@@ -61,21 +61,3 @@ curl -o chirps-tile.png "http://127.0.0.1:8000/cog/tiles/WebMercatorQuad/4/5/5.p
 CHIRPS COG test file:
 
 https://data.chc.ucsb.edu/products/CHIRPS/v3.0/daily/final/rnl/2026/chirps-v3.0.rnl.2026.01.31.tif
-
-## STAC (`/stac`)
-
-STAC landing page:
-
-http://127.0.0.1:8000/stac
-
-```bash
-curl "http://127.0.0.1:8000/stac"
-```
-
-STAC tile metadata (example):
-
-http://127.0.0.1:8000/stac/tilejson.json?url=https%3A%2F%2Fdata.chc.ucsb.edu%2Fproducts%2FCHIRPS%2Fv3.0%2Fdaily%2Ffinal%2Frnl%2F2026%2Fchirps-v3.0.rnl.2026.01.31.tif
-
-```bash
-curl "http://127.0.0.1:8000/stac/tilejson.json?url=https%3A%2F%2Fdata.chc.ucsb.edu%2Fproducts%2FCHIRPS%2Fv3.0%2Fdaily%2Ffinal%2Frnl%2F2026%2Fchirps-v3.0.rnl.2026.01.31.tif"
-```
