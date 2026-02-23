@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from titiler.core.factory import (TilerFactory,  MultiBaseTilerFactory)
 from rio_tiler.io import STACReader
+from eoapi.endpoints.collections import router as collections_router
 
 from starlette.middleware.cors import CORSMiddleware
 
@@ -21,6 +22,8 @@ app.add_middleware(
 
 # Create a TilerFactory for Cloud-Optimized GeoTIFFs
 cog = TilerFactory()
+
+app.include_router(collections_router)
 
 # Register all the COG endpoints automatically
 app.include_router(cog.router, prefix="/cog", tags=["Cloud Optimized GeoTIFF"])
