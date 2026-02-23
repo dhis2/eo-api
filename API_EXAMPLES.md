@@ -28,8 +28,28 @@ http://127.0.0.1:8000/collections/era5-land-daily
 
 Collections in this section correspond to OGC API - Common collection discovery endpoints.
 
+Get CHIRPS coverage (default extent/time):
+
+http://127.0.0.1:8000/collections/chirps-daily/coverage
+
 ```bash
-curl "http://127.0.0.1:8000/collections/era5-land-daily"
+curl "http://127.0.0.1:8000/collections/chirps-daily/coverage"
+```
+
+Get CHIRPS coverage for a specific datetime and bbox:
+
+http://127.0.0.1:8000/collections/chirps-daily/coverage?datetime=2026-01-31T00:00:00Z&bbox=30,-5,35,2
+
+```bash
+curl "http://127.0.0.1:8000/collections/chirps-daily/coverage?datetime=2026-01-31T00:00:00Z&bbox=30,-5,35,2"
+```
+
+Get ERA5-Land coverage for a range-subset parameter:
+
+http://127.0.0.1:8000/collections/era5-land-daily/coverage?range-subset=2m_temperature
+
+```bash
+curl "http://127.0.0.1:8000/collections/era5-land-daily/coverage?range-subset=2m_temperature"
 ```
 
 ## COG (`/cog`)

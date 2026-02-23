@@ -39,6 +39,7 @@ uvicorn main:app --reload
 - `make sync` — install dependencies with uv
 - `make run` — start the app with uv
 - `make validate-datasets` — validate all dataset YAML files against the Pydantic schema
+- `make test` — run Python tests with pytest
 
 ## API examples
 

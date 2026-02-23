@@ -3,12 +3,10 @@ from fastapi import APIRouter, HTTPException, Request
 from pygeoapi import l10n
 from pygeoapi.util import url_join
 from eoapi.datasets import DatasetDefinition, load_datasets
+from eoapi.endpoints.constants import CRS84, OGC_RELTYPES_BASE
+from eoapi.endpoints.errors import not_found
 
 router = APIRouter(tags=["Collections"])
-
-OGC_RELTYPES_BASE = "http://www.opengis.net/def/rel/ogc/1.0"
-CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
-
 
 def _base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
@@ -104,11 +102,5 @@ def get_collections(request: Request) -> dict:
 def get_collection(collection_id: str, request: Request) -> dict:
     dataset = load_datasets().get(collection_id)
     if dataset is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "NotFound",
-                "description": f"Collection '{collection_id}' not found",
-            },
-        )
+        raise not_found("Collection", collection_id)
     return _build_collection(request, dataset)

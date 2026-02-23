@@ -9,9 +9,9 @@ keywords:
   - raster
 spatial_bbox:
   - -180.0
-  - -50.0
+  - -60.0
   - 180.0
-  - 50.0
+  - 60.0
 temporal_interval:
   - 1981-01-01T00:00:00Z
   - null
