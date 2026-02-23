@@ -4,6 +4,8 @@ from rio_tiler.io import STACReader
 
 from starlette.middleware.cors import CORSMiddleware
 
+from datasets.api import router as datasets_router
+
 app = FastAPI()
 
 # Bsed on: 
@@ -44,3 +46,6 @@ app.include_router(
 @app.get("/")
 def read_index():
     return {"message": "Welcome to DHIS2 EO API"}
+
+# Include datasets router
+app.include_router(datasets_router)
