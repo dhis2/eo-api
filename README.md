@@ -25,6 +25,15 @@ pip install -e .
 uvicorn main:app --reload
 ```
 
+### Using conda
+
+```
+conda create -n dhis2-eo-api python=3.13
+conda activate dhis2-eo-api
+pip install -e .
+uvicorn main:app --reload
+```
+
 ### Makefile targets
 
 - `make sync` — install dependencies with uv
