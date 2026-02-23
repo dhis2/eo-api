@@ -21,13 +21,13 @@ If you can't use uv (e.g. mixed conda/forge environments):
 ```
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 uvicorn main:app --reload
 ```
 
 ### Makefile targets
 
-- `make sync` — install dependencies with uv and regenerate requirements.txt
+- `make sync` — install dependencies with uv
 - `make run` — start the app with uv
 
 Root endpoint:
