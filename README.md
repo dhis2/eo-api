@@ -38,6 +38,7 @@ uvicorn main:app --reload
 
 - `make sync` — install dependencies with uv
 - `make run` — start the app with uv
+- `make validate-datasets` — validate all dataset YAML files against the Pydantic schema
 
 Root endpoint:
 
@@ -54,6 +55,12 @@ http://127.0.0.1:8000/collections
 http://127.0.0.1:8000/collections/chirps-daily
 
 http://127.0.0.1:8000/collections/era5-land-daily
+
+## Dataset definitions
+
+Collection metadata for `/collections` is defined in top-level YAML files under `datasets/`.
+
+For schema details, examples, and current dataset files, see [`datasets/README.md`](datasets/README.md).
 
 Examples:
 

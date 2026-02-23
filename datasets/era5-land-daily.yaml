@@ -1,0 +1,17 @@
+id: era5-land-daily
+title: ERA5-Land Daily Climate
+description: Daily ERA5-Land variables as a gridded coverage dataset.
+keywords:
+  - ERA5-Land
+  - temperature
+  - soil moisture
+  - coverage
+  - raster
+spatial_bbox:
+  - -180.0
+  - -90.0
+  - 180.0
+  - 90.0
+temporal_interval:
+  - 1950-01-01T00:00:00Z
+  - null

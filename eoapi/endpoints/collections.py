@@ -2,30 +2,12 @@ from fastapi import APIRouter, HTTPException, Request
 
 from pygeoapi import l10n
 from pygeoapi.util import url_join
+from eoapi.datasets import DatasetDefinition, load_datasets
 
 router = APIRouter(tags=["Collections"])
 
 OGC_RELTYPES_BASE = "http://www.opengis.net/def/rel/ogc/1.0"
 CRS84 = "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
-
-DATASETS: dict[str, dict] = {
-    "chirps-daily": {
-        "id": "chirps-daily",
-        "title": "CHIRPS Daily Precipitation",
-        "description": "Daily precipitation from CHIRPS as a gridded coverage dataset.",
-        "keywords": ["CHIRPS", "precipitation", "rainfall", "coverage", "raster"],
-        "spatial_bbox": [-180.0, -50.0, 180.0, 50.0],
-        "temporal_interval": ["1981-01-01T00:00:00Z", None],
-    },
-    "era5-land-daily": {
-        "id": "era5-land-daily",
-        "title": "ERA5-Land Daily Climate",
-        "description": "Daily ERA5-Land variables as a gridded coverage dataset.",
-        "keywords": ["ERA5-Land", "temperature", "soil moisture", "coverage", "raster"],
-        "spatial_bbox": [-180.0, -90.0, 180.0, 90.0],
-        "temporal_interval": ["1950-01-01T00:00:00Z", None],
-    },
-}
 
 
 def _base_url(request: Request) -> str:
@@ -70,26 +52,26 @@ def _collection_links(request: Request, collection_id: str) -> list[dict]:
     ]
 
 
-def _build_collection(request: Request, dataset: dict) -> dict:
+def _build_collection(request: Request, dataset: DatasetDefinition) -> dict:
     locale = _locale_from_request(request)
     return {
-        "id": dataset["id"],
-        "title": l10n.translate(dataset["title"], locale),
-        "description": l10n.translate(dataset["description"], locale),
-        "keywords": dataset["keywords"],
+        "id": dataset.id,
+        "title": l10n.translate(dataset.title, locale),
+        "description": l10n.translate(dataset.description, locale),
+        "keywords": dataset.keywords,
         "extent": {
             "spatial": {
-                "bbox": [dataset["spatial_bbox"]],
+                "bbox": [list(dataset.spatial_bbox)],
                 "crs": CRS84,
             },
             "temporal": {
-                "interval": [dataset["temporal_interval"]],
+                "interval": [list(dataset.temporal_interval)],
                 "trs": "http://www.opengis.net/def/uom/ISO-8601/0/Gregorian",
             },
         },
         "itemType": "coverage",
         "crs": [CRS84],
-        "links": _collection_links(request, dataset["id"]),
+        "links": _collection_links(request, dataset.id),
     }
 
 
@@ -97,9 +79,10 @@ def _build_collection(request: Request, dataset: dict) -> dict:
 def get_collections(request: Request) -> dict:
     base = _base_url(request)
     collections_url = url_join(base, "collections")
+    datasets = load_datasets()
 
     return {
-        "collections": [_build_collection(request, dataset) for dataset in DATASETS.values()],
+        "collections": [_build_collection(request, dataset) for dataset in datasets.values()],
         "links": [
             {
                 "rel": "self",
@@ -119,7 +102,7 @@ def get_collections(request: Request) -> dict:
 
 @router.get("/collections/{collection_id}")
 def get_collection(collection_id: str, request: Request) -> dict:
-    dataset = DATASETS.get(collection_id)
+    dataset = load_datasets().get(collection_id)
     if dataset is None:
         raise HTTPException(
             status_code=404,

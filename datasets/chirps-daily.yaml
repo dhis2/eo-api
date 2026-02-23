@@ -1,0 +1,17 @@
+id: chirps-daily
+title: CHIRPS Daily Precipitation
+description: Daily precipitation from CHIRPS as a gridded coverage dataset.
+keywords:
+  - CHIRPS
+  - precipitation
+  - rainfall
+  - coverage
+  - raster
+spatial_bbox:
+  - -180.0
+  - -50.0
+  - 180.0
+  - 50.0
+temporal_interval:
+  - 1981-01-01T00:00:00Z
+  - null

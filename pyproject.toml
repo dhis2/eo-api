@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "eo-api"
 version = "0.1.0"
@@ -6,6 +10,10 @@ dependencies = [
     "titiler-core>=1.2.0",
     "uvicorn>=0.41.0",
     "pygeoapi>=0.22.0",
+    "pyyaml>=6.0",
     "dhis2eo @ git+https://github.com/dhis2/dhis2eo.git@v1.1.0",
     "dhis2-client @ git+https://github.com/dhis2/dhis2-python-client.git@V0.3.0",
 ]
+
+[tool.setuptools]
+packages = ["eoapi"]
