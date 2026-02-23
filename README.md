@@ -2,21 +2,42 @@
 
 DHIS2 EO API allows data from multiple sources (primarily earth observation data) to be extracted, transformed and loaded into DHIS2 and the Chap Modelling Platform.
 
-Create conda environment:
+## Setup
 
-`conda create -n dhis2-eo-api python=3.13`
+### Using uv (recommended)
 
-Activate environment:
+Install dependencies (requires [uv](https://docs.astral.sh/uv/)):
 
-`conda activate dhis2-eo-api`
-
-Install requirements:
-
-`pip install -r requirements.txt`
+`uv sync`
 
 Start the app:
 
-`uvicorn main:app --reload`
+`uv run uvicorn main:app --reload`
+
+### Using pip (alternative)
+
+If you can't use uv (e.g. mixed conda/forge environments):
+
+```
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+uvicorn main:app --reload
+```
+
+### Using conda
+
+```
+conda create -n dhis2-eo-api python=3.13
+conda activate dhis2-eo-api
+pip install -e .
+uvicorn main:app --reload
+```
+
+### Makefile targets
+
+- `make sync` — install dependencies with uv
+- `make run` — start the app with uv
 
 Root endpoint:
 
