@@ -15,5 +15,5 @@ dependencies = [
     "dhis2-client @ git+https://github.com/dhis2/dhis2-python-client.git@V0.3.0",
 ]
 
-[tool.setuptools]
-packages = ["eoapi"]
+[tool.setuptools.packages.find]
+include = ["eoapi*"]

@@ -22,7 +22,7 @@ http://127.0.0.1:8000/conformance
 curl "http://127.0.0.1:8000/conformance"
 ```
 
-Note: values used in `range-subset` and `parameter-name` must match keys in `datasets/<dataset-id>.yaml` under `parameters`.
+Note: values used in `range-subset` and `parameter-name` must match keys in `eoapi/datasets/<dataset-id>/<dataset-id>.yaml` under `parameters`.
 
 List collections:
 

@@ -1,19 +1,25 @@
-from datetime import date
 import re
 
 from fastapi import APIRouter, Query, Request
 
-from dhis2eo.data.cds.era5_land import hourly as era5_land_hourly
-from dhis2eo.data.cds.era5_land import monthly as era5_land_monthly
-from dhis2eo.data.chc.chirps3 import daily as chirps3_daily
 from pygeoapi.api import FORMAT_TYPES, F_JSON
 from pygeoapi.util import url_join
 
 from eoapi.datasets import DatasetDefinition, load_datasets
+from eoapi.datasets.base import AreaResolver, BBox, ParameterMap, Point, PositionResolver, SourcePayload
+from eoapi.datasets.resolvers import area_resolvers, position_resolvers
 from eoapi.endpoints.constants import CRS84
 from eoapi.endpoints.errors import invalid_parameter, not_found
 
 router = APIRouter()
+
+POSITION_RESOLVERS: dict[str, PositionResolver] = {
+    **position_resolvers(),
+}
+
+AREA_RESOLVERS: dict[str, AreaResolver] = {
+    **area_resolvers(),
+}
 
 POINT_PATTERN = re.compile(
     r"^POINT\s*\(\s*(?P<x>-?\d+(?:\.\d+)?)\s+(?P<y>-?\d+(?:\.\d+)?)\s*\)$",
@@ -83,34 +89,13 @@ def _select_parameters(dataset: DatasetDefinition, parameter_name: str | None) -
 
 def _resolve_dhis2eo_source(
     collection_id: str,
-    parameters: dict[str, dict],
+    parameters: ParameterMap,
     datetime_value: str,
-    coords: tuple[float, float],
-) -> dict:
-    if collection_id == "chirps-daily":
-        try:
-            sample_day = date.fromisoformat(datetime_value[:10])
-        except ValueError as exc:
-            raise invalid_parameter("datetime must be an ISO 8601 date or datetime") from exc
-
-        return {
-            "backend": "dhis2eo.data.chc.chirps3.daily",
-            "resolver": "url_for_day",
-            "source_url": chirps3_daily.url_for_day(sample_day),
-            "point": [coords[0], coords[1]],
-        }
-
-    if collection_id == "era5-land-daily":
-        return {
-            "backend": "dhis2eo.data.cds.era5_land",
-            "resolver": [
-                era5_land_hourly.download.__name__,
-                era5_land_monthly.download.__name__,
-            ],
-            "variables": list(parameters.keys()),
-            "point": [coords[0], coords[1]],
-            "note": "ERA5-Land point query is resolved through CDS workflows in dhis2eo.",
-        }
+    coords: Point,
+) -> SourcePayload:
+    resolver = POSITION_RESOLVERS.get(collection_id)
+    if resolver is not None:
+        return resolver(datetime_value, parameters, coords)
 
     return {
         "backend": "dhis2eo",
@@ -120,34 +105,13 @@ def _resolve_dhis2eo_source(
 
 def _resolve_dhis2eo_source_for_bbox(
     collection_id: str,
-    parameters: dict[str, dict],
+    parameters: ParameterMap,
     datetime_value: str,
-    bbox: tuple[float, float, float, float],
-) -> dict:
-    if collection_id == "chirps-daily":
-        try:
-            sample_day = date.fromisoformat(datetime_value[:10])
-        except ValueError as exc:
-            raise invalid_parameter("datetime must be an ISO 8601 date or datetime") from exc
-
-        return {
-            "backend": "dhis2eo.data.chc.chirps3.daily",
-            "resolver": "url_for_day",
-            "source_url": chirps3_daily.url_for_day(sample_day),
-            "bbox": list(bbox),
-        }
-
-    if collection_id == "era5-land-daily":
-        return {
-            "backend": "dhis2eo.data.cds.era5_land",
-            "resolver": [
-                era5_land_hourly.download.__name__,
-                era5_land_monthly.download.__name__,
-            ],
-            "variables": list(parameters.keys()),
-            "bbox": list(bbox),
-            "note": "ERA5-Land area query is resolved through CDS workflows in dhis2eo.",
-        }
+    bbox: BBox,
+) -> SourcePayload:
+    resolver = AREA_RESOLVERS.get(collection_id)
+    if resolver is not None:
+        return resolver(datetime_value, parameters, bbox)
 
     return {
         "backend": "dhis2eo",
@@ -227,7 +191,7 @@ def get_collection_position(
     parameter_name: str | None = Query(
         default=None,
         alias="parameter-name",
-        description="Comma-separated parameter IDs. Must match keys under datasets/<id>.yaml -> parameters",
+        description="Comma-separated parameter IDs. Must match keys under eoapi/datasets/<id>/<id>.yaml -> parameters",
     ),
     output_format: str = Query(default=F_JSON, alias="f"),
 ) -> dict:
@@ -274,7 +238,7 @@ def get_collection_area(
     parameter_name: str | None = Query(
         default=None,
         alias="parameter-name",
-        description="Comma-separated parameter IDs. Must match keys under datasets/<id>.yaml -> parameters",
+        description="Comma-separated parameter IDs. Must match keys under eoapi/datasets/<id>/<id>.yaml -> parameters",
     ),
     output_format: str = Query(default=F_JSON, alias="f"),
 ) -> dict:

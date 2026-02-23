@@ -15,9 +15,9 @@ description: Design OGC API - Processes style EO execution endpoints and request
 
 - Dataset discovery:
   - `GET /collections`
-  - `GET /collections/{collection_id}`
+  - `GET /collections/{collectionId}`
 - Coverage retrieval:
-  - `GET /collections/{collection_id}/coverage`
+  - `GET /collections/{collectionId}/coverage`
 - Process execution endpoints (target baseline):
   - `GET /processes`
   - `GET /processes/{process-id}`

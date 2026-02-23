@@ -45,8 +45,17 @@ uvicorn main:app --reload
 
 See [`API_EXAMPLES.md`](API_EXAMPLES.md) for docs, collections, STAC, and COG request examples.
 
+## Documentation
+
+- API usage examples: [`API_EXAMPLES.md`](API_EXAMPLES.md)
+- Dataset schema and resolver conventions: [`eoapi/datasets/README.md`](eoapi/datasets/README.md)
+- Product requirements and scope: [`PRD.md`](PRD.md)
+- Repository coding guidance for AI edits: [`.github/copilot-instructions.md`](.github/copilot-instructions.md)
+
 ## Dataset definitions
 
-Collection metadata for `/collections` is defined in top-level YAML files under `datasets/`.
+Collection metadata for `/collections` is defined in YAML files under `eoapi/datasets/`.
 
-For schema details, examples, and current dataset files, see [`datasets/README.md`](datasets/README.md).
+Each dataset uses `eoapi/datasets/<dataset-id>/<dataset-id>.yaml` with matching resolver code in `eoapi/datasets/<dataset-id>/resolver.py`.
+
+For schema details, examples, and current dataset files, see [`eoapi/datasets/README.md`](eoapi/datasets/README.md).

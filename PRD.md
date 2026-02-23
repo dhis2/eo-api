@@ -81,16 +81,18 @@ Current EO data workflows are fragmented across tools and scripts, making them h
 
 - Implement OGC API - Common collection discovery endpoints:
   - `GET /collections`
-  - `GET /collections/{collection_id}`
+  - `GET /collections/{collectionId}`
 - Implement OGC API - Coverages baseline endpoint:
-  - `GET /collections/{collection_id}/coverage`
+  - `GET /collections/{collectionId}/coverage`
 - Support key coverage query parameters (`bbox`, `datetime`, `range-subset`, `f`) with structured validation errors.
 
 ### FR11 — File-driven dataset catalog
 
-- Store dataset definitions as one YAML file per dataset in top-level `datasets/`.
+- Store dataset definitions with one folder per dataset in `eoapi/datasets/<dataset-id>/`.
+- Store metadata as `eoapi/datasets/<dataset-id>/<dataset-id>.yaml`.
+- Store dataset source resolver logic as `eoapi/datasets/<dataset-id>/resolver.py`.
 - Validate dataset definitions via Pydantic before use.
-- Keep dataset schema and examples documented in `datasets/README.md`.
+- Keep dataset schema and examples documented in `eoapi/datasets/README.md`.
 
 ### FR8 — Consumer app compatibility
 
@@ -144,9 +146,9 @@ Current EO data workflows are fragmented across tools and scripts, making them h
 ### In scope
 
 - Draft unified API interface
-- OGC collection discovery (`/collections`, `/collections/{collection_id}`)
-- OGC coverage baseline (`/collections/{collection_id}/coverage`) for gridded datasets (CHIRPS, ERA5-Land)
-- File-driven dataset definitions (`datasets/*.yaml`) with schema validation
+- OGC collection discovery (`/collections`, `/collections/{collectionId}`)
+- OGC coverage baseline (`/collections/{collectionId}/coverage`) for gridded datasets (CHIRPS, ERA5-Land)
+- File-driven dataset definitions (`eoapi/datasets/<dataset-id>/<dataset-id>.yaml`) with schema validation
 - Process catalog + at least one executable process flow
 - Climate variable import path (temperature/precipitation) aggregated to org units
 - Preview of data for org unit
@@ -206,8 +208,8 @@ Current EO data workflows are fragmented across tools and scripts, making them h
 
 ## 15) Acceptance Criteria (MVP)
 
-- `/collections` and `/collections/{collection_id}` return OGC-compatible collection metadata for configured datasets.
-- `/collections/{collection_id}/coverage` returns OGC Coverages-compatible response structures for supported datasets.
+- `/collections` and `/collections/{collectionId}` return OGC-compatible collection metadata for configured datasets.
+- `/collections/{collectionId}/coverage` returns OGC Coverages-compatible response structures for supported datasets.
 - Dataset definitions are managed as YAML files and validated successfully before runtime use.
 - A user can discover available process(es) and execute one through API.
 - A climate dataset can be previewed and aggregated to org units.

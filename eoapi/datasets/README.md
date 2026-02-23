@@ -2,7 +2,19 @@
 
 This folder contains dataset definitions used by the `/collections` endpoints.
 
-Definitions are loaded from `*.yaml` files and validated by the `DatasetDefinition` Pydantic model in `eoapi/datasets.py`.
+Definitions are loaded from dataset-specific subfolders and validated by the `DatasetDefinition` Pydantic model in `eoapi/datasets/catalog.py`.
+
+## Folder layout
+
+Each dataset has its own folder named after the dataset ID:
+
+- `eoapi/datasets/<dataset-id>/<dataset-id>.yaml`
+- `eoapi/datasets/<dataset-id>/resolver.py`
+
+Example:
+
+- `eoapi/datasets/chirps-daily/chirps-daily.yaml`
+- `eoapi/datasets/chirps-daily/resolver.py`
 
 ## Required schema
 
@@ -68,5 +80,19 @@ parameters:
 
 ## Current definitions
 
-- `chirps-daily.yaml`
-- `era5-land-daily.yaml`
+- `chirps-daily/chirps-daily.yaml`
+- `era5-land-daily/era5-land-daily.yaml`
+
+## Adding a new dataset resolver module
+
+When adding a new dataset, create a folder under `eoapi/datasets/` named exactly as the dataset ID and include a `resolver.py` module for dataset-specific source integration logic.
+
+Expected resolver functions in the module:
+
+- `coverage_source(datetime_value, parameters, bbox)`
+- `position_source(datetime_value, parameters, coords)`
+- `area_source(datetime_value, parameters, bbox)`
+
+These should follow the shared resolver contracts in `eoapi/datasets/base.py`.
+
+Resolver registration is automatic via `eoapi/datasets/resolvers.py`, which scans dataset folders and loads `resolver.py` by dataset ID.

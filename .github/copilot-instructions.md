@@ -12,16 +12,17 @@
 
 - Dataset discovery is implemented via:
   - `GET /collections`
-  - `GET /collections/{collection_id}`
+  - `GET /collections/{collectionId}`
 - OGC API - Coverages baseline is implemented via:
-  - `GET /collections/{collection_id}/coverage`
+  - `GET /collections/{collectionId}/coverage`
 - Collections and coverages are split into separate endpoint modules:
   - `eoapi/endpoints/collections.py`
   - `eoapi/endpoints/coverages.py`
 - Shared endpoint constants/errors live in:
   - `eoapi/endpoints/constants.py`
   - `eoapi/endpoints/errors.py`
-- Dataset metadata is file-driven from top-level `datasets/*.yaml` and validated by Pydantic (`eoapi/datasets.py`).
+- Dataset metadata is file-driven from `eoapi/datasets/<dataset-id>/<dataset-id>.yaml` and validated by Pydantic (`eoapi/datasets/catalog.py`).
+- Dataset-specific source resolver logic lives in `eoapi/datasets/<dataset-id>/resolver.py`.
 - Dataset validation command is available via `make validate-datasets`.
 - Tests currently include endpoint error contract tests and run via `make test`.
 
@@ -106,4 +107,4 @@
 - Update docs when adding endpoints, process parameters, or output schema changes.
 - Include example requests/responses for new process execution paths.
 - Keep `README.md` concise and place endpoint examples in `API_EXAMPLES.md`.
-- Keep dataset schema documentation in `datasets/README.md`.
+- Keep dataset schema documentation in `eoapi/datasets/README.md`.

@@ -13,7 +13,7 @@ description: Define scheduled and custom EO data pipelines with optional pre/pos
 
 ## Canonical pipeline stages
 
-1. Discover dataset and validate metadata (from `datasets/*.yaml` definitions)
+1. Discover dataset and validate metadata (from `eoapi/datasets/<dataset-id>/<dataset-id>.yaml` definitions)
 2. Extract data for time/area window
 3. Cache source/intermediate artifacts as files when needed
 4. Transform and harmonize units/CRS

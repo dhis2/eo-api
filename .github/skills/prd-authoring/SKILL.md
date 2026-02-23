@@ -36,9 +36,9 @@ description: Draft or refine PRDs for DHIS2 EO API features with clear MVP scope
 - Explicitly identifies which Google Earth Engine-dependent behavior is replaced by `eo-api`
 - Calls out standards alignment (OGC/STAC) when applicable
 - Reflects current implemented baseline where relevant:
-  - `/collections`, `/collections/{collection_id}`
-  - `/collections/{collection_id}/coverage`
-  - File-driven dataset metadata in `datasets/*.yaml` validated by Pydantic
+  - `/collections`, `/collections/{collectionId}`
+  - `/collections/{collectionId}/coverage`
+  - File-driven dataset metadata in `eoapi/datasets/<dataset-id>/<dataset-id>.yaml` validated by Pydantic
   - Validation/test workflow via `make validate-datasets` and `make test`
 
 ## Quality bar

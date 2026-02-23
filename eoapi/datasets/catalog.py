@@ -1,11 +1,11 @@
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 import yaml
 
-DATASETS_DIR = Path(__file__).resolve().parents[1] / "datasets"
+DATASETS_DIR = Path(__file__).resolve().parent
 
 
 class DatasetDefinition(BaseModel):
@@ -40,11 +40,24 @@ class DatasetDefinition(BaseModel):
 def load_datasets() -> dict[str, DatasetDefinition]:
     datasets: dict[str, DatasetDefinition] = {}
 
-    for dataset_file in sorted(DATASETS_DIR.glob("*.yml")) + sorted(DATASETS_DIR.glob("*.yaml")):
+    dataset_dirs = sorted(path for path in DATASETS_DIR.iterdir() if path.is_dir())
+    for dataset_dir in dataset_dirs:
+        yaml_candidates = [dataset_dir / f"{dataset_dir.name}.yml", dataset_dir / f"{dataset_dir.name}.yaml"]
+        dataset_file = next((candidate for candidate in yaml_candidates if candidate.exists()), None)
+        if dataset_file is None:
+            fallback_files = sorted(dataset_dir.glob("*.yml")) + sorted(dataset_dir.glob("*.yaml"))
+            if not fallback_files:
+                continue
+            dataset_file = fallback_files[0]
+
         with dataset_file.open("r", encoding="utf-8") as file_handle:
             payload = yaml.safe_load(file_handle) or {}
 
         dataset = DatasetDefinition.model_validate(payload)
+        if dataset.id != dataset_dir.name:
+            raise RuntimeError(
+                f"Dataset id '{dataset.id}' must match dataset folder name '{dataset_dir.name}'"
+            )
         if dataset.id in datasets:
             raise RuntimeError(f"Duplicate dataset id found: {dataset.id}")
         datasets[dataset.id] = dataset
