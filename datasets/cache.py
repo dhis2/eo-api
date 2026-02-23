@@ -8,6 +8,7 @@ import xarray as xr
 import numpy as np
 
 from . import registry
+from constants import BBOX, COUNTRY_CODE
 
 # paths
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -16,11 +17,6 @@ CACHE_DIR = SCRIPT_DIR / 'cache'
 # TEMPORARY QUEUED BACKGROUND JOB EXECUTOR UNTIL WE GET A PROPER ONE
 CACHE_WORKER = ThreadPoolExecutor(max_workers=1)
 atexit.register(CACHE_WORKER.shutdown, wait=True, cancel_futures=True)
-
-# get constants for org units bbox and country code (hacky hardcoded for now)
-# TODO: these should be defined centrally somewhere or retrieved from DHIS2 connection
-BBOX = [-13.25, 6.79, -10.23, 10.05]
-COUNTRY_CODE = 'SLE'
 
 def build_dataset_cache(dataset_id, start, end, overwrite):
     # get dataset
@@ -57,8 +53,7 @@ def get_cache_info(dataset):
     # find all files with cache prefix
     # TODO: this is not bulletproof, eg 2m_temperature would also get 2m_temperature_max which is a different dataset
     # ...probably need a delimeter to specify end of dataset name... 
-    prefix = get_cache_prefix(dataset)
-    files = list(CACHE_DIR.glob(f'{prefix}*'))
+    files = get_cache_files(dataset)
     if not files:
         cache_info = dict(
             temporal_coverage = None,
@@ -96,6 +91,11 @@ def get_cache_info(dataset):
 def get_cache_prefix(dataset):
     prefix = dataset['id']
     return prefix
+
+def get_cache_files(dataset):
+    prefix = get_cache_prefix(dataset)
+    files = list(CACHE_DIR.glob(f'{prefix}*'))
+    return files
 
 def get_dynamic_function(full_path):
     # Split the path into: 'dhis2eo.data.cds.era5_land.hourly' and 'function'

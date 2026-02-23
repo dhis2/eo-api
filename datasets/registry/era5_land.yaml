@@ -10,6 +10,25 @@
     temporal: mean
     spatial: mean
   units: kelvin
+  convertUnits: degC
+  resolution: 9 km x 9 km
+  source: ERA5-Land Reanalysis
+  sourceUrl: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land
+  variable: t2m
+
+- id: 2m_temperature_max_hourly
+  name: 2m temperature highest (ERA5-Land)
+  shortName: 2m temperature highest
+  periodType: hourly
+  cacheInfo: 
+    eoFunction: dhis2eo.data.cds.era5_land.hourly.download
+    defaultParams:
+      variables: ['2m_temperature']
+  aggregation: 
+    temporal: max
+    spatial: mean
+  units: kelvin
+  convertUnits: degC
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   sourceUrl: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land
@@ -23,10 +42,12 @@
     eoFunction: dhis2eo.data.cds.era5_land.hourly.download
     defaultParams:
       variables: ['total_precipitation']
+  preProcess: ['deaccumulate_era5']
   aggregation: 
     temporal: sum
     spatial: mean
   units: m
+  convertUnits: mm
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   sourceUrl: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land
