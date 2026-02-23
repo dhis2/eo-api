@@ -1,6 +1,7 @@
 # DHIS2 EO API — Product Requirements Document (PRD)
 
 ## 1) Overview
+
 DHIS2 EO API is a no-code geospatial data integration platform that enables users to discover, fetch, process, harmonize, and load earth observation and related datasets into DHIS2 and the CHAP Modelling Platform.
 
 DHIS2 Maps app and DHIS2 Climate app are core downstream consumers of this API, with `eo-api` replacing functionality currently sourced from Google Earth Engine.
@@ -8,7 +9,9 @@ DHIS2 Maps app and DHIS2 Climate app are core downstream consumers of this API, 
 This PRD defines the MVP scope for the hackathon and a near-term path toward a production-ready platform.
 
 ## 2) Problem Statement
+
 Current EO data workflows are fragmented across tools and scripts, making them hard to repeat, schedule, and maintain. Teams need a unified API that supports:
+
 - Dataset discovery
 - On-demand processing
 - Aggregation to DHIS2 org units
@@ -16,6 +19,7 @@ Current EO data workflows are fragmented across tools and scripts, making them h
 - Optional custom pre/post-processing
 
 ## 3) Goals
+
 - Provide a unified API for EO data retrieval and processing.
 - Enable no-code workflows comparable to DHIS2 Climate Tools, using existing DHIS2 EO libraries.
 - Support map-serving and analytics use cases without Google Earth Engine lock-in.
@@ -23,18 +27,22 @@ Current EO data workflows are fragmented across tools and scripts, making them h
 - Deliver an MVP that proves core end-to-end flows during the hackathon.
 
 ## 4) Non-Goals (MVP)
+
 - Full enterprise IAM/SSO implementation.
 - Comprehensive billing/tenancy model.
 - Complete OGC suite compliance beyond selected process endpoints.
 - Replacing all existing tooling in one release.
 
 ## 5) Users and Key User Stories
+
 ### Primary users
+
 - DHIS2 implementers and analysts
 - Climate/health data teams
 - GIS/data engineering teams
 
 ### User stories
+
 - User A: Import daily temperature and precipitation into DHIS2 on a user-defined schedule, aggregated to org units.
 - User B: Import annual population data, automatically aggregated to org units.
 - User C: Visualize high-resolution population data in DHIS2 Maps with meaningful density-based styles.
@@ -42,11 +50,14 @@ Current EO data workflows are fragmented across tools and scripts, making them h
 - User E: Add custom pre/post-processing (e.g., consecutive rainy days) before import.
 
 ## 6) Functional Requirements
+
 ### FR1 — Unified data/process API
+
 - Expose a single API surface for dataset listing, request submission, processing, and retrieval.
 - Use `dhis2eo` as the default EO/climate processing integration library.
 
 ### FR2 — Core process execution
+
 - Support process discovery and execution using an OGC API - Processes-aligned model.
 - Minimum endpoints:
   - `GET /processes`
@@ -54,6 +65,7 @@ Current EO data workflows are fragmented across tools and scripts, making them h
   - `POST /processes/{process-id}/execution`
 
 ### FR3 — Raster and tiling capabilities
+
 - Support on-the-fly image tiling and styling from raster sources (COGs/Zarr where feasible).
 - Enable:
   - Value retrieval at a location
@@ -61,30 +73,52 @@ Current EO data workflows are fragmented across tools and scripts, making them h
 - Ensure parity for the core map/preview capabilities currently implemented with Google Earth Engine for DHIS2 Maps and Climate clients.
 
 ### FR4 — Dataset discovery endpoint
+
 - Provide endpoint(s) to list available datasets for DHIS2 Maps and related clients.
 - Prefer STAC-compatible metadata where possible.
 
+### FR10 — OGC Collections and Coverages baseline
+
+- Implement OGC API - Common collection discovery endpoints:
+  - `GET /collections`
+  - `GET /collections/{collection_id}`
+- Implement OGC API - Coverages baseline endpoint:
+  - `GET /collections/{collection_id}/coverage`
+- Support key coverage query parameters (`bbox`, `datetime`, `range-subset`, `f`) with structured validation errors.
+
+### FR11 — File-driven dataset catalog
+
+- Store dataset definitions as one YAML file per dataset in top-level `datasets/`.
+- Validate dataset definitions via Pydantic before use.
+- Keep dataset schema and examples documented in `datasets/README.md`.
+
 ### FR8 — Consumer app compatibility
+
 - API contracts and outputs must support DHIS2 Maps app (https://github.com/dhis2/maps-app) and DHIS2 Climate app (https://github.com/dhis2/climate-app).
 - Changes to EO API contracts should be assessed for impact on both apps before release.
 
 ### FR5 — Scheduling and orchestration
+
 - Allow fixed-interval runs for recurring ingestion.
 - Support simple pipeline orchestration with optional pre/post-processing step hooks.
 
 ### FR6 — DHIS2 integration
+
 - Push processed/aggregated outputs to DHIS2 database through the DHIS2 Web API.
 - Use `dhis2-python-client` as the default DHIS2 Web API integration library.
 
 ### FR9 — Caching and configuration storage
+
 - Support file-based caching of downloaded and/or intermediate processed data when needed for performance, resiliency, or replay.
 - Support use of DHIS2 Data Store for storing EO API configuration metadata where appropriate.
 
 ### FR7 — Upstream library evolution
+
 - Treat `dhis2-python-client` and `dhis2eo` as strategic dependencies that can be changed to fulfill `eo-api` requirements.
 - When required functionality is missing, define and implement upstream changes rather than introducing long-term local forks in `eo-api`.
 
 ## 7) Non-Functional Requirements
+
 - Reliability: Handle simultaneous and long-running requests.
 - Extensibility: Process catalog must support adding new EO pipelines with minimal API changes.
 - Interoperability: Align with open geospatial standards where practical (OGC API, STAC).
@@ -93,6 +127,7 @@ Current EO data workflows are fragmented across tools and scripts, making them h
 - Dependency sustainability: Upstream contributions to `dhis2-python-client` and `dhis2eo` should preserve backward compatibility where feasible.
 
 ## 8) Proposed Technical Direction
+
 - API framework: FastAPI
 - Process API: pygeoapi (OGC API - Processes)
 - Raster/tile API: TiTiler (`/cog/*`, `/stac/*`)
@@ -105,25 +140,34 @@ Current EO data workflows are fragmented across tools and scripts, making them h
 - Deployment: Docker-based services
 
 ## 9) MVP Scope (Hackathon)
+
 ### In scope
+
 - Draft unified API interface
+- OGC collection discovery (`/collections`, `/collections/{collection_id}`)
+- OGC coverage baseline (`/collections/{collection_id}/coverage`) for gridded datasets (CHIRPS, ERA5-Land)
+- File-driven dataset definitions (`datasets/*.yaml`) with schema validation
 - Process catalog + at least one executable process flow
 - Climate variable import path (temperature/precipitation) aggregated to org units
 - Preview of data for org unit
 - Basic scheduled run capability (or simulated scheduler integration)
 
 ### Out of scope
+
 - Full production-grade authz/authn stack
 - Broad catalog of EO sources
 - Advanced UI beyond thin client integration points
 
 ## 10) Success Metrics
+
 - Time-to-first-ingestion: User can configure and run first import quickly.
 - Pipeline success rate for scheduled runs.
 - Latency for preview and aggregation requests within acceptable operational bounds.
 - Number of reusable process definitions in the process catalog.
+- Dataset onboarding time: time to add a new dataset definition YAML and expose it via `/collections`.
 
 ## 11) Google Earth Engine Parity Checklist
+
 - [ ] On-the-fly raster tiling available via EO API endpoints for Maps/Climate use cases.
 - [ ] Styling controls exposed for map visualization workflows used by DHIS2 Maps app.
 - [ ] Value retrieval at a single location (point query) supported for climate/map inspection.
@@ -136,27 +180,35 @@ Current EO data workflows are fragmented across tools and scripts, making them h
 - [ ] Core Climate app workflows run without Google Earth Engine dependency.
 
 ### Parity verification criteria
+
 - Functional parity: Equivalent user-visible outcome for each checklist item in Maps and Climate integrations.
 - Data parity: Results are within agreed tolerance for value/aggregation comparisons.
 - Operational parity: Throughput and latency are acceptable for expected production usage.
 
 ## 12) Risks and Open Questions
+
 - Should TiTiler and EO API run in same container or separate services?
 - Should openEO be explored as a strategic integration path?
 - What level of OGC API - Processes compliance is required for MVP vs production?
 
 ## 13) Upstream Contribution Strategy
+
 - Preferred path: implement missing cross-project capabilities in `dhis2-python-client` and/or `dhis2eo`, then consume released versions in `eo-api`.
 - Avoid permanent private forks; use short-lived patches only when release timing requires temporary workarounds.
 - Track upstream gaps as explicit requirements with owner, milestone, and compatibility impact.
 
 ## 14) Milestones
+
 1. Domain and technology landscape assessment
 2. Unified API draft finalized
 3. MVP process flow implemented
 4. End-to-end demo: dataset → process → aggregated output → DHIS2 import path
 
 ## 15) Acceptance Criteria (MVP)
+
+- `/collections` and `/collections/{collection_id}` return OGC-compatible collection metadata for configured datasets.
+- `/collections/{collection_id}/coverage` returns OGC Coverages-compatible response structures for supported datasets.
+- Dataset definitions are managed as YAML files and validated successfully before runtime use.
 - A user can discover available process(es) and execute one through API.
 - A climate dataset can be previewed and aggregated to org units.
 - A recurring run can be configured and triggered on schedule.

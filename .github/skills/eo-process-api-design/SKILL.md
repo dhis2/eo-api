@@ -6,16 +6,32 @@ description: Design OGC API - Processes style EO execution endpoints and request
 # EO Process API Design
 
 ## Use this skill when
+
 - Adding or modifying process execution endpoints
 - Designing dataset/process discovery and execution contracts
 - Defining long-running execution behavior and status tracking
 
-## Required endpoint baseline
-- `GET /processes`
-- `GET /processes/{process-id}`
-- `POST /processes/{process-id}/execution`
+## Current API baseline in this repo
+
+- Dataset discovery:
+  - `GET /collections`
+  - `GET /collections/{collection_id}`
+- Coverage retrieval:
+  - `GET /collections/{collection_id}/coverage`
+- Process execution endpoints (target baseline):
+  - `GET /processes`
+  - `GET /processes/{process-id}`
+  - `POST /processes/{process-id}/execution`
+
+## OGC endpoint guidance
+
+- For collections, follow OGC API - Common response structures (`extent`, `links`, stable IDs).
+- For coverage responses, follow OGC API - Coverages/CoverageJSON-compatible structures (`domain`, `parameters`, `ranges`).
+- Validate query parameters and return structured `InvalidParameterValue` errors.
+- Return `NotFound` for unknown collections/processes.
 
 ## Design rules
+
 - Keep resource names consistent and stable
 - Use explicit IDs for process, execution, dataset
 - Return structured validation errors with actionable messages
@@ -23,6 +39,7 @@ description: Design OGC API - Processes style EO execution endpoints and request
 - Keep response schemas backward compatible
 
 ## EO/DHIS2 checks
+
 - Document CRS assumptions and aggregation method semantics
 - Include preview/dry-run support where feasible
 - Use `dhis2-python-client` for DHIS2 Web API operations
@@ -33,6 +50,7 @@ description: Design OGC API - Processes style EO execution endpoints and request
 - Prioritize process capabilities that replace current Google Earth Engine-backed functionality
 
 ## Output checklist
+
 - Endpoint contract
 - Example request/response
 - Error model

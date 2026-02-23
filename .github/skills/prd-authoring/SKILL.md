@@ -35,6 +35,11 @@ description: Draft or refine PRDs for DHIS2 EO API features with clear MVP scope
 - Includes compatibility and migration implications for `maps-app` and `climate-app`
 - Explicitly identifies which Google Earth Engine-dependent behavior is replaced by `eo-api`
 - Calls out standards alignment (OGC/STAC) when applicable
+- Reflects current implemented baseline where relevant:
+  - `/collections`, `/collections/{collection_id}`
+  - `/collections/{collection_id}/coverage`
+  - File-driven dataset metadata in `datasets/*.yaml` validated by Pydantic
+  - Validation/test workflow via `make validate-datasets` and `make test`
 
 ## Quality bar
 

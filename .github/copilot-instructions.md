@@ -8,6 +8,23 @@
 - DHIS2 Maps app and DHIS2 Climate app are primary consumers of `eo-api`.
 - `eo-api` should replace functionality currently sourced via Google Earth Engine for these apps.
 
+## Current implemented baseline (keep in sync)
+
+- Dataset discovery is implemented via:
+  - `GET /collections`
+  - `GET /collections/{collection_id}`
+- OGC API - Coverages baseline is implemented via:
+  - `GET /collections/{collection_id}/coverage`
+- Collections and coverages are split into separate endpoint modules:
+  - `eoapi/endpoints/collections.py`
+  - `eoapi/endpoints/coverages.py`
+- Shared endpoint constants/errors live in:
+  - `eoapi/endpoints/constants.py`
+  - `eoapi/endpoints/errors.py`
+- Dataset metadata is file-driven from top-level `datasets/*.yaml` and validated by Pydantic (`eoapi/datasets.py`).
+- Dataset validation command is available via `make validate-datasets`.
+- Tests currently include endpoint error contract tests and run via `make test`.
+
 ## Product priorities
 
 - Favor end-to-end data flow correctness over feature breadth.
@@ -41,6 +58,8 @@
 - For async/long-running operations, expose job status instead of blocking calls.
 - Include stable identifiers for datasets, processes, and executions.
 - Treat Maps app and Climate app contracts as first-class compatibility targets.
+- For collections/coverages, prefer OGC API - Common and OGC API - Coverages compatible response structures and link relations.
+- Keep collections and coverages handlers decoupled, with shared helpers/constants in dedicated modules.
 
 ## Geospatial/data handling guidance
 
@@ -86,3 +105,5 @@
 
 - Update docs when adding endpoints, process parameters, or output schema changes.
 - Include example requests/responses for new process execution paths.
+- Keep `README.md` concise and place endpoint examples in `API_EXAMPLES.md`.
+- Keep dataset schema documentation in `datasets/README.md`.
