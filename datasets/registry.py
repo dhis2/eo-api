@@ -32,6 +32,24 @@ def get_dataset(dataset_id):
     """
     Get dataset dict for a given id
     """
+    from . import cache
     datasets_lookup = {d['id']: d for d in list_datasets()}
     if dataset_id in datasets_lookup:
-        return datasets_lookup[dataset_id]
+        # get base dataset info
+        dataset = datasets_lookup[dataset_id]
+
+        # return
+        return dataset
+
+def get_dataset_with_cache_info(dataset_id):
+    # get base dataset info
+    dataset = get_dataset(dataset_id)
+    
+    if dataset:
+        # add info from dataset cache
+        from . import cache
+        cache_info = cache.get_cache_info(dataset)
+        dataset.update(cache_info)
+
+        # return
+        return dataset

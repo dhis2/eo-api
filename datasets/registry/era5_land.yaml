@@ -2,11 +2,32 @@
   name: 2m temperature (ERA5-Land)
   shortName: 2m temperature
   periodType: hourly
-  eoDownloader: cds.era5_land.hourly
-  temporalAggregation: mean
-  spatialAggregation: mean
+  cacheInfo: 
+    eoFunction: dhis2eo.data.cds.era5_land.hourly.download
+    defaultParams:
+      variables: ['2m_temperature']
+  aggregation: 
+    temporal: mean
+    spatial: mean
   units: kelvin
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   sourceUrl: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land
   variable: t2m
+
+- id: total_precipitation_hourly
+  name: Total precipitation (ERA5-Land)
+  shortName: Total precipitation
+  periodType: hourly
+  cacheInfo: 
+    eoFunction: dhis2eo.data.cds.era5_land.hourly.download
+    defaultParams:
+      variables: ['total_precipitation']
+  aggregation: 
+    temporal: sum
+    spatial: mean
+  units: m
+  resolution: 9 km x 9 km
+  source: ERA5-Land Reanalysis
+  sourceUrl: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land
+  variable: tp
