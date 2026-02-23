@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 
 from dhis2eo.data.cds.era5_land import hourly as era5_land_hourly
 from dhis2eo.data.cds.era5_land import monthly as era5_land_monthly
@@ -8,36 +8,11 @@ from dhis2eo.data.chc.chirps3 import daily as chirps3_daily
 from pygeoapi.api import FORMAT_TYPES, F_JSON
 from pygeoapi.util import url_join
 
-from eoapi.datasets import load_datasets
+from eoapi.datasets import DatasetDefinition, load_datasets
 from eoapi.endpoints.constants import CRS84
 from eoapi.endpoints.errors import invalid_parameter, not_found
 
-router = APIRouter(tags=["Coverages"])
-
-COVERAGE_PARAMETERS: dict[str, dict[str, dict]] = {
-    "chirps-daily": {
-        "precip": {
-            "type": "Parameter",
-            "description": {"en": "Daily precipitation"},
-            "unit": {"label": {"en": "mm/day"}},
-            "observedProperty": {"label": {"en": "Precipitation"}},
-        }
-    },
-    "era5-land-daily": {
-        "2m_temperature": {
-            "type": "Parameter",
-            "description": {"en": "2m air temperature"},
-            "unit": {"label": {"en": "K"}},
-            "observedProperty": {"label": {"en": "2m temperature"}},
-        },
-        "total_precipitation": {
-            "type": "Parameter",
-            "description": {"en": "Total precipitation"},
-            "unit": {"label": {"en": "m"}},
-            "observedProperty": {"label": {"en": "Total precipitation"}},
-        },
-    },
-}
+router = APIRouter()
 
 
 def _base_url(request: Request) -> str:
@@ -75,8 +50,11 @@ def _parse_datetime(datetime_value: str | None, fallback_start: str) -> str:
     return datetime_value
 
 
-def _select_parameters(collection_id: str, range_subset: str | None) -> dict[str, dict]:
-    available = COVERAGE_PARAMETERS.get(collection_id, {})
+def _select_parameters(dataset: DatasetDefinition, range_subset: str | None) -> dict[str, dict]:
+    available = dataset.parameters
+    if not available:
+        raise invalid_parameter(f"No parameters configured for collection '{dataset.id}'")
+
     if not range_subset:
         return available
 
@@ -90,6 +68,7 @@ def _select_parameters(collection_id: str, range_subset: str | None) -> dict[str
 
 def _resolve_dhis2eo_source(
     collection_id: str,
+    parameters: dict[str, dict],
     datetime_value: str,
     bbox: tuple[float, float, float, float],
 ) -> dict:
@@ -113,7 +92,7 @@ def _resolve_dhis2eo_source(
                 era5_land_hourly.download.__name__,
                 era5_land_monthly.download.__name__,
             ],
-            "variables": list(COVERAGE_PARAMETERS[collection_id].keys()),
+            "variables": list(parameters.keys()),
             "bbox": list(bbox),
             "note": "ERA5-Land source data is resolved via CDS download workflows in dhis2eo.",
         }
@@ -150,26 +129,30 @@ def _coverage_links(request: Request, collection_id: str) -> list[dict]:
     ]
 
 
-@router.get("/collections/{collection_id}/coverage")
+@router.get("/collections/{collectionId}/coverage")
 def get_collection_coverage(
-    collection_id: str,
+    collectionId: str,
     request: Request,
     bbox: str | None = None,
     datetime_value: str | None = Query(default=None, alias="datetime"),
-    range_subset: str | None = Query(default=None, alias="range-subset"),
+    range_subset: str | None = Query(
+        default=None,
+        alias="range-subset",
+        description="Comma-separated parameter IDs. Must match keys under datasets/<id>.yaml -> parameters",
+    ),
     output_format: str = Query(default=F_JSON, alias="f"),
 ) -> dict:
     if output_format not in {F_JSON, "covjson"}:
         raise invalid_parameter("Only f=json and f=covjson are currently supported")
 
-    dataset = load_datasets().get(collection_id)
+    dataset = load_datasets().get(collectionId)
     if dataset is None:
-        raise not_found("Collection", collection_id)
+        raise not_found("Collection", collectionId)
 
     bbox_values = _parse_bbox(bbox, dataset.spatial_bbox)
     time_value = _parse_datetime(datetime_value, dataset.temporal_interval[0])
-    parameters = _select_parameters(collection_id, range_subset)
-    source = _resolve_dhis2eo_source(collection_id, time_value, bbox_values)
+    parameters = _select_parameters(dataset, range_subset)
+    source = _resolve_dhis2eo_source(collectionId, parameters, time_value, bbox_values)
 
     ranges = {
         parameter_name: {
@@ -213,6 +196,6 @@ def get_collection_coverage(
         },
         "parameters": parameters,
         "ranges": ranges,
-        "links": _coverage_links(request, collection_id),
+        "links": _coverage_links(request, collectionId),
         "source": source,
     }

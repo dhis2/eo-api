@@ -1,8 +1,9 @@
 from fastapi import FastAPI
-from titiler.core.factory import (TilerFactory,  MultiBaseTilerFactory)
+from titiler.core.factory import (TilerFactory)
 from rio_tiler.io import STACReader
 from eoapi.endpoints.collections import router as collections_router
-from eoapi.endpoints.coverages import router as coverages_router
+from eoapi.endpoints.conformance import router as conformance_router
+from eoapi.endpoints.root import router as root_router
 
 from starlette.middleware.cors import CORSMiddleware
 
@@ -24,28 +25,9 @@ app.add_middleware(
 # Create a TilerFactory for Cloud-Optimized GeoTIFFs
 cog = TilerFactory()
 
+app.include_router(root_router)
+app.include_router(conformance_router)
 app.include_router(collections_router)
-app.include_router(coverages_router)
 
 # Register all the COG endpoints automatically
 app.include_router(cog.router, prefix="/cog", tags=["Cloud Optimized GeoTIFF"])
-
-stac = MultiBaseTilerFactory(
-    reader=STACReader,
-    router_prefix="/stac",
-    add_ogc_maps=True,
-    # extensions=[stacViewerExtension(), stacRenderExtension(), wmtsExtension()],
-    # enable_telemetry=api_settings.telemetry_enabled,
-    # templates=titiler_templates,
-)
-
-app.include_router(
-    stac.router,
-    prefix="/stac",
-    tags=["SpatioTemporal Asset Catalog"],
-)
-
-# Optional: Add a welcome message for the root endpoint
-@app.get("/")
-def read_index():
-    return {"message": "Welcome to DHIS2 EO API"}

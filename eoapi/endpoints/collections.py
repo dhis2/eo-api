@@ -5,6 +5,8 @@ from pygeoapi.util import url_join
 from eoapi.datasets import DatasetDefinition, load_datasets
 from eoapi.endpoints.constants import CRS84, OGC_RELTYPES_BASE
 from eoapi.endpoints.errors import not_found
+from eoapi.endpoints.coverages import router as coverages_router
+from eoapi.endpoints.edr import router as edr_router
 
 router = APIRouter(tags=["Collections"])
 
@@ -46,6 +48,18 @@ def _collection_links(request: Request, collection_id: str) -> list[dict]:
             "type": "application/json",
             "title": "Collection coverage",
             "href": url_join(collection_url, "coverage"),
+        },
+        {
+            "rel": f"{OGC_RELTYPES_BASE}/data",
+            "type": "application/json",
+            "title": "Collection EDR position query",
+            "href": url_join(collection_url, "position"),
+        },
+        {
+            "rel": f"{OGC_RELTYPES_BASE}/data",
+            "type": "application/json",
+            "title": "Collection EDR area query",
+            "href": url_join(collection_url, "area"),
         },
     ]
 
@@ -98,9 +112,13 @@ def get_collections(request: Request) -> dict:
     }
 
 
-@router.get("/collections/{collection_id}")
-def get_collection(collection_id: str, request: Request) -> dict:
-    dataset = load_datasets().get(collection_id)
+@router.get("/collections/{collectionId}")
+def get_collection(collectionId: str, request: Request) -> dict:
+    dataset = load_datasets().get(collectionId)
     if dataset is None:
-        raise not_found("Collection", collection_id)
+        raise not_found("Collection", collectionId)
     return _build_collection(request, dataset)
+
+
+router.include_router(coverages_router, tags=["Collections"])
+router.include_router(edr_router, tags=["Collections"])

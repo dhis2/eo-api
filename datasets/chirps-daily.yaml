@@ -15,3 +15,14 @@ spatial_bbox:
 temporal_interval:
   - 1981-01-01T00:00:00Z
   - null
+parameters:
+  precip:
+    type: Parameter
+    description:
+      en: Daily precipitation
+    unit:
+      label:
+        en: mm/day
+    observedProperty:
+      label:
+        en: Precipitation

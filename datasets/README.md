@@ -2,7 +2,7 @@
 
 This folder contains dataset definitions used by the `/collections` endpoints.
 
-Definitions are loaded from `*.yaml` files and validated by the `DatasetDefinition` Pydantic model in `eoapi/endpoints/collections.py`.
+Definitions are loaded from `*.yaml` files and validated by the `DatasetDefinition` Pydantic model in `eoapi/datasets.py`.
 
 ## Required schema
 
@@ -15,6 +15,25 @@ Definitions are loaded from `*.yaml` files and validated by the `DatasetDefiniti
 ## Optional schema
 
 - `keywords` (array of strings): tags used for discovery
+- `parameters` (object): shared parameter definitions used by both Coverages and EDR endpoints
+
+### `parameters` object shape
+
+Each key is a parameter ID (for example `precip` or `2m_temperature`) and value is a CoverageJSON/EDR-compatible parameter object, for example:
+
+```yaml
+parameters:
+  precip:
+    type: Parameter
+    description:
+      en: Daily precipitation
+    unit:
+      label:
+        en: mm/day
+    observedProperty:
+      label:
+        en: Precipitation
+```
 
 ## Example
 
@@ -34,6 +53,17 @@ spatial_bbox:
 temporal_interval:
   - 2000-01-01T00:00:00Z
   - null
+parameters:
+  precip:
+    type: Parameter
+    description:
+      en: Daily precipitation
+    unit:
+      label:
+        en: mm/day
+    observedProperty:
+      label:
+        en: Precipitation
 ```
 
 ## Current definitions

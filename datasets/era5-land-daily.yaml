@@ -15,3 +15,24 @@ spatial_bbox:
 temporal_interval:
   - 1950-01-01T00:00:00Z
   - null
+parameters:
+  2m_temperature:
+    type: Parameter
+    description:
+      en: 2m air temperature
+    unit:
+      label:
+        en: K
+    observedProperty:
+      label:
+        en: 2m temperature
+  total_precipitation:
+    type: Parameter
+    description:
+      en: Total precipitation
+    unit:
+      label:
+        en: m
+    observedProperty:
+      label:
+        en: Total precipitation

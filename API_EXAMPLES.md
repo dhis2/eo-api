@@ -4,7 +4,25 @@ Base URL (local):
 
 http://127.0.0.1:8000
 
+OGC landing page:
+
+http://127.0.0.1:8000/
+
+```bash
+curl "http://127.0.0.1:8000/"
+```
+
 ## Collections (`/collections`)
+
+Conformance declaration:
+
+http://127.0.0.1:8000/conformance
+
+```bash
+curl "http://127.0.0.1:8000/conformance"
+```
+
+Note: values used in `range-subset` and `parameter-name` must match keys in `datasets/<dataset-id>.yaml` under `parameters`.
 
 List collections:
 
@@ -50,6 +68,38 @@ http://127.0.0.1:8000/collections/era5-land-daily/coverage?range-subset=2m_tempe
 
 ```bash
 curl "http://127.0.0.1:8000/collections/era5-land-daily/coverage?range-subset=2m_temperature"
+```
+
+Get CHIRPS EDR position query:
+
+http://127.0.0.1:8000/collections/chirps-daily/position?coords=POINT(30%20-1)&datetime=2026-01-31T00:00:00Z&parameter-name=precip
+
+```bash
+curl "http://127.0.0.1:8000/collections/chirps-daily/position?coords=POINT(30%20-1)&datetime=2026-01-31T00:00:00Z&parameter-name=precip"
+```
+
+Get ERA5-Land EDR position query:
+
+http://127.0.0.1:8000/collections/era5-land-daily/position?coords=POINT(36.8%20-1.3)&parameter-name=2m_temperature
+
+```bash
+curl "http://127.0.0.1:8000/collections/era5-land-daily/position?coords=POINT(36.8%20-1.3)&parameter-name=2m_temperature"
+```
+
+Get CHIRPS EDR area query:
+
+http://127.0.0.1:8000/collections/chirps-daily/area?bbox=30,-5,35,2&datetime=2026-01-31T00:00:00Z&parameter-name=precip
+
+```bash
+curl "http://127.0.0.1:8000/collections/chirps-daily/area?bbox=30,-5,35,2&datetime=2026-01-31T00:00:00Z&parameter-name=precip"
+```
+
+Get ERA5-Land EDR area query:
+
+http://127.0.0.1:8000/collections/era5-land-daily/area?bbox=36,-2,38,0&parameter-name=2m_temperature
+
+```bash
+curl "http://127.0.0.1:8000/collections/era5-land-daily/area?bbox=36,-2,38,0&parameter-name=2m_temperature"
 ```
 
 ## COG (`/cog`)

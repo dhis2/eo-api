@@ -15,6 +15,7 @@ class DatasetDefinition(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     spatial_bbox: tuple[float, float, float, float]
     temporal_interval: tuple[str, str | None]
+    parameters: dict[str, dict] = Field(default_factory=dict)
 
     @field_validator("temporal_interval", mode="before")
     @classmethod
