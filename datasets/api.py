@@ -4,10 +4,7 @@ from fastapi import APIRouter, HTTPException
 from . import registry
 from . import cache
 
-router = APIRouter(
-    prefix="/datasets",
-    tags=["datasets"]
-)
+router = APIRouter()
 
 @router.get("/")
 def list_datasets():

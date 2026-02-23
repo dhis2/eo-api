@@ -36,16 +36,17 @@ stac = MultiBaseTilerFactory(
     # templates=titiler_templates,
 )
 
+# Register the STAC router
 app.include_router(
     stac.router,
     prefix="/stac",
     tags=["SpatioTemporal Asset Catalog"],
 )
 
+# Register the datasets router
+app.include_router(datasets_router, prefix="/datasets", tags=['Datasets'])
+
 # Optional: Add a welcome message for the root endpoint
 @app.get("/")
 def read_index():
     return {"message": "Welcome to DHIS2 EO API"}
-
-# Include datasets router
-app.include_router(datasets_router)
