@@ -47,6 +47,14 @@ Docs:
 
 http://127.0.0.1:8000/docs
 
+Collections (OGC API):
+
+http://127.0.0.1:8000/collections
+
+http://127.0.0.1:8000/collections/chirps-daily
+
+http://127.0.0.1:8000/collections/era5-land-daily
+
 Examples:
 
 COG info:
