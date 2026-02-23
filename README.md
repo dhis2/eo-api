@@ -41,10 +41,6 @@ uvicorn main:app --reload
 - `make validate-datasets` — validate all dataset YAML files against the Pydantic schema
 - `make test` — run Python tests with pytest
 
-## API examples
-
-See [`API_EXAMPLES.md`](API_EXAMPLES.md) for docs, collections, STAC, and COG request examples.
-
 ## Documentation
 
 - API usage examples: [`API_EXAMPLES.md`](API_EXAMPLES.md)
