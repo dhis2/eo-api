@@ -86,3 +86,7 @@ def get_dataset_period_type_raster(dataset_id: str, period_type: str, start: str
         filename='eo-api-raster-download.nc',
         background=BackgroundTask(serialize.cleanup_file, file_path)
     )
+
+@router.get("/{dataset_id}/{period_type}/tiles")
+def get_dataset_period_type_tiles(dataset_id: str, period_type: str, start: str, end: str, temporal_aggregation: str):
+    pass
