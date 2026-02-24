@@ -1,5 +1,7 @@
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 import constants
 from . import registry
@@ -59,3 +61,28 @@ def get_dataset_period_type_org_units(dataset_id: str, period_type: str, start: 
     # serialize to json
     data = serialize.dataframe_to_json_data(df, dataset)
     return data
+
+@router.get("/{dataset_id}/{period_type}/raster")
+def get_dataset_period_type_raster(dataset_id: str, period_type: str, start: str, end: str, temporal_aggregation: str):
+    """
+    Get a dataset dynamically aggregated to a given period type and return as downloadable raster file.
+    """
+    # get dataset metadata
+    dataset = registry.get_dataset(dataset_id)
+    
+    # get raster data
+    ds = raster.get_data(dataset, start, end)
+
+    # aggregate to period type
+    ds = raster.to_timeperiod(ds, dataset, period_type, statistic=temporal_aggregation)
+
+    # serialize to temporary netcdf
+    file_path = serialize.xarray_to_temporary_netcdf(ds)
+
+    # return as streaming file and delete after completion
+    return FileResponse(
+        file_path,
+        media_type="application/x-netcdf",
+        filename='eo-api-raster-download.nc',
+        background=BackgroundTask(serialize.cleanup_file, file_path)
+    )

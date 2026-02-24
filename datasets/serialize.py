@@ -1,3 +1,5 @@
+import os
+import tempfile
 
 from dhis2eo.integrations.pandas import dataframe_to_dhis2_json
 
@@ -22,3 +24,16 @@ def dataframe_to_json_data(df, dataset):
 
     # return
     return data
+
+def xarray_to_temporary_netcdf(ds):
+    # temporary file path
+    path = tempfile.mktemp()
+
+    # save to path
+    ds.to_netcdf(path)
+
+    # return
+    return path
+
+def cleanup_file(path: str):
+    os.remove(path)
