@@ -14,6 +14,8 @@ def get_aggregate(
     period_type,
     start,
     end,
+    temporal_aggregation,
+    spatial_aggregation,
 ):
     # get dataset metadata
     dataset = registry.get_dataset(dataset_id)
@@ -33,18 +35,18 @@ def get_aggregate(
     time_dim = get_time_dim(ds)
     ds = ds.sel(**{time_dim: slice(start, end)})
 
-    # preprocess if needed
+    # apply any preprocessing functions
     for prep_name in dataset.get('preProcess', []):
         prep_func = getattr(preprocess, prep_name)
         ds = prep_func(ds)
 
     # aggregate to period type
     print(f'Aggregating period type from {dataset["periodType"]} to {period_type}')
-    ds = temporal.aggregate(ds, dataset, period_type, start, end)
+    ds = temporal.aggregate(ds, dataset, period_type, statistic=temporal_aggregation)
 
     # aggregate to geojson features
     print('Aggregating to org units')
-    df = spatial.aggregate(ds, dataset, features)
+    df = spatial.aggregate(ds, dataset, features, statistic=spatial_aggregation)
 
     # convert to units
     if dataset.get('convertUnits'):

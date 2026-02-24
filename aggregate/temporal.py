@@ -4,9 +4,8 @@ from earthkit import transforms
 
 from datasets.cache import get_time_dim
 
-def aggregate(ds, dataset, period_type, start, end, timezone_offset=0):
+def aggregate(ds, dataset, period_type, statistic, timezone_offset=0):
     varname = dataset['variable']
-    agg_method = dataset['aggregation']['temporal']
     time_dim = get_time_dim(ds)
 
     # remember mask of valid pixels from original dataset (only one time point needed)
@@ -17,7 +16,7 @@ def aggregate(ds, dataset, period_type, start, end, timezone_offset=0):
         if period_type == 'daily':
             ds = transforms.temporal.daily_reduce(
                 ds[varname],
-                how=agg_method,
+                how=statistic,
                 time_shift={"hours": timezone_offset},
                 remove_partial_periods=False,
             )
@@ -25,7 +24,7 @@ def aggregate(ds, dataset, period_type, start, end, timezone_offset=0):
         elif period_type == 'monthly':
             ds = transforms.temporal.monthly_reduce(
                 ds[varname],
-                how=agg_method,
+                how=statistic,
                 time_shift={"hours": timezone_offset},
                 remove_partial_periods=False,
             )
@@ -38,7 +37,7 @@ def aggregate(ds, dataset, period_type, start, end, timezone_offset=0):
         if period_type == 'monthly':
             ds = transforms.temporal.monthly_reduce(
                 ds[varname],
-                how=agg_method,
+                how=statistic,
                 remove_partial_periods=False,
             )
         
