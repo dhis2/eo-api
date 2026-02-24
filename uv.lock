@@ -585,6 +585,8 @@ source = { editable = "." }
 dependencies = [
     { name = "dhis2-client" },
     { name = "dhis2eo" },
+    { name = "geojson-pydantic" },
+    { name = "httpx" },
     { name = "pygeoapi" },
     { name = "python-dotenv" },
     { name = "titiler-core" },
@@ -604,6 +606,8 @@ dev = [
 requires-dist = [
     { name = "dhis2-client", git = "https://github.com/dhis2/dhis2-python-client.git?rev=V0.3.0" },
     { name = "dhis2eo", git = "https://github.com/dhis2/dhis2eo.git?rev=v1.1.0" },
+    { name = "geojson-pydantic", specifier = ">=2.1.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "pygeoapi", specifier = ">=0.22.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "titiler-core", specifier = ">=1.2.0" },

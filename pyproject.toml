@@ -13,6 +13,8 @@ dependencies = [
     "pygeoapi>=0.22.0",
     "dhis2eo @ git+https://github.com/dhis2/dhis2eo.git@v1.1.0",
     "dhis2-client @ git+https://github.com/dhis2/dhis2-python-client.git@V0.3.0",
+    "geojson-pydantic>=2.1.0",
+    "httpx>=0.28.1",
 ]
 
 [tool.ruff]

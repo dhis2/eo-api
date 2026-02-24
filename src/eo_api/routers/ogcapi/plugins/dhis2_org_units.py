@@ -1,8 +1,56 @@
 """DHIS2 Organization Units feature provider for pygeoapi."""
 
+from datetime import datetime
 from typing import Any
 
+import httpx
+from geojson_pydantic import Feature, FeatureCollection
+from geojson_pydantic.geometries import Geometry
+from pydantic import BaseModel
 from pygeoapi.provider.base import BaseProvider, SchemaType
+
+DHIS2_BASE_URL = "https://play.im.dhis2.org/dev/api"
+DHIS2_AUTH = ("admin", "district")
+DHIS2_FIELDS = "id,code,name,shortName,level,openingDate,geometry"
+
+
+class DHIS2OrgUnit(BaseModel):
+    """Organisation unit as returned by the DHIS2 API."""
+
+    id: str
+    name: str | None = None
+    code: str | None = None
+    shortName: str | None = None
+    level: int | None = None
+    openingDate: datetime | None = None
+    geometry: Geometry | None = None
+
+
+def _fetch_org_units() -> list[DHIS2OrgUnit]:
+    """Fetch all organisation units from the DHIS2 API."""
+    response = httpx.get(
+        f"{DHIS2_BASE_URL}/organisationUnits",
+        params={"paging": "false", "fields": DHIS2_FIELDS},
+        auth=DHIS2_AUTH,
+    )
+    response.raise_for_status()
+    return [DHIS2OrgUnit.model_validate(ou) for ou in response.json()["organisationUnits"]]
+
+
+def _org_unit_to_feature(org_unit: DHIS2OrgUnit) -> Feature:
+    """Convert a DHIS2 org unit to a GeoJSON Feature."""
+    return Feature(
+        type="Feature",
+        id=org_unit.id,
+        geometry=org_unit.geometry,
+        properties={
+            "name": org_unit.name,
+            "code": org_unit.code,
+            "shortName": org_unit.shortName,
+            "level": org_unit.level,
+            "openingDate": org_unit.openingDate.isoformat() if org_unit.openingDate else None,
+        },
+    )
 
 
 class DHIS2OrgUnitsProvider(BaseProvider):
@@ -14,16 +62,24 @@ class DHIS2OrgUnitsProvider(BaseProvider):
 
     def get_fields(self) -> dict[str, str]:
         """Return fields and their datatypes."""
-        return {"field1": "string", "field2": "string"}
+        return {
+            "name": "string",
+            "code": "string",
+            "shortName": "string",
+            "level": "integer",
+            "openingDate": "string",
+        }
 
     def get(self, identifier: str, **kwargs: Any) -> dict[str, Any]:
         """Return a single feature by identifier."""
-        return {
-            "type": "Feature",
-            "id": identifier,
-            "geometry": {"type": "Point", "coordinates": [-75, 45]},
-            "properties": {"stn_id": "35", "datetime": "2001-10-30T14:24:55Z", "value": "89.9"},
-        }
+        response = httpx.get(
+            f"{DHIS2_BASE_URL}/organisationUnits/{identifier}",
+            params={"fields": DHIS2_FIELDS},
+            auth=DHIS2_AUTH,
+        )
+        response.raise_for_status()
+        org_unit = DHIS2OrgUnit.model_validate(response.json())
+        return _org_unit_to_feature(org_unit).model_dump()
 
     def query(
         self,
@@ -39,31 +95,18 @@ class DHIS2OrgUnitsProvider(BaseProvider):
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Return feature collection matching the query parameters."""
-        if bbox is None:
-            bbox = []
-        if properties is None:
-            properties = []
-        if sortby is None:
-            sortby = []
-        if select_properties is None:
-            select_properties = []
+        org_units = _fetch_org_units()
+        number_matched = len(org_units)
+        page = org_units[offset : offset + limit]
 
-        # optionally specify the output filename pygeoapi can use as part
-        # of the response (HTTP Content-Disposition header)
-        self.filename = "my-cool-filename.dat"
-
-        # open data file (self.data) and process, return
-        return {
-            "type": "FeatureCollection",
-            "features": [
-                {
-                    "type": "Feature",
-                    "id": "371",
-                    "geometry": {"type": "Point", "coordinates": [-75, 45]},
-                    "properties": {"stn_id": "35", "datetime": "2001-10-30T14:24:55Z", "value": "89.9"},
-                }
-            ],
-        }
+        fc = FeatureCollection(
+            type="FeatureCollection",
+            features=[_org_unit_to_feature(ou) for ou in page],
+        )
+        result = fc.model_dump()
+        result["numberMatched"] = number_matched
+        result["numberReturned"] = len(page)
+        return result
 
     def get_schema(self, schema_type: SchemaType = SchemaType.item) -> tuple[str, dict[str, Any]]:
         """Return a JSON schema for the provider."""
