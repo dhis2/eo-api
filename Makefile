@@ -19,8 +19,8 @@ test: ## Run tests with pytest
 openapi: ## Generate pygeoapi OpenAPI spec
 	PYTHONPATH="$(PWD)" uv run pygeoapi openapi generate ./pygeoapi-config.yml > pygeoapi-openapi.yml
 
-docker-up: ## Start container with docker compose
-	docker compose up --build -d
+docker-build: ## Full rebuild with docker compose
+	docker compose build --no-cache
 
-docker-down: ## Stop container with docker compose
-	docker compose down
+docker-run: ## Start containers with docker compose
+	docker compose up
