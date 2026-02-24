@@ -13,6 +13,12 @@ Install dependencies (requires [uv](https://docs.astral.sh/uv/)):
 Environment variables are loaded automatically from `.env` (via `python-dotenv`).
 Copy `.env.example` to `.env` and adjust values as needed.
 
+Key environment variables (used by the OGC API DHIS2 plugin):
+
+- `DHIS2_BASE_URL` -- DHIS2 API base URL (defaults to play server in `.env.example`)
+- `DHIS2_USERNAME` -- DHIS2 username
+- `DHIS2_PASSWORD` -- DHIS2 password
+
 Start the app:
 
 `uv run uvicorn eo_api.main:app --reload`
@@ -39,9 +45,13 @@ uvicorn eo_api.main:app --reload
 
 ### Makefile targets
 
-- `make sync` — install dependencies with uv
-- `make run` — start the app with uv
-- `make lint` — run ruff linting and format checks
+- `make sync` -- install dependencies with uv
+- `make run` -- start the app with uvicorn
+- `make lint` -- run ruff linting and format checks
+- `make test` -- run tests with pytest
+- `make openapi` -- generate pygeoapi OpenAPI spec
+- `make start` -- start the Docker stack (builds images first)
+- `make restart` -- tear down, rebuild, and start the Docker stack from scratch
 
 ### pygeoapi instructions
 
