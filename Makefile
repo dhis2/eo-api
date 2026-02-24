@@ -12,3 +12,6 @@ run: ## Start the app with uvicorn
 lint: ## Run ruff linting and formatting (autofix)
 	uv run ruff check --fix .
 	uv run ruff format .
+
+test: ## Run tests with pytest
+	uv run pytest tests/
