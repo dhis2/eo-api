@@ -99,7 +99,7 @@ components:
       name: resourceId
       required: true
       schema:
-        default: obs
+        default: dhis2-org-units
         type: string
     skipGeometry:
       description: This option can be used to skip response geometries for each feature.
@@ -258,6 +258,325 @@ paths:
       summary: Collections
       tags:
       - server
+  /collections/chirps-precipitation:
+    get:
+      description: CHIRPS v3 daily precipitation
+      operationId: describeChirps-precipitationCollection
+      parameters:
+      - $ref: '#/components/parameters/f'
+      - $ref: '#/components/parameters/lang'
+      responses:
+        '200':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/Collection
+        '400':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/InvalidParameter
+        '404':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/NotFound
+        '500':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
+      summary: Get CHIRPS v3 daily precipitation metadata
+      tags:
+      - chirps-precipitation
+  /collections/chirps-precipitation/area:
+    get:
+      description: CHIRPS v3 daily precipitation
+      operationId: queryAreaChirps-precipitation
+      parameters:
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/areaCoords.yaml
+      - $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/parameters/datetime
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/parameter-name.yaml
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/z.yaml
+      - $ref: '#/components/parameters/f'
+      responses:
+        '200':
+          content:
+            application/prs.coverage+json:
+              schema:
+                $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/schemas/coverageJSON.yaml
+          description: Response
+      summary: query CHIRPS v3 daily precipitation by area
+      tags:
+      - chirps-precipitation
+  /collections/chirps-precipitation/cube:
+    get:
+      description: CHIRPS v3 daily precipitation
+      operationId: queryCubeChirps-precipitation
+      parameters:
+      - description: Only features that have a geometry that intersects the bounding
+          box are selected.The bounding box is provided as four or six numbers, depending
+          on whether the coordinate reference system includes a vertical axis (height
+          or depth).
+        explode: false
+        in: query
+        name: bbox
+        required: true
+        schema:
+          items:
+            type: number
+          maxItems: 6
+          minItems: 4
+          type: array
+        style: form
+      - $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/parameters/datetime
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/parameter-name.yaml
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/z.yaml
+      - $ref: '#/components/parameters/f'
+      responses:
+        '200':
+          content:
+            application/prs.coverage+json:
+              schema:
+                $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/schemas/coverageJSON.yaml
+          description: Response
+      summary: query CHIRPS v3 daily precipitation by cube
+      tags:
+      - chirps-precipitation
+  /collections/chirps-precipitation/position:
+    get:
+      description: CHIRPS v3 daily precipitation
+      operationId: queryPositionChirps-precipitation
+      parameters:
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/positionCoords.yaml
+      - $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/parameters/datetime
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/parameter-name.yaml
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/z.yaml
+      - $ref: '#/components/parameters/f'
+      responses:
+        '200':
+          content:
+            application/prs.coverage+json:
+              schema:
+                $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/schemas/coverageJSON.yaml
+          description: Response
+      summary: query CHIRPS v3 daily precipitation by position
+      tags:
+      - chirps-precipitation
+  /collections/dhis2-org-units:
+    get:
+      description: Get organization units from DHIS2
+      operationId: describeDhis2-org-unitsCollection
+      parameters:
+      - $ref: '#/components/parameters/f'
+      - $ref: '#/components/parameters/lang'
+      responses:
+        '200':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/Collection
+        '400':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/InvalidParameter
+        '404':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/NotFound
+        '500':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
+      summary: Get DHIS2 organization units metadata
+      tags:
+      - dhis2-org-units
+  /collections/dhis2-org-units/items:
+    get:
+      description: Get organization units from DHIS2
+      operationId: getDhis2-org-unitsFeatures
+      parameters:
+      - $ref: '#/components/parameters/f'
+      - $ref: '#/components/parameters/lang'
+      - $ref: '#/components/parameters/bbox'
+      - description: The optional limit parameter limits the number of items that
+          are presented in the response document (maximum=50, default=20).
+        explode: false
+        in: query
+        name: limit
+        required: false
+        schema:
+          default: 20
+          maximum: 50
+          minimum: 1
+          type: integer
+        style: form
+      - $ref: '#/components/parameters/crs'
+      - $ref: '#/components/parameters/bbox-crs'
+      - description: The properties that should be included for each feature. The
+          parameter value is a comma-separated list of property names.
+        explode: false
+        in: query
+        name: properties
+        required: false
+        schema:
+          items:
+            enum: []
+            type: string
+          type: array
+        style: form
+      - $ref: '#/components/parameters/vendorSpecificParameters'
+      - $ref: '#/components/parameters/skipGeometry'
+      - $ref: https://raw.githubusercontent.com/opengeospatial/ogcapi-records/master/core/openapi/parameters/sortby.yaml
+      - $ref: '#/components/parameters/offset'
+      responses:
+        '200':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/Features
+        '400':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/InvalidParameter
+        '404':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/NotFound
+        '500':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
+      summary: Get DHIS2 organization units items
+      tags:
+      - dhis2-org-units
+    options:
+      description: Get organization units from DHIS2
+      operationId: optionsDhis2-org-unitsFeatures
+      responses:
+        '200':
+          description: options response
+      summary: Options for DHIS2 organization units items
+      tags:
+      - dhis2-org-units
+    post:
+      description: Get organization units from DHIS2
+      operationId: getCQL2Dhis2-org-unitsFeatures
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: https://schemas.opengis.net/cql2/1.0/cql2.json
+        description: Get items with CQL2
+        required: true
+      responses:
+        '200':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/Features
+        '400':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/InvalidParameter
+        '500':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
+      summary: Get DHIS2 organization units items with CQL2
+      tags:
+      - dhis2-org-units
+  /collections/dhis2-org-units/items/{featureId}:
+    get:
+      description: Get organization units from DHIS2
+      operationId: getDhis2-org-unitsFeature
+      parameters:
+      - $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/parameters/featureId
+      - $ref: '#/components/parameters/crs'
+      - $ref: '#/components/parameters/f'
+      - $ref: '#/components/parameters/lang'
+      responses:
+        '200':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/Feature
+        '400':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/InvalidParameter
+        '404':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/NotFound
+        '500':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
+      summary: Get DHIS2 organization units item by id
+      tags:
+      - dhis2-org-units
+    options:
+      description: Get organization units from DHIS2
+      operationId: optionsDhis2-org-unitsFeature
+      parameters:
+      - $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/parameters/featureId
+      responses:
+        '200':
+          description: options response
+      summary: Options for DHIS2 organization units item by id
+      tags:
+      - dhis2-org-units
+  /collections/era5-land:
+    get:
+      description: ERA5-Land hourly data on single levels from 1981 to present
+      operationId: describeEra5-landCollection
+      parameters:
+      - $ref: '#/components/parameters/f'
+      - $ref: '#/components/parameters/lang'
+      responses:
+        '200':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/Collection
+        '400':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/InvalidParameter
+        '404':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/NotFound
+        '500':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
+      summary: Get ERA5-Land hourly metadata
+      tags:
+      - era5-land
+  /collections/era5-land/area:
+    get:
+      description: ERA5-Land hourly data on single levels from 1981 to present
+      operationId: queryAreaEra5-land
+      parameters:
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/areaCoords.yaml
+      - $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/parameters/datetime
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/parameter-name.yaml
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/z.yaml
+      - $ref: '#/components/parameters/f'
+      responses:
+        '200':
+          content:
+            application/prs.coverage+json:
+              schema:
+                $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/schemas/coverageJSON.yaml
+          description: Response
+      summary: query ERA5-Land hourly data on single levels from 1981 to present by
+        area
+      tags:
+      - era5-land
+  /collections/era5-land/cube:
+    get:
+      description: ERA5-Land hourly data on single levels from 1981 to present
+      operationId: queryCubeEra5-land
+      parameters:
+      - description: Only features that have a geometry that intersects the bounding
+          box are selected.The bounding box is provided as four or six numbers, depending
+          on whether the coordinate reference system includes a vertical axis (height
+          or depth).
+        explode: false
+        in: query
+        name: bbox
+        required: true
+        schema:
+          items:
+            type: number
+          maxItems: 6
+          minItems: 4
+          type: array
+        style: form
+      - $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/parameters/datetime
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/parameter-name.yaml
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/z.yaml
+      - $ref: '#/components/parameters/f'
+      responses:
+        '200':
+          content:
+            application/prs.coverage+json:
+              schema:
+                $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/schemas/coverageJSON.yaml
+          description: Response
+      summary: query ERA5-Land hourly data on single levels from 1981 to present by
+        cube
+      tags:
+      - era5-land
+  /collections/era5-land/position:
+    get:
+      description: ERA5-Land hourly data on single levels from 1981 to present
+      operationId: queryPositionEra5-land
+      parameters:
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/positionCoords.yaml
+      - $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/parameters/datetime
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/parameter-name.yaml
+      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/z.yaml
+      - $ref: '#/components/parameters/f'
+      responses:
+        '200':
+          content:
+            application/prs.coverage+json:
+              schema:
+                $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/schemas/coverageJSON.yaml
+          description: Response
+      summary: query ERA5-Land hourly data on single levels from 1981 to present by
+        position
+      tags:
+      - era5-land
   /collections/gdps-temperature:
     get:
       description: Global Deterministic Prediction System sample
@@ -1007,6 +1326,12 @@ tags:
     description: information
     url: https://example.org
   name: server
+- description: Get organization units from DHIS2
+  name: dhis2-org-units
+- description: CHIRPS v3 daily precipitation
+  name: chirps-precipitation
+- description: ERA5-Land hourly data on single levels from 1981 to present
+  name: era5-land
 - description: My cool observations
   name: obs
 - description: lakes of the world, public domain

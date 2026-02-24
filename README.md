@@ -42,6 +42,24 @@ uvicorn main:app --reload
 - `make sync` — install dependencies with uv
 - `make run` — start the app with uv
 
+### pygeoapi instructions
+
+To validate the configuration:
+
+```
+pygeoapi config validate -c pygeoapi-config.yml`
+```
+
+Run after changes are made in pygeoapi-config.yml:
+
+`make openapi` or
+
+```
+PYTHONPATH="$(pwd)" uv run pygeoapi openapi generate ./pygeoapi-config.yml > pygeoapi-openapi.yml
+```
+
+### Endpoints
+
 Root endpoint:
 
 http://127.0.0.1:8000/ -> Welcome to DHIS2 EO API
@@ -49,6 +67,10 @@ http://127.0.0.1:8000/ -> Welcome to DHIS2 EO API
 Docs:
 
 http://127.0.0.1:8000/docs
+
+OGC API
+
+http://127.0.0.1:8000/ogcapi
 
 Examples:
 
