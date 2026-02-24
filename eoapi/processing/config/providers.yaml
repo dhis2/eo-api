@@ -1,0 +1,6 @@
+version: "1.0"
+providers:
+  chirps-daily:
+    name: chirps3
+    options:
+      variable: precip

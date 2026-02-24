@@ -1,10 +1,18 @@
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, Field
 
-from pygeoapi.api import FORMAT_TYPES, F_JSON
-from pygeoapi.util import url_join
+try:
+    from pygeoapi.api import FORMAT_TYPES, F_JSON
+    from pygeoapi.util import url_join
+except ImportError:
+    F_JSON = "json"
+    FORMAT_TYPES = {F_JSON: "application/json"}
+
+    def url_join(base_url: str, *parts: str) -> str:
+        segments = [base_url.rstrip("/"), *(part.strip("/") for part in parts if part)]
+        return "/".join(segment for segment in segments if segment)
 
 from eoapi.endpoints.errors import invalid_parameter, not_found
 from eoapi.endpoints.processes import run_process
@@ -21,14 +29,14 @@ router = APIRouter(tags=["Workflows"])
 
 
 class WorkflowStep(BaseModel):
-    name: str | None = Field(default=None, min_length=1)
-    processId: str = Field(min_length=1)
-    payload: dict[str, Any]
+    name: str | None = Field(default=None, min_length=1, description="Optional step label.")
+    processId: str = Field(min_length=1, description="Process ID to execute in this step.")
+    payload: dict[str, Any] = Field(description="Execution payload containing `inputs`.")
 
 
 class WorkflowCreateRequest(BaseModel):
-    name: str = Field(min_length=1)
-    steps: list[WorkflowStep] = Field(min_length=1)
+    name: str = Field(min_length=1, description="Workflow name.")
+    steps: list[WorkflowStep] = Field(min_length=1, description="Ordered list of steps.")
 
 
 class WorkflowUpdateRequest(BaseModel):
@@ -93,7 +101,11 @@ def run_workflow_by_id(workflow_id: str) -> dict[str, Any]:
     }
 
 
-@router.get("/workflows")
+@router.get(
+    "/workflows",
+    summary="List workflows",
+    description="Returns all workflow definitions.",
+)
 def get_workflows(request: Request) -> dict[str, Any]:
     base = _base_url(request)
     workflows = [_workflow_response(request, workflow) for workflow in list_workflows()]
@@ -106,8 +118,52 @@ def get_workflows(request: Request) -> dict[str, Any]:
     }
 
 
-@router.post("/workflows", status_code=201)
-def post_workflow(payload: WorkflowCreateRequest, request: Request) -> dict[str, Any]:
+@router.post(
+    "/workflows",
+    status_code=201,
+    summary="Create workflow",
+    description="Creates a workflow composed of one or more process execution steps.",
+)
+def post_workflow(
+    request: Request,
+    payload: WorkflowCreateRequest = Body(
+        ...,
+        openapi_examples={
+            "two_step": {
+                "summary": "Two-step climate workflow",
+                "value": {
+                    "name": "climate-workflow",
+                    "steps": [
+                        {
+                            "name": "zonal",
+                            "processId": "raster.zonal_stats",
+                            "payload": {
+                                "inputs": {
+                                    "dataset_id": "chirps-daily",
+                                    "params": ["precip"],
+                                    "time": "2026-01-31",
+                                    "aoi": [30.0, -10.0, 31.0, -9.0],
+                                }
+                            },
+                        },
+                        {
+                            "name": "timeseries",
+                            "processId": "raster.point_timeseries",
+                            "payload": {
+                                "inputs": {
+                                    "dataset_id": "chirps-daily",
+                                    "params": ["precip"],
+                                    "time": "2026-01-31",
+                                    "aoi": {"bbox": [30.0, -10.0, 32.0, -8.0]},
+                                }
+                            },
+                        },
+                    ],
+                },
+            }
+        },
+    ),
+) -> dict[str, Any]:
     workflow = create_workflow(
         {
             "name": payload.name,
@@ -117,7 +173,11 @@ def post_workflow(payload: WorkflowCreateRequest, request: Request) -> dict[str,
     return _workflow_response(request, workflow)
 
 
-@router.get("/workflows/{workflowId}")
+@router.get(
+    "/workflows/{workflowId}",
+    summary="Get workflow",
+    description="Returns one workflow definition by ID.",
+)
 def get_workflow_by_id(workflowId: str, request: Request) -> dict[str, Any]:
     workflow = get_workflow(workflowId)
     if workflow is None:
@@ -125,8 +185,21 @@ def get_workflow_by_id(workflowId: str, request: Request) -> dict[str, Any]:
     return _workflow_response(request, workflow)
 
 
-@router.patch("/workflows/{workflowId}")
-def patch_workflow(workflowId: str, payload: WorkflowUpdateRequest, request: Request) -> dict[str, Any]:
+@router.patch(
+    "/workflows/{workflowId}",
+    summary="Update workflow",
+    description="Updates workflow name and/or steps.",
+)
+def patch_workflow(
+    workflowId: str,
+    request: Request,
+    payload: WorkflowUpdateRequest = Body(
+        ...,
+        openapi_examples={
+            "rename": {"summary": "Rename workflow", "value": {"name": "updated-workflow-name"}},
+        },
+    ),
+) -> dict[str, Any]:
     updates = payload.model_dump(exclude_unset=True)
     if "steps" in updates and updates["steps"] is not None:
         updates["steps"] = [WorkflowStep.model_validate(step).model_dump() for step in updates["steps"]]
@@ -138,14 +211,24 @@ def patch_workflow(workflowId: str, payload: WorkflowUpdateRequest, request: Req
     return _workflow_response(request, workflow)
 
 
-@router.delete("/workflows/{workflowId}", status_code=204)
+@router.delete(
+    "/workflows/{workflowId}",
+    status_code=204,
+    summary="Delete workflow",
+    description="Deletes a workflow by ID.",
+)
 def remove_workflow(workflowId: str) -> None:
     deleted = delete_workflow(workflowId)
     if not deleted:
         raise not_found("Workflow", workflowId)
 
 
-@router.post("/workflows/{workflowId}/run", status_code=202)
+@router.post(
+    "/workflows/{workflowId}/run",
+    status_code=202,
+    summary="Run workflow",
+    description="Runs all workflow steps in order and returns resulting job IDs.",
+)
 def run_workflow(workflowId: str, request: Request) -> dict[str, Any]:
     result = run_workflow_by_id(workflowId)
     base = _base_url(request)

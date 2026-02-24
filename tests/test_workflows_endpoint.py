@@ -1,21 +1,32 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from eoapi.endpoints.features import router as features_router
 from eoapi.endpoints.processes import router as processes_router
 from eoapi.endpoints.workflows import router as workflows_router
+from eoapi.processing.providers.base import RasterFetchResult
 
 
 def create_client() -> TestClient:
     app = FastAPI()
-    app.include_router(features_router)
     app.include_router(processes_router)
     app.include_router(workflows_router)
     return TestClient(app)
 
 
-def test_workflow_crud_and_run() -> None:
+def test_workflow_crud_and_run(monkeypatch) -> None:
     client = create_client()
+
+    class FakeProvider:
+        provider_id = "fake"
+
+        def fetch(self, request):
+            return RasterFetchResult(
+                provider=self.provider_id,
+                asset_paths=[f"/tmp/{request.parameter}.nc"],
+                from_cache=True,
+            )
+
+    monkeypatch.setattr("eoapi.processing.service.build_provider", lambda dataset: FakeProvider())
 
     create_response = client.post(
         "/workflows",
@@ -23,31 +34,26 @@ def test_workflow_crud_and_run() -> None:
             "name": "climate-workflow",
             "steps": [
                 {
-                    "name": "aggregate",
-                    "processId": "eo-aggregate-import",
+                    "name": "zonal",
+                    "processId": "raster.zonal_stats",
                     "payload": {
                         "inputs": {
-                            "datasetId": "chirps-daily",
-                            "parameters": ["precip"],
-                            "datetime": "2026-01-31T00:00:00Z",
-                            "orgUnitLevel": 2,
-                            "aggregation": "mean",
-                            "dhis2": {"dataElementId": "abc123", "dryRun": True},
+                            "dataset_id": "chirps-daily",
+                            "params": ["precip"],
+                            "time": "2026-01-31",
+                            "aoi": [30.0, -10.0, 31.0, -9.0],
                         }
                     },
                 },
                 {
-                    "name": "cdd",
-                    "processId": "xclim-cdd",
+                    "name": "timeseries",
+                    "processId": "raster.point_timeseries",
                     "payload": {
                         "inputs": {
-                            "datasetId": "chirps-daily",
-                            "parameter": "precip",
-                            "start": "2026-01-01",
-                            "end": "2026-01-31",
-                            "orgUnitLevel": 2,
-                            "threshold": {"value": 1.0, "unit": "mm/day"},
-                            "dhis2": {"dataElementId": "abc123", "dryRun": True},
+                            "dataset_id": "chirps-daily",
+                            "params": ["precip"],
+                            "time": "2026-01-31",
+                            "aoi": {"bbox": [30.0, -10.0, 32.0, -8.0]},
                         }
                     },
                 },

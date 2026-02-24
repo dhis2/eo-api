@@ -43,6 +43,11 @@ def test_collections_includes_external_federated_entries(monkeypatch) -> None:
     assert "chirps-daily" in ids
     assert "ext:demo-provider:rainfall-collection" in ids
 
+    local = next(collection for collection in payload["collections"] if collection["id"] == "chirps-daily")
+    rels = {link["rel"] for link in local["links"]}
+    assert "process" in rels
+    assert "process-execute" in rels
+
 
 def test_get_external_collection_details(monkeypatch) -> None:
     client = create_client()

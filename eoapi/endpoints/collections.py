@@ -8,6 +8,7 @@ from eoapi.endpoints.errors import not_found
 from eoapi.external_ogc import get_external_collection, list_external_collections, parse_federated_collection_id
 from eoapi.endpoints.coverages import router as coverages_router
 from eoapi.endpoints.edr import router as edr_router
+from eoapi.processing.process_catalog import PROCESS_IDS
 
 router = APIRouter(tags=["Collections"])
 
@@ -25,7 +26,7 @@ def _collection_links(request: Request, collection_id: str) -> list[dict]:
     base = _base_url(request)
     collections_url = url_join(base, "collections")
     collection_url = url_join(collections_url, collection_id)
-    return [
+    links = [
         {
             "rel": "self",
             "type": "application/json",
@@ -63,6 +64,26 @@ def _collection_links(request: Request, collection_id: str) -> list[dict]:
             "href": url_join(collection_url, "area"),
         },
     ]
+
+    # Cross-link collection to available processes for OGC process/data discovery.
+    for process_id in PROCESS_IDS:
+        links.append(
+            {
+                "rel": "process",
+                "type": "application/json",
+                "title": f"Process definition: {process_id}",
+                "href": url_join(base, "processes", process_id),
+            }
+        )
+        links.append(
+            {
+                "rel": "process-execute",
+                "type": "application/json",
+                "title": f"Execute process: {process_id}",
+                "href": url_join(base, "processes", process_id, "execution"),
+            }
+        )
+    return links
 
 
 def _build_collection(request: Request, dataset: DatasetDefinition) -> dict:
