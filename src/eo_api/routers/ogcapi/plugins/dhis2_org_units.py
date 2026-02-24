@@ -16,6 +16,15 @@ class DHIS2OrgUnitsProvider(BaseProvider):
         """Return fields and their datatypes."""
         return {"field1": "string", "field2": "string"}
 
+    def get(self, identifier: str, **kwargs: Any) -> dict[str, Any]:
+        """Return a single feature by identifier."""
+        return {
+            "type": "Feature",
+            "id": identifier,
+            "geometry": {"type": "Point", "coordinates": [-75, 45]},
+            "properties": {"stn_id": "35", "datetime": "2001-10-30T14:24:55Z", "value": "89.9"},
+        }
+
     def query(
         self,
         offset: int = 0,
