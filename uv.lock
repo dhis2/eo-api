@@ -581,7 +581,7 @@ wheels = [
 [[package]]
 name = "eo-api"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "dhis2-client" },
     { name = "dhis2eo" },
