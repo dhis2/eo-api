@@ -26,6 +26,30 @@ class DHIS2OrgUnit(BaseModel):
     geometry: Geometry | None = None
 
 
+class OrgUnitProperties(BaseModel):
+    """Feature properties for a DHIS2 org unit."""
+
+    name: str | None = None
+    code: str | None = None
+    shortName: str | None = None
+    level: int | None = None
+    openingDate: str | None = None
+
+
+def _schema_to_fields(model: type[BaseModel]) -> dict[str, dict[str, str]]:
+    """Convert a Pydantic model's JSON Schema to pygeoapi field definitions."""
+    schema = model.model_json_schema()
+    fields = {}
+    for name, prop in schema["properties"].items():
+        if "anyOf" in prop:
+            types = [t for t in prop["anyOf"] if t.get("type") != "null"]
+            field_type = types[0]["type"] if types else "string"
+        else:
+            field_type = prop.get("type", "string")
+        fields[name] = {"type": field_type}
+    return fields
+
+
 def _fetch_org_units() -> list[DHIS2OrgUnit]:
     """Fetch all organisation units from the DHIS2 API."""
     response = httpx.get(
@@ -39,17 +63,18 @@ def _fetch_org_units() -> list[DHIS2OrgUnit]:
 
 def _org_unit_to_feature(org_unit: DHIS2OrgUnit) -> Feature:
     """Convert a DHIS2 org unit to a GeoJSON Feature."""
+    props = OrgUnitProperties(
+        name=org_unit.name,
+        code=org_unit.code,
+        shortName=org_unit.shortName,
+        level=org_unit.level,
+        openingDate=org_unit.openingDate.isoformat() if org_unit.openingDate else None,
+    )
     return Feature(
         type="Feature",
         id=org_unit.id,
         geometry=org_unit.geometry,
-        properties={
-            "name": org_unit.name,
-            "code": org_unit.code,
-            "shortName": org_unit.shortName,
-            "level": org_unit.level,
-            "openingDate": org_unit.openingDate.isoformat() if org_unit.openingDate else None,
-        },
+        properties=props.model_dump(),
     )
 
 
@@ -59,16 +84,13 @@ class DHIS2OrgUnitsProvider(BaseProvider):
     def __init__(self, provider_def: dict[str, Any]) -> None:
         """Inherit from parent class."""
         super().__init__(provider_def)
+        self.get_fields()
 
-    def get_fields(self) -> dict[str, str]:
+    def get_fields(self) -> dict[str, dict[str, str]]:
         """Return fields and their datatypes."""
-        return {
-            "name": "string",
-            "code": "string",
-            "shortName": "string",
-            "level": "integer",
-            "openingDate": "string",
-        }
+        if not self._fields:
+            self._fields = _schema_to_fields(OrgUnitProperties)
+        return self._fields
 
     def get(self, identifier: str, **kwargs: Any) -> dict[str, Any]:
         """Return a single feature by identifier."""
