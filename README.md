@@ -41,6 +41,7 @@ uvicorn eo_api.main:app --reload
 
 - `make sync` — install dependencies with uv
 - `make run` — start the app with uv
+- `make lint` — run ruff linting and format checks
 
 Root endpoint:
 
