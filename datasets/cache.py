@@ -20,11 +20,7 @@ logger = logging.getLogger(__name__)
 SCRIPT_DIR = Path(__file__).parent.resolve()
 CACHE_DIR = SCRIPT_DIR / 'cache'
 
-# TEMPORARY QUEUED BACKGROUND JOB EXECUTOR UNTIL WE GET A PROPER ONE
-CACHE_WORKER = ThreadPoolExecutor(max_workers=1)
-atexit.register(CACHE_WORKER.shutdown, wait=True, cancel_futures=True)
-
-def build_dataset_cache(dataset, start, end, overwrite):
+def build_dataset_cache(dataset, start, end, overwrite, background_tasks):
     # get download function
     cache_info = dataset['cacheInfo']
     eo_download_func_path = cache_info['eoFunction']
@@ -50,7 +46,8 @@ def build_dataset_cache(dataset, start, end, overwrite):
 
     # execute the download
     #logger.info(params)
-    CACHE_WORKER.submit(eo_download_func, **params)
+    #CACHE_WORKER.submit(eo_download_func, **params)
+    background_tasks.add_task(eo_download_func, **params)
 
 def get_cache_info(dataset):
     # find all files with cache prefix

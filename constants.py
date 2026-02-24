@@ -6,4 +6,4 @@ import geopandas as gpd
 GEOJSON_FILE = 'brazil-regions.geojson'
 COUNTRY_CODE = 'BRA'
 ORG_UNITS_GEOJSON = json.load(open(GEOJSON_FILE))
-BBOX = map(float, gpd.read_file(GEOJSON_FILE).total_bounds)
+BBOX = list(map(float, gpd.read_file(GEOJSON_FILE).total_bounds))

@@ -1,5 +1,5 @@
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
@@ -37,12 +37,12 @@ def get_dataset(dataset_id: str):
     return dataset
 
 @router.get("/{dataset_id}/build_cache", response_model=dict)
-def build_dataset_cache(dataset_id: str, start: str, end: str | None = None, overwrite: bool = False):
+def build_dataset_cache(dataset_id: str, start: str, end: str | None = None, overwrite: bool = False, background_tasks: BackgroundTasks = None):
     """
     Download and cache dataset.
     """
     dataset = get_dataset_or_404(dataset_id)
-    cache.build_dataset_cache(dataset, start=start, end=end, overwrite=overwrite)
+    cache.build_dataset_cache(dataset, start=start, end=end, overwrite=overwrite, background_tasks=background_tasks)
     return {'status': 'Dataset caching request submitted for processing'}
 
 @router.get("/{dataset_id}/{period_type}/orgunits", response_model=list)
