@@ -122,6 +122,79 @@ The `type` field on a provider determines which OGC API standard the collection 
 
 A single collection can have multiple providers (e.g. both `feature` and `tile` on the same resource).
 
+## CQL filtering
+
+pygeoapi supports [CQL2](https://docs.ogc.org/is/21-065r2/21-065r2.html) text filters on collections backed by a CQL-capable provider. Filters are passed as query parameters:
+
+```
+?filter=<expression>&filter-lang=cql-text
+```
+
+The `dhis2-org-units-cql` collection exposes this capability. Its filterable properties are `name`, `code`, `shortName`, `level`, and `openingDate`.
+
+### Supported operators
+
+| Category | Operators | Example |
+|---|---|---|
+| Comparison | `=`, `<>`, `<`, `<=`, `>`, `>=` | `level=2` |
+| Pattern matching | `LIKE`, `ILIKE` (`%` = any chars, `_` = single char) | `name LIKE '%Hospital%'` |
+| Range | `BETWEEN ... AND ...` | `level BETWEEN 2 AND 3` |
+| Set membership | `IN (...)` | `level IN (1,2)` |
+| Null checks | `IS NULL`, `IS NOT NULL` | `code IS NOT NULL` |
+| Logical | `AND`, `OR`, `NOT` | `level=3 AND name LIKE '%CH%'` |
+
+String values must be enclosed in **single quotes**.
+
+### Example queries
+
+Exact match on level:
+
+```
+/ogcapi/collections/dhis2-org-units-cql/items?filter=level=2&filter-lang=cql-text
+```
+
+String match on name:
+
+```
+/ogcapi/collections/dhis2-org-units-cql/items?filter=name='0002 CH Mittaphap'&filter-lang=cql-text
+```
+
+LIKE (case-sensitive pattern):
+
+```
+/ogcapi/collections/dhis2-org-units-cql/items?filter=name LIKE '%Hospital%'&filter-lang=cql-text
+```
+
+ILIKE (case-insensitive pattern):
+
+```
+/ogcapi/collections/dhis2-org-units-cql/items?filter=name ILIKE '%hospital%'&filter-lang=cql-text
+```
+
+Combined filter with AND:
+
+```
+/ogcapi/collections/dhis2-org-units-cql/items?filter=level=3 AND name LIKE '%CH%'&filter-lang=cql-text
+```
+
+BETWEEN range:
+
+```
+/ogcapi/collections/dhis2-org-units-cql/items?filter=level BETWEEN 2 AND 3&filter-lang=cql-text
+```
+
+IN set membership:
+
+```
+/ogcapi/collections/dhis2-org-units-cql/items?filter=level IN (1,2)&filter-lang=cql-text
+```
+
+NULL check combined with comparison:
+
+```
+/ogcapi/collections/dhis2-org-units-cql/items?filter=code IS NULL AND level=5&filter-lang=cql-text
+```
+
 ## Plugin system
 
 pygeoapi uses a plugin architecture so that new data backends, output formats, and processing tasks can be added without modifying the core.
