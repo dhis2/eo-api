@@ -1,12 +1,18 @@
+from dotenv import load_dotenv
 from fastapi import FastAPI
-from titiler.core.factory import (TilerFactory,  MultiBaseTilerFactory)
-from rio_tiler.io import STACReader
+from titiler.core.factory import (TilerFactory)
 
 from starlette.middleware.cors import CORSMiddleware
+
+load_dotenv()
+
+from pygeoapi.starlette_app import APP as pygeoapi_app
 
 app = FastAPI()
 
 # Bsed on: 
+# https://docs.pygeoapi.io/en/stable/administration.html
+# https://dive.pygeoapi.io/advanced/downstream-applications/#starlette-and-fastapi
 # https://developmentseed.org/titiler/user_guide/getting_started/#4-create-your-titiler-application
 # https://github.com/developmentseed/titiler/blob/main/src/titiler/application/titiler/application/main.py
 
@@ -19,26 +25,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# mount all pygeoapi endpoints to /ogcapi
+app.mount(path="/ogcapi", app=pygeoapi_app)
+
 # Create a TilerFactory for Cloud-Optimized GeoTIFFs
 cog = TilerFactory()
 
 # Register all the COG endpoints automatically
 app.include_router(cog.router, prefix="/cog", tags=["Cloud Optimized GeoTIFF"])
-
-stac = MultiBaseTilerFactory(
-    reader=STACReader,
-    router_prefix="/stac",
-    add_ogc_maps=True,
-    # extensions=[stacViewerExtension(), stacRenderExtension(), wmtsExtension()],
-    # enable_telemetry=api_settings.telemetry_enabled,
-    # templates=titiler_templates,
-)
-
-app.include_router(
-    stac.router,
-    prefix="/stac",
-    tags=["SpatioTemporal Asset Catalog"],
-)
 
 # Optional: Add a welcome message for the root endpoint
 @app.get("/")

@@ -10,6 +10,9 @@ Install dependencies (requires [uv](https://docs.astral.sh/uv/)):
 
 `uv sync`
 
+Environment variables are loaded automatically from `.env` (via `python-dotenv`).
+Copy `.env.example` to `.env` and adjust values as needed.
+
 Start the app:
 
 `uv run uvicorn main:app --reload`
