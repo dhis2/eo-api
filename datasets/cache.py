@@ -85,8 +85,10 @@ def get_cache_info(dataset):
 
     # cache info
     cache_info = dict(
-        temporal_coverage = {'start': start, 'end': end},
-        spatial_coverage = {'xmin': xmin, 'ymin': ymin, 'xmax': xmax, 'ymax': ymax},
+        coverage=dict(
+            temporal = {'start': start, 'end': end},
+            spatial = {'xmin': xmin, 'ymin': ymin, 'xmax': xmax, 'ymax': ymax},
+        )
     )
     return cache_info
 

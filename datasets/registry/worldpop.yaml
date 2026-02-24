@@ -6,9 +6,6 @@
     eoFunction: dhis2eo.data.worldpop.pop_total.yearly.download
     defaultParams:
       version: global2
-  aggregation: 
-    temporal: mean
-    spatial: sum
   units: people
   resolution: 100m x 100m
   source: WorldPop Global2
