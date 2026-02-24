@@ -203,34 +203,20 @@ components:
       type: object
 info:
   contact:
-    name: Organization Name
-    url: https://pygeoapi.io
+    name: DHIS2 EO API
+    url: https://dhis2.org
     x-ogc-serviceContact:
-      addresses:
-      - administrativeArea: Country
-        city: City
-        deliveryPoint:
-        - Mailing Address
-      contactInstructions: During hours of service. Off on weekends.
+      addresses: []
       emails:
-      - value: you@example.org
+      - value: climate@dhis2.org
       hoursOfService: pointOfContact
-      links:
-      - href: Contact URL
-        type: text/html
-      name: Lastname, Firstname
-      phones:
-      - type: main
-        value: +xx-xxx-xxx-xxxx
-      - type: fax
-        value: +xx-xxx-xxx-xxxx
-      position: Position Title
-  description: pygeoapi provides an API to geospatial data
+      name: DHIS2 Climate Team
+  description: OGC API compliant geospatial data API
   license:
     name: CC-BY 4.0 license
     url: https://creativecommons.org/licenses/by/4.0/
   termsOfService: https://creativecommons.org/licenses/by/4.0/
-  title: pygeoapi default instance
+  title: DHIS2 EO API
   version: 0.22.0
   x-keywords:
   - geospatial
@@ -1013,10 +999,10 @@ paths:
       tags:
       - hello-world
 servers:
-- description: pygeoapi provides an API to geospatial data
+- description: OGC API compliant geospatial data API
   url: http://127.0.0.1:8000/ogcapi
 tags:
-- description: pygeoapi provides an API to geospatial data
+- description: OGC API compliant geospatial data API
   externalDocs:
     description: information
     url: https://example.org

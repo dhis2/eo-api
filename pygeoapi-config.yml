@@ -64,19 +64,13 @@ logging:
 metadata:
   identification:
     title:
-      en: pygeoapi default instance
-      fr: instance par défaut de pygeoapi
+      en: DHIS2 EO API
     description:
-      en: pygeoapi provides an API to geospatial data
-      fr: pygeoapi fournit une API aux données géospatiales
+      en: OGC API compliant geospatial data API
     keywords:
       en:
         - geospatial
         - data
-        - api
-      fr:
-        - géospatiale
-        - données
         - api
     keywords_type: theme
     terms_of_service: https://creativecommons.org/licenses/by/4.0/
@@ -85,22 +79,11 @@ metadata:
     name: CC-BY 4.0 license
     url: https://creativecommons.org/licenses/by/4.0/
   provider:
-    name: Organization Name
-    url: https://pygeoapi.io
+    name: DHIS2 EO API
+    url: https://dhis2.org
   contact:
-    name: Lastname, Firstname
-    position: Position Title
-    address: Mailing Address
-    city: City
-    stateorprovince: Administrative Area
-    postalcode: Zip or Postal Code
-    country: Country
-    phone: +xx-xxx-xxx-xxxx
-    fax: +xx-xxx-xxx-xxxx
-    email: you@example.org
-    url: Contact URL
-    hours: Mo-Fr 08:00-17:00
-    instructions: During hours of service. Off on weekends.
+    name: DHIS2 Climate Team
+    email: climate@dhis2.org
     role: pointOfContact
 
 resources:
