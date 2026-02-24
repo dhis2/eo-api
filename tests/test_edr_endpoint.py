@@ -85,3 +85,91 @@ def test_edr_area_invalid_bbox() -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "InvalidParameterValue"
+
+
+def test_external_edr_position_proxy_success(monkeypatch) -> None:
+    client = create_client()
+
+    monkeypatch.setattr(
+        "eoapi.endpoints.edr.proxy_external_collection_request",
+        lambda collection_id, operation, query_params: {
+            "type": "FeatureCollection",
+            "features": [],
+            "federation": {
+                "providerId": "demo-provider",
+                "sourceCollectionId": "rainfall-collection",
+                "operation": operation,
+            },
+        },
+    )
+
+    response = client.get(
+        "/collections/ext:demo-provider:rainfall-collection/position",
+        params={"coords": "POINT(30 -1)", "f": "json"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["type"] == "FeatureCollection"
+    assert payload["federation"]["operation"] == "position"
+
+
+def test_external_edr_area_proxy_success(monkeypatch) -> None:
+    client = create_client()
+
+    monkeypatch.setattr(
+        "eoapi.endpoints.edr.proxy_external_collection_request",
+        lambda collection_id, operation, query_params: {
+            "type": "FeatureCollection",
+            "features": [],
+            "federation": {
+                "providerId": "demo-provider",
+                "sourceCollectionId": "rainfall-collection",
+                "operation": operation,
+            },
+        },
+    )
+
+    response = client.get(
+        "/collections/ext:demo-provider:rainfall-collection/area",
+        params={"bbox": "30,-5,35,2", "f": "json"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["type"] == "FeatureCollection"
+    assert payload["federation"]["operation"] == "area"
+
+
+def test_external_edr_position_proxy_disabled_operation(monkeypatch) -> None:
+    client = create_client()
+
+    monkeypatch.setattr(
+        "eoapi.endpoints.edr.is_external_operation_enabled",
+        lambda collection_id, operation: False,
+    )
+
+    response = client.get(
+        "/collections/ext:demo-provider:rainfall-collection/position",
+        params={"coords": "POINT(30 -1)", "f": "json"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "InvalidParameterValue"
+
+
+def test_external_edr_area_proxy_disabled_operation(monkeypatch) -> None:
+    client = create_client()
+
+    monkeypatch.setattr(
+        "eoapi.endpoints.edr.is_external_operation_enabled",
+        lambda collection_id, operation: False,
+    )
+
+    response = client.get(
+        "/collections/ext:demo-provider:rainfall-collection/area",
+        params={"bbox": "30,-5,35,2", "f": "json"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "InvalidParameterValue"

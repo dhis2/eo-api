@@ -10,7 +10,9 @@ dependencies = [
     "titiler-core>=1.2.0",
     "uvicorn>=0.41.0",
     "pygeoapi>=0.22.0",
+    "croniter>=2.0.5",
     "pyyaml>=6.0",
+    "xclim>=0.58.1",
     "dhis2eo @ git+https://github.com/dhis2/dhis2eo.git@v1.1.0",
     "dhis2-client @ git+https://github.com/dhis2/dhis2-python-client.git@V0.3.0",
 ]

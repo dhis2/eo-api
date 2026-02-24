@@ -17,5 +17,10 @@ def test_landing_page_links() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["title"] == "DHIS2 EO API"
+    runtime = payload["runtime"]
+    assert "dhis2" in runtime
+    assert "state" in runtime
+    assert "internalScheduler" in runtime
+    assert "apiKeyRequired" in runtime
     rels = {link["rel"] for link in payload["links"]}
     assert {"self", "conformance", "data", "service-doc"}.issubset(rels)

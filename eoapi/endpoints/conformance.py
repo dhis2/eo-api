@@ -14,6 +14,10 @@ CONFORMANCE_CLASSES = [
     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/core",
     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/position",
     "http://www.opengis.net/spec/ogcapi-edr-1/1.1/conf/area",
+    "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core",
+    "http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/geojson",
+    "http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/core",
+    "http://www.opengis.net/spec/ogcapi-processes-1/1.0/conf/json",
 ]
 
 

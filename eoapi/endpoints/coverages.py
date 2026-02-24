@@ -8,6 +8,11 @@ from eoapi.datasets.base import BBox, CoverageResolver, ParameterMap, SourcePayl
 from eoapi.datasets.resolvers import coverage_resolvers
 from eoapi.endpoints.constants import CRS84
 from eoapi.endpoints.errors import invalid_parameter, not_found
+from eoapi.external_ogc import (
+    is_external_operation_enabled,
+    parse_federated_collection_id,
+    proxy_external_collection_request,
+)
 
 router = APIRouter()
 
@@ -122,6 +127,19 @@ def get_collection_coverage(
     ),
     output_format: str = Query(default=F_JSON, alias="f"),
 ) -> dict:
+    if parse_federated_collection_id(collectionId) is not None:
+        operation_enabled = is_external_operation_enabled(collectionId, "coverage")
+        if operation_enabled is False:
+            raise invalid_parameter("coverage operation is disabled for this external provider")
+        proxied = proxy_external_collection_request(
+            collection_id=collectionId,
+            operation="coverage",
+            query_params=list(request.query_params.multi_items()),
+        )
+        if proxied is None:
+            raise not_found("Collection", collectionId)
+        return proxied
+
     if output_format not in {F_JSON, "covjson"}:
         raise invalid_parameter("Only f=json and f=covjson are currently supported")
 

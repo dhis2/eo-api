@@ -5,6 +5,7 @@ from pygeoapi.util import url_join
 from eoapi.datasets import DatasetDefinition, load_datasets
 from eoapi.endpoints.constants import CRS84, OGC_RELTYPES_BASE
 from eoapi.endpoints.errors import not_found
+from eoapi.external_ogc import get_external_collection, list_external_collections, parse_federated_collection_id
 from eoapi.endpoints.coverages import router as coverages_router
 from eoapi.endpoints.edr import router as edr_router
 
@@ -87,14 +88,70 @@ def _build_collection(request: Request, dataset: DatasetDefinition) -> dict:
     }
 
 
+def _external_collection_links(request: Request, collection_id: str, source_url: str | None) -> list[dict]:
+    base = _base_url(request)
+    collections_url = url_join(base, "collections")
+    collection_url = url_join(collections_url, collection_id)
+
+    links = [
+        {
+            "rel": "self",
+            "type": "application/json",
+            "title": "This collection",
+            "href": collection_url,
+        },
+        {
+            "rel": "root",
+            "type": "application/json",
+            "title": "API root",
+            "href": url_join(base, "/"),
+        },
+        {
+            "rel": "parent",
+            "type": "application/json",
+            "title": "Collections",
+            "href": collections_url,
+        },
+    ]
+
+    if source_url:
+        links.append(
+            {
+                "rel": "source",
+                "type": "application/json",
+                "title": "Upstream collection",
+                "href": source_url,
+            }
+        )
+
+    return links
+
+
+def _normalize_external_collection(request: Request, collection: dict) -> dict:
+    federation = collection.get("federation", {}) if isinstance(collection.get("federation"), dict) else {}
+    source_url = None
+    provider_url = federation.get("providerUrl")
+    source_collection_id = federation.get("sourceCollectionId")
+    if isinstance(provider_url, str) and isinstance(source_collection_id, str):
+        source_url = url_join(provider_url.rstrip("/"), "collections", source_collection_id)
+
+    return {
+        **collection,
+        "links": _external_collection_links(request, collection["id"], source_url),
+    }
+
+
 @router.get("/collections")
 def get_collections(request: Request) -> dict:
     base = _base_url(request)
     collections_url = url_join(base, "collections")
     datasets = load_datasets()
 
+    local_collections = [_build_collection(request, dataset) for dataset in datasets.values()]
+    external_collections = [_normalize_external_collection(request, item) for item in list_external_collections()]
+
     return {
-        "collections": [_build_collection(request, dataset) for dataset in datasets.values()],
+        "collections": local_collections + external_collections,
         "links": [
             {
                 "rel": "self",
@@ -114,6 +171,12 @@ def get_collections(request: Request) -> dict:
 
 @router.get("/collections/{collectionId}")
 def get_collection(collectionId: str, request: Request) -> dict:
+    if parse_federated_collection_id(collectionId) is not None:
+        external_collection = get_external_collection(collectionId)
+        if external_collection is None:
+            raise not_found("Collection", collectionId)
+        return _normalize_external_collection(request, external_collection)
+
     dataset = load_datasets().get(collectionId)
     if dataset is None:
         raise not_found("Collection", collectionId)

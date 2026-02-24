@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EO API Example App</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>EO API Example App</h1>
+      <p class="subtitle">
+        Minimal example for scheduled daily temperature/precipitation imports
+        into DHIS2.
+      </p>
+
+      <section class="panel">
+        <h2>1) Custom Workflows</h2>
+        <form id="workflow-form">
+          <div class="grid">
+            <label>
+              Workflow name
+              <input
+                id="workflow-name"
+                value="climate-indicators-workflow"
+                required
+              />
+            </label>
+          </div>
+          <label>
+            Steps JSON (array of {"name", "processId", "payload"})
+            <textarea id="workflow-steps" rows="12" required>
+[{"name":"aggregate-precip","processId":"eo-aggregate-import","payload":{"inputs":{"datasetId":"chirps-daily","parameters":["precip"],"datetime":"2026-01-31T00:00:00Z","orgUnitLevel":2,"aggregation":"mean","dhis2":{"dataElementId":"abc123","dryRun":true}}}},{"name":"cdd-indicator","processId":"xclim-cdd","payload":{"inputs":{"datasetId":"chirps-daily","parameter":"precip","start":"2026-01-01","end":"2026-01-31","orgUnitLevel":2,"threshold":{"value":1.0,"unit":"mm/day"},"dhis2":{"dataElementId":"abc123","dryRun":true}}}}]</textarea
+            >
+          </label>
+          <div class="actions">
+            <button type="submit">Save Workflow</button>
+            <button type="button" id="refresh-workflows">
+              Refresh Workflows
+            </button>
+          </div>
+        </form>
+        <p class="hint">
+          Workflows are saved in your browser and run steps sequentially via the
+          API.
+        </p>
+      </section>
+
+      <section class="panel">
+        <h2>2) Workflows</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Steps</th>
+              <th>Last Jobs</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="workflows-body"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>3) Configure Schedule</h2>
+        <form id="schedule-form">
+          <div class="grid">
+            <label>
+              Name
+              <input id="name" value="nightly-climate-import" required />
+            </label>
+
+            <label>
+              Cron
+              <input id="cron" value="0 0 * * *" required />
+            </label>
+
+            <label>
+              Timezone
+              <input id="timezone" value="UTC" required />
+            </label>
+
+            <label>
+              Dataset
+              <select id="datasetId" required></select>
+            </label>
+
+            <label>
+              Workflow schedule target (optional)
+              <select id="schedule-workflow-id">
+                <option value="">Use aggregate-import inputs</option>
+              </select>
+            </label>
+
+            <label>
+              Parameters (comma separated)
+              <input id="parameters" value="precip" required />
+            </label>
+
+            <label>
+              Date/Time (ISO)
+              <input id="datetime" value="2026-01-31T00:00:00Z" required />
+            </label>
+
+            <label>
+              Org Unit Level
+              <input
+                id="orgUnitLevel"
+                type="number"
+                value="2"
+                min="1"
+                required
+              />
+            </label>
+
+            <label>
+              Aggregation
+              <select id="aggregation" required>
+                <option value="mean" selected>mean</option>
+                <option value="sum">sum</option>
+                <option value="min">min</option>
+                <option value="max">max</option>
+              </select>
+            </label>
+
+            <label>
+              DHIS2 Data Element ID
+              <input
+                id="dataElementId"
+                placeholder="e.g. WUg3MYWQ7pt"
+                required
+              />
+            </label>
+
+            <label class="checkbox-row">
+              <input id="dryRun" type="checkbox" checked />
+              Dry run
+            </label>
+          </div>
+
+          <div class="actions">
+            <button type="submit">Create Schedule</button>
+            <button type="button" id="refresh-schedules">
+              Refresh Schedules
+            </button>
+          </div>
+        </form>
+        <p id="parameter-help" class="hint"></p>
+      </section>
+
+      <section class="panel">
+        <h2>4) Schedules</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Cron</th>
+              <th>Enabled</th>
+              <th>Last Job</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="schedules-body"></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>5) Job Status</h2>
+        <div class="actions">
+          <input id="job-id" placeholder="Paste jobId" />
+          <button id="check-job">Check Job</button>
+        </div>
+        <pre id="job-output"></pre>
+      </section>
+
+      <section class="panel">
+        <h2>Scheduler Callback (Optional)</h2>
+        <p class="hint">
+          Use this only if callback token protection is enabled in the API
+          (`EOAPI_SCHEDULER_TOKEN`).
+        </p>
+        <label>
+          X-Scheduler-Token
+          <input id="scheduler-token" placeholder="token" />
+        </label>
+      </section>
+
+      <section class="panel">
+        <h2>Messages</h2>
+        <pre id="output"></pre>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

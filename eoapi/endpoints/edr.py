@@ -10,6 +10,11 @@ from eoapi.datasets.base import AreaResolver, BBox, ParameterMap, Point, Positio
 from eoapi.datasets.resolvers import area_resolvers, position_resolvers
 from eoapi.endpoints.constants import CRS84
 from eoapi.endpoints.errors import invalid_parameter, not_found
+from eoapi.external_ogc import (
+    is_external_operation_enabled,
+    parse_federated_collection_id,
+    proxy_external_collection_request,
+)
 
 router = APIRouter()
 
@@ -195,6 +200,19 @@ def get_collection_position(
     ),
     output_format: str = Query(default=F_JSON, alias="f"),
 ) -> dict:
+    if parse_federated_collection_id(collectionId) is not None:
+        operation_enabled = is_external_operation_enabled(collectionId, "position")
+        if operation_enabled is False:
+            raise invalid_parameter("position operation is disabled for this external provider")
+        proxied = proxy_external_collection_request(
+            collection_id=collectionId,
+            operation="position",
+            query_params=list(request.query_params.multi_items()),
+        )
+        if proxied is None:
+            raise not_found("Collection", collectionId)
+        return proxied
+
     if output_format not in {F_JSON, "geojson"}:
         raise invalid_parameter("Only f=json and f=geojson are currently supported")
 
@@ -242,6 +260,19 @@ def get_collection_area(
     ),
     output_format: str = Query(default=F_JSON, alias="f"),
 ) -> dict:
+    if parse_federated_collection_id(collectionId) is not None:
+        operation_enabled = is_external_operation_enabled(collectionId, "area")
+        if operation_enabled is False:
+            raise invalid_parameter("area operation is disabled for this external provider")
+        proxied = proxy_external_collection_request(
+            collection_id=collectionId,
+            operation="area",
+            query_params=list(request.query_params.multi_items()),
+        )
+        if proxied is None:
+            raise not_found("Collection", collectionId)
+        return proxied
+
     if output_format not in {F_JSON, "geojson"}:
         raise invalid_parameter("Only f=json and f=geojson are currently supported")
 
