@@ -27,7 +27,7 @@ def build_dataset_cache(dataset_id, start, end, overwrite):
     cache_info = dataset['cacheInfo']
     eo_download_func_path = cache_info['eoFunction']
     eo_download_func = get_dynamic_function(eo_download_func_path)
-    print(eo_download_func_path, eo_download_func)
+    #print(eo_download_func_path, eo_download_func)
 
     # construct standard params
     params = cache_info['defaultParams']
@@ -47,7 +47,7 @@ def build_dataset_cache(dataset_id, start, end, overwrite):
         params['country_code'] = COUNTRY_CODE
 
     # execute the download
-    print(params)
+    #print(params)
     CACHE_WORKER.submit(eo_download_func, **params)
 
 def get_cache_info(dataset):

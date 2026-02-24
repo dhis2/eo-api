@@ -52,11 +52,11 @@ def get_dataset_period_type_org_units(dataset_id: str, period_type: str, start: 
     # aggregate to period type
     ds = raster.to_timeperiod(ds, dataset, period_type, statistic=temporal_aggregation)
 
+    # convert units if needed (inplace)
+    units.convert_units(ds, dataset)
+
     # aggregate to geojson features
     df = raster.to_features(ds, dataset, features=constants.ORG_UNITS_GEOJSON, statistic=spatial_aggregation)
-
-    # convert units if needed
-    units.convert_units(df, dataset)
 
     # serialize to json
     data = serialize.dataframe_to_json_data(df, dataset)
@@ -75,6 +75,9 @@ def get_dataset_period_type_raster(dataset_id: str, period_type: str, start: str
 
     # aggregate to period type
     ds = raster.to_timeperiod(ds, dataset, period_type, statistic=temporal_aggregation)
+
+    # convert units if needed (inplace)
+    units.convert_units(ds, dataset)
 
     # serialize to temporary netcdf
     file_path = serialize.xarray_to_temporary_netcdf(ds)
