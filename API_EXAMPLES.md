@@ -24,23 +24,23 @@ Example runtime payload:
 
 ```json
 {
-	"cors": {
-		"mode": "wildcard",
-		"origins": 1
-	},
-	"apiKeyRequired": false,
-	"dhis2": {
-		"configured": false,
-		"host": "unset",
-		"authMode": "none"
-	},
-	"state": {
-		"persistenceEnabled": true,
-		"directory": ".cache/state"
-	},
-	"internalScheduler": {
-		"enabled": true
-	}
+  "cors": {
+    "mode": "wildcard",
+    "origins": 1
+  },
+  "apiKeyRequired": false,
+  "dhis2": {
+    "configured": false,
+    "host": "unset",
+    "authMode": "none"
+  },
+  "state": {
+    "persistenceEnabled": true,
+    "directory": ".cache/state"
+  },
+  "internalScheduler": {
+    "enabled": true
+  }
 }
 ```
 

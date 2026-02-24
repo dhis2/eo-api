@@ -6,6 +6,7 @@ title: DHIS2 EO API — Executive Brief
 ---
 
 # DHIS2 EO API
+
 ## Executive Brief (10 slides)
 
 - Unified API for Earth Observation data into DHIS2 and CHAP
@@ -49,6 +50,7 @@ flowchart LR
 # 4) OGC APIs used: what, how, why
 
 Used in this API:
+
 - **OGC API - Common**: landing page + collection discovery (`/`, `/collections`)
 - **OGC API - Coverages**: gridded raster access (`/collections/{id}/coverage`)
 - **OGC API - EDR**: direct query patterns for point/area extraction (`/position`, `/area`)
@@ -56,12 +58,14 @@ Used in this API:
 - **OGC API - Processes (style)**: process catalog + execution (`/processes/*`)
 
 How they relate:
+
 - `Common` provides dataset identities and links
 - `Coverages` + `EDR` are complementary views over the same collections
 - `Processes` consume collection-driven inputs and publish job/output links
 - `Features` carries both input geometries (org units) and process outputs
 
 Why this mix:
+
 - Interoperability with geospatial tools and clients
 - Predictable contracts for DHIS2 Maps/Climate integration
 - Composable architecture (discover → query → process → import)
@@ -94,6 +98,7 @@ flowchart TB
 - `xclim-warm-days`
 
 Outputs include:
+
 - Import summary
 - Feature-level results
 - Traceable job state
@@ -112,18 +117,20 @@ Outputs include:
 # 6b) Orchestrator scorecard (weighted)
 
 Scoring basis:
+
 - 1–5 score scale across API fit, time to production, ops overhead, reliability, governance, dev speed, scale, and cost.
 
-| Option | Weighted total (/100) |
-|---|---:|
-| Prefect | **87** |
-| Dagster | 68 |
-| Airflow | 67 |
-| Temporal | 66 |
-| Argo Workflows | 61 |
-| Internal scheduler only | 59 |
+| Option                  | Weighted total (/100) |
+| ----------------------- | --------------------: |
+| Prefect                 |                **87** |
+| Dagster                 |                    68 |
+| Airflow                 |                    67 |
+| Temporal                |                    66 |
+| Argo Workflows          |                    61 |
+| Internal scheduler only |                    59 |
 
 Decision for current phase:
+
 - Choose **Prefect** as primary orchestrator.
 - Keep internal scheduler as fallback.
 - Re-evaluate if enterprise governance constraints become dominant.

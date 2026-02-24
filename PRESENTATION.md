@@ -6,6 +6,7 @@ title: DHIS2 EO API
 ---
 
 # DHIS2 EO API
+
 ## Unified Earth Observation processing for DHIS2 and CHAP
 
 - Standards-aligned geospatial API for discovery, processing, and ingestion
@@ -17,10 +18,12 @@ title: DHIS2 EO API
 # Why this API exists
 
 ## Problem
+
 - EO and climate workflows are often fragmented across scripts and tools
 - Hard to repeat, schedule, validate, and operationalize at scale
 
 ## Goal
+
 - One API surface for:
   - Dataset discovery
   - EO processing
@@ -80,6 +83,7 @@ flowchart LR
 # OGC APIs used: what, how, why
 
 Used in this API:
+
 - **OGC API - Common**: landing page + collection discovery (`/`, `/collections`)
 - **OGC API - Coverages**: gridded raster access (`/collections/{id}/coverage`)
 - **OGC API - EDR**: direct query patterns for point/area extraction (`/position`, `/area`)
@@ -87,12 +91,14 @@ Used in this API:
 - **OGC API - Processes (style)**: process catalog + execution (`/processes/*`)
 
 How they relate:
+
 - `Common` provides dataset identities and link relations
 - `Coverages` + `EDR` are complementary views over the same collections
 - `Processes` consume collection-based inputs and emit job/output links
 - `Features` carries both input geometries and process outputs
 
 Why this mix:
+
 - Interoperability with geospatial tools and ecosystem clients
 - Predictable contracts for DHIS2 Maps/Climate integration
 - Composable workflow model (discover → query → process → import)
@@ -130,12 +136,14 @@ flowchart TB
 # Endpoint map
 
 ## Discovery and standards
+
 - GET /
 - GET /conformance
 - GET /collections
 - GET /collections/{collectionId}
 
 ## Data access
+
 - GET /collections/{collectionId}/coverage
 - GET /collections/{collectionId}/position
 - GET /collections/{collectionId}/area
@@ -143,12 +151,14 @@ flowchart TB
 - GET /features/{collectionId}/items
 
 ## Execution
+
 - GET /processes
 - GET /processes/{processId}
 - POST /processes/{processId}/execution
 - GET /jobs/{jobId}
 
 ## Orchestration
+
 - CRUD /workflows + POST /workflows/{workflowId}/run
 - CRUD /schedules + POST /schedules/{scheduleId}/run
 
@@ -173,6 +183,7 @@ flowchart TB
 - xclim-warm-days
 
 Each process produces:
+
 - Import summary
 - Feature outputs
 - Traceable job status
@@ -203,10 +214,12 @@ Each process produces:
 # Scheduling options
 
 ## Internal scheduler
+
 - Poll-based cron worker built into API process
 - Runs enabled schedules at due times
 
 ## Prefect integration
+
 - Optional offloading of schedule runs to Prefect deployments
 - Job status can sync from Prefect flow states
 

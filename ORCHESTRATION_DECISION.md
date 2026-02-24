@@ -19,28 +19,28 @@ Options compared:
 - Weighted score = score × weight
 - Weights reflect current eo-api phase (MVP to near-production)
 
-| Criterion | Weight |
-|---|---:|
-| API-triggered integration fit | 20 |
-| Time to production | 15 |
-| Operations overhead | 15 |
-| Reliability and retries | 15 |
-| Governance and auditability | 10 |
-| Developer productivity | 10 |
-| Scalability and parallelism | 10 |
-| Cost predictability | 5 |
-| **Total** | **100** |
+| Criterion                     |  Weight |
+| ----------------------------- | ------: |
+| API-triggered integration fit |      20 |
+| Time to production            |      15 |
+| Operations overhead           |      15 |
+| Reliability and retries       |      15 |
+| Governance and auditability   |      10 |
+| Developer productivity        |      10 |
+| Scalability and parallelism   |      10 |
+| Cost predictability           |       5 |
+| **Total**                     | **100** |
 
 ## Results
 
-| Option | API fit (20) | Time (15) | Ops (15) | Reliability (15) | Governance (10) | Dev speed (10) | Scale (10) | Cost (5) | **Weighted total / 100** |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **Prefect** | 5 | 5 | 4 | 4 | 3 | 5 | 4 | 4 | **87** |
-| **Dagster** | 3 | 3 | 3 | 4 | 4 | 4 | 4 | 3 | **68** |
-| **Airflow** | 3 | 3 | 2 | 4 | 5 | 3 | 5 | 3 | **67** |
-| **Temporal** | 4 | 2 | 3 | 5 | 3 | 2 | 5 | 3 | **66** |
-| **Argo Workflows** | 3 | 2 | 3 | 4 | 3 | 2 | 5 | 3 | **61** |
-| **Internal scheduler only** | 2 | 5 | 5 | 2 | 1 | 4 | 2 | 5 | **59** |
+| Option                      | API fit (20) | Time (15) | Ops (15) | Reliability (15) | Governance (10) | Dev speed (10) | Scale (10) | Cost (5) | **Weighted total / 100** |
+| --------------------------- | -----------: | --------: | -------: | ---------------: | --------------: | -------------: | ---------: | -------: | -----------------------: |
+| **Prefect**                 |            5 |         5 |        4 |                4 |               3 |              5 |          4 |        4 |                   **87** |
+| **Dagster**                 |            3 |         3 |        3 |                4 |               4 |              4 |          4 |        3 |                   **68** |
+| **Airflow**                 |            3 |         3 |        2 |                4 |               5 |              3 |          5 |        3 |                   **67** |
+| **Temporal**                |            4 |         2 |        3 |                5 |               3 |              2 |          5 |        3 |                   **66** |
+| **Argo Workflows**          |            3 |         2 |        3 |                4 |               3 |              2 |          5 |        3 |                   **61** |
+| **Internal scheduler only** |            2 |         5 |        5 |                2 |               1 |              4 |          2 |        5 |                   **59** |
 
 ## Recommendation
 
