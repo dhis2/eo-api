@@ -15,3 +15,9 @@ lint: ## Run ruff linting and formatting (autofix)
 
 test: ## Run tests with pytest
 	uv run pytest tests/
+
+docker-build: ## Build Docker image
+	docker build -t eo-api .
+
+docker-run: ## Run Docker container
+	docker run --rm --env-file .env -p 8000:8000 eo-api
