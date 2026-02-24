@@ -1,8 +1,12 @@
 
 from fastapi import APIRouter, HTTPException
 
+import constants
 from . import registry
 from . import cache
+from . import raster
+from . import units
+from . import serialize
 
 router = APIRouter()
 
@@ -31,3 +35,27 @@ def build_dataset_cache(dataset_id: str, start: str, end: str, overwrite: bool =
     """
     cache.build_dataset_cache(dataset_id, start=start, end=end, overwrite=overwrite)
     return {'status': 'Dataset caching request submitted for processing'}
+
+@router.get("/{dataset_id}/{period_type}/orgunits", response_model=list)
+def get_dataset_period_type_org_units(dataset_id: str, period_type: str, start: str, end: str, temporal_aggregation: str, spatial_aggregation: str):
+    """
+    Get a dataset dynamically aggregated to a given period type and org units and return json values.
+    """
+    # get dataset metadata
+    dataset = registry.get_dataset(dataset_id)
+    
+    # get raster data
+    ds = raster.get_data(dataset, start, end)
+
+    # aggregate to period type
+    ds = raster.to_timeperiod(ds, dataset, period_type, statistic=temporal_aggregation)
+
+    # aggregate to geojson features
+    df = raster.to_features(ds, dataset, features=constants.ORG_UNITS_GEOJSON, statistic=spatial_aggregation)
+
+    # convert units if needed
+    units.convert_units(df, dataset)
+
+    # serialize to json
+    data = serialize.dataframe_to_json_data(df, dataset)
+    return data

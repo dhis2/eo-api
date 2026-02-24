@@ -1,10 +1,45 @@
+import json
 
 import xarray as xr
+import geopandas as gpd
 from earthkit import transforms
 
-from datasets.cache import get_time_dim
+from . import preprocess
+from . import cache
 
-def aggregate(ds, dataset, period_type, statistic, timezone_offset=0):
+from .cache import get_time_dim
+
+
+def get_data(dataset, start, end):
+    '''Get xarray raster dataset for given time range'''
+    # load xarray from cache
+    print('Accessing dataset')
+    files = cache.get_cache_files(dataset)
+    ds = xr.open_mfdataset(
+        files,
+        data_vars="minimal",
+        coords="minimal",
+        compat="override"
+    )
+
+    # subset time dim
+    time_dim = get_time_dim(ds)
+    ds = ds.sel(**{time_dim: slice(start, end)})
+
+    # apply any preprocessing functions
+    for prep_name in dataset.get('preProcess', []):
+        prep_func = getattr(preprocess, prep_name)
+        ds = prep_func(ds)
+
+    # return
+    return ds
+
+
+def to_timeperiod(ds, dataset, period_type, statistic, timezone_offset=0):
+    '''Aggregate given xarray dataset to another period type'''
+
+    print(f'Aggregating period type from {dataset["periodType"]} to {period_type}')
+
     varname = dataset['variable']
     time_dim = get_time_dim(ds)
 
@@ -49,3 +84,27 @@ def aggregate(ds, dataset, period_type, statistic, timezone_offset=0):
 
     # return
     return ds
+
+
+def to_features(ds, dataset, features, statistic):
+    '''Aggregate given xarray to geojson features and return pandas dataframe'''
+
+    print('Aggregating to org units')
+
+    # load geojson as geopandas
+    gdf = gpd.read_file(json.dumps(features))
+
+    # aggregate
+    ds = transforms.spatial.reduce(
+        ds,
+        gdf,
+        mask_dim="id", # TODO: DONT HARDCODE
+        how=statistic,
+    )
+
+    # convert to df
+    df = ds.to_dataframe().reset_index()
+
+    # return
+    return df
+

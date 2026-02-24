@@ -5,7 +5,6 @@ from rio_tiler.io import STACReader
 from starlette.middleware.cors import CORSMiddleware
 
 from datasets.api import router as datasets_router
-from aggregate.api import router as aggregate_router
 
 app = FastAPI()
 
@@ -46,9 +45,6 @@ app.include_router(
 
 # Register the datasets router
 app.include_router(datasets_router, prefix="/datasets", tags=['Datasets'])
-
-# Register the aggregate router
-app.include_router(aggregate_router, prefix="/aggregate", tags=['Aggregate'])
 
 # Optional: Add a welcome message for the root endpoint
 @app.get("/")
