@@ -10,6 +10,9 @@ Install dependencies (requires [uv](https://docs.astral.sh/uv/)):
 
 `uv sync`
 
+Environment variables are loaded automatically from `.env` (via `python-dotenv`).
+Copy `.env.example` to `.env` and adjust values as needed.
+
 Start the app:
 
 `uv run uvicorn main:app --reload`
@@ -38,6 +41,30 @@ uvicorn main:app --reload
 
 - `make sync` — install dependencies with uv
 - `make run` — start the app with uv
+- `make run-pygeoapi PYGEOAPI_CONFIG=/absolute/path/to/pygeoapi-config.yml` — start app with pygeoapi mounted at `/ogcapi`
+- `make run-pygeoapi-example` — start app with pygeoapi mounted at `/ogcapi` using `./pygeoapi-config.yml`
+
+### Minimal pygeoapi downstream integration
+
+This project supports the pygeoapi downstream-application pattern (mounting pygeoapi in FastAPI):
+
+- Set `PYGEOAPI_CONFIG` to your pygeoapi config file path.
+- Start the API with `make run-pygeoapi PYGEOAPI_CONFIG=/absolute/path/to/pygeoapi-config.yml`.
+- Access pygeoapi endpoints under `/ogcapi` (for example `/ogcapi`, `/ogcapi/conformance`, `/ogcapi/collections`).
+
+Example:
+
+```bash
+make run-pygeoapi PYGEOAPI_CONFIG="/absolute/path/to/pygeoapi-config.yml"
+```
+
+If you keep your config at repo root as `pygeoapi-config.yml`, you can run:
+
+```bash
+make run-pygeoapi-example
+```
+
+A standalone minimal example is available at `examples/pygeoapi_downstream_fastapi.py`.
 
 Root endpoint:
 
