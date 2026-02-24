@@ -1,16 +1,17 @@
+"""DHIS2 EO API - Earth observation data API for DHIS2."""
+
 from dotenv import load_dotenv
 from fastapi import FastAPI
-from titiler.core.factory import (TilerFactory)
-
 from starlette.middleware.cors import CORSMiddleware
+from titiler.core.factory import TilerFactory
 
 load_dotenv()
 
-from pygeoapi.starlette_app import APP as pygeoapi_app
+from pygeoapi.starlette_app import APP as pygeoapi_app  # noqa: E402
 
 app = FastAPI()
 
-# Bsed on: 
+# Bsed on:
 # https://docs.pygeoapi.io/en/stable/administration.html
 # https://dive.pygeoapi.io/advanced/downstream-applications/#starlette-and-fastapi
 # https://developmentseed.org/titiler/user_guide/getting_started/#4-create-your-titiler-application
@@ -34,7 +35,9 @@ cog = TilerFactory()
 # Register all the COG endpoints automatically
 app.include_router(cog.router, prefix="/cog", tags=["Cloud Optimized GeoTIFF"])
 
+
 # Optional: Add a welcome message for the root endpoint
 @app.get("/")
-def read_index():
+def read_index() -> dict[str, str]:
+    """Return a welcome message for the root endpoint."""
     return {"message": "Welcome to DHIS2 EO API"}

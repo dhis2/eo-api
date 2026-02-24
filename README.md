@@ -15,7 +15,7 @@ Copy `.env.example` to `.env` and adjust values as needed.
 
 Start the app:
 
-`uv run uvicorn main:app --reload`
+`uv run uvicorn eo_api.main:app --reload`
 
 ### Using pip (alternative)
 
@@ -25,7 +25,7 @@ If you can't use uv (e.g. mixed conda/forge environments):
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .
-uvicorn main:app --reload
+uvicorn eo_api.main:app --reload
 ```
 
 ### Using conda
@@ -34,7 +34,7 @@ uvicorn main:app --reload
 conda create -n dhis2-eo-api python=3.13
 conda activate dhis2-eo-api
 pip install -e .
-uvicorn main:app --reload
+uvicorn eo_api.main:app --reload
 ```
 
 ### Makefile targets
