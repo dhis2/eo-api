@@ -45,9 +45,31 @@ def build_dataset_cache(dataset, start, end, overwrite, background_tasks):
         params['country_code'] = COUNTRY_CODE
 
     # execute the download
-    #logger.info(params)
-    #CACHE_WORKER.submit(eo_download_func, **params)
     background_tasks.add_task(eo_download_func, **params)
+
+def optimize_dataset_cache(dataset):
+    logger.info(f'Optimizing cache for dataset {dataset["id"]}')
+
+    # open all cache files as xarray
+    files = get_cache_files(dataset)
+    logger.info(f'Opening {len(files)} files from cache')
+    ds = xr.open_mfdataset(files)
+
+    # determine optimal chunk sizes
+    logger.info(f'Determining optimal chunk size for zarr archive')
+    ds_autochunk = ds.chunk('auto').unify_chunks()
+    # extract the first chunk size for each dimension to force uniformity
+    uniform_chunks = {dim: ds_autochunk.chunks[dim][0] for dim in ds_autochunk.dims}
+    logging.info(f'--> {uniform_chunks}')
+
+    # save as zarr
+    logger.info(f'Saving to optimized zarr file')
+    zarr_path = CACHE_DIR / f'{get_cache_prefix(dataset)}.zarr'
+    ds_chunked = ds.chunk(uniform_chunks)
+    ds_chunked.to_zarr(zarr_path, mode='w')
+    ds_chunked.close()
+
+    logger.info('Optimizing complete')
 
 def get_cache_info(dataset):
     # find all files with cache prefix
@@ -96,7 +118,12 @@ def get_cache_prefix(dataset):
 
 def get_cache_files(dataset):
     prefix = get_cache_prefix(dataset)
-    files = list(CACHE_DIR.glob(f'{prefix}*'))
+    optimized = CACHE_DIR / f'{prefix}.zarr'
+    if optimized.exists():
+        files = [optimized]
+    else:
+        logger.warning(f'Could not find optimized zarr file for dataset {dataset["id"]}, using slower netcdf files instead.')
+        files = list(CACHE_DIR.glob(f'{prefix}*.nc'))
     return files
 
 def get_dynamic_function(full_path):

@@ -18,16 +18,22 @@ logger = logging.getLogger(__name__)
 def get_data(dataset, start, end):
     '''Get xarray raster dataset for given time range'''
     # load xarray from cache
-    logger.info('Accessing dataset')
+    logger.info('Opening dataset')
     files = cache.get_cache_files(dataset)
-    ds = xr.open_mfdataset(
-        files,
-        data_vars="minimal",
-        coords="minimal",
-        compat="override"
-    )
+    if len(files) == 1 and str(files[0]).endswith('.zarr'):
+        # optimized zarr
+        ds = xr.open_zarr(files[0])
+    else:
+        # raw cache files (slower)
+        ds = xr.open_mfdataset(
+            files,
+            data_vars="minimal",
+            coords="minimal",
+            compat="override"
+        )
 
     # subset time dim
+    logger.info(f'Subsetting time to {start} and {end}')
     time_dim = get_time_dim(ds)
     ds = ds.sel(**{time_dim: slice(start, end)})
 

@@ -39,11 +39,20 @@ def get_dataset(dataset_id: str):
 @router.get("/{dataset_id}/build_cache", response_model=dict)
 def build_dataset_cache(dataset_id: str, start: str, end: str | None = None, overwrite: bool = False, background_tasks: BackgroundTasks = None):
     """
-    Download and cache dataset.
+    Download and cache dataset as local netcdf files direct from the source.
     """
     dataset = get_dataset_or_404(dataset_id)
     cache.build_dataset_cache(dataset, start=start, end=end, overwrite=overwrite, background_tasks=background_tasks)
     return {'status': 'Dataset caching request submitted for processing'}
+
+@router.get("/{dataset_id}/optimize_cache", response_model=dict)
+def optimize_dataset_cache(dataset_id: str, background_tasks: BackgroundTasks = None):
+    """
+    Optimize dataset cache by collecting all cache files to a single zarr archive.
+    """
+    dataset = get_dataset_or_404(dataset_id)
+    background_tasks.add_task(cache.optimize_dataset_cache, dataset)
+    return {'status': 'Dataset cache optimization submitted for processing'}
 
 @router.get("/{dataset_id}/{period_type}/orgunits", response_model=list)
 def get_dataset_period_type_org_units(dataset_id: str, period_type: str, start: str, end: str, temporal_aggregation: str, spatial_aggregation: str):
