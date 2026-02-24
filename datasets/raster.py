@@ -103,6 +103,12 @@ def to_timeperiod(ds, dataset, period_type, statistic, timezone_offset=0):
     # apply the original mask in case the aggregation turned nan values to 0s
     ds = xr.where(valid, ds, None)
 
+    # IMPORTANT: compute to avoid slow dask graphs
+    ds = ds.compute()
+
+    # convert back to dataset
+    ds = ds.to_dataset()
+
     # return
     return ds
 
@@ -116,8 +122,9 @@ def to_features(ds, dataset, features, statistic):
     gdf = gpd.read_file(json.dumps(features))
 
     # aggregate
+    varname = dataset['variable']
     ds = transforms.spatial.reduce(
-        ds,
+        ds[varname],
         gdf,
         mask_dim="id", # TODO: DONT HARDCODE
         how=statistic,
