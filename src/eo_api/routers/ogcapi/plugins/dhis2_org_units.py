@@ -6,7 +6,7 @@ from typing import Any
 import httpx
 from geojson_pydantic import Feature, FeatureCollection
 from geojson_pydantic.geometries import Geometry
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pygeoapi.provider.base import BaseProvider, SchemaType
 
 DHIS2_BASE_URL = "https://play.im.dhis2.org/dev/api"
@@ -29,11 +29,11 @@ class DHIS2OrgUnit(BaseModel):
 class OrgUnitProperties(BaseModel):
     """Feature properties for a DHIS2 org unit."""
 
-    name: str | None = None
-    code: str | None = None
-    shortName: str | None = None
-    level: int | None = None
-    openingDate: str | None = None
+    name: str | None = Field(None, title="Name")
+    code: str | None = Field(None, title="Code")
+    shortName: str | None = Field(None, title="Short name")
+    level: int | None = Field(None, title="Level")
+    openingDate: str | None = Field(None, title="Opening date")
 
 
 def _schema_to_fields(model: type[BaseModel]) -> dict[str, dict[str, str]]:
@@ -46,7 +46,10 @@ def _schema_to_fields(model: type[BaseModel]) -> dict[str, dict[str, str]]:
             field_type = types[0]["type"] if types else "string"
         else:
             field_type = prop.get("type", "string")
-        fields[name] = {"type": field_type}
+        field_def: dict[str, str] = {"type": field_type}
+        if "title" in prop:
+            field_def["title"] = prop["title"]
+        fields[name] = field_def
     return fields
 
 
