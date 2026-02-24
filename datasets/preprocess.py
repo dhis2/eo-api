@@ -1,10 +1,16 @@
+import logging
 
 import xarray as xr
+
+
+# logger
+logger = logging.getLogger(__name__)
+
 
 def deaccumulate_era5(ds_cumul):
     '''Convert ERA5 cumulative hourly data to incremental hourly data'''
 
-    print('Deaccumulating ERA5 dataset')
+    logger.info('Deaccumulating ERA5 dataset')
     # NOTE: this is hardcoded to era5 specific cumulative patterns and varnames
     
     # shift all values to previous hour, so the values don't spill over to the next day

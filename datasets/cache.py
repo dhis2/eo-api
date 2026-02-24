@@ -1,6 +1,7 @@
 import atexit
 import importlib
 import inspect
+import logging
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
@@ -10,6 +11,9 @@ import numpy as np
 from . import registry
 from .utils import get_time_dim, get_lon_lat_dims, numpy_period_string
 from constants import BBOX, COUNTRY_CODE
+
+# logger
+logger = logging.getLogger(__name__)
 
 # paths
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -27,7 +31,7 @@ def build_dataset_cache(dataset_id, start, end, overwrite):
     cache_info = dataset['cacheInfo']
     eo_download_func_path = cache_info['eoFunction']
     eo_download_func = get_dynamic_function(eo_download_func_path)
-    #print(eo_download_func_path, eo_download_func)
+    #logger.info(eo_download_func_path, eo_download_func)
 
     # construct standard params
     params = cache_info['defaultParams']
@@ -47,7 +51,7 @@ def build_dataset_cache(dataset_id, start, end, overwrite):
         params['country_code'] = COUNTRY_CODE
 
     # execute the download
-    #print(params)
+    #logger.info(params)
     CACHE_WORKER.submit(eo_download_func, **params)
 
 def get_cache_info(dataset):

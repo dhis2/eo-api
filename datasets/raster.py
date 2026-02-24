@@ -1,4 +1,5 @@
 import json
+import logging
 
 import xarray as xr
 import geopandas as gpd
@@ -10,10 +11,14 @@ from . import cache
 from .utils import get_time_dim
 
 
+# logger
+logger = logging.getLogger(__name__)
+
+
 def get_data(dataset, start, end):
     '''Get xarray raster dataset for given time range'''
     # load xarray from cache
-    print('Accessing dataset')
+    logger.info('Accessing dataset')
     files = cache.get_cache_files(dataset)
     ds = xr.open_mfdataset(
         files,
@@ -38,7 +43,7 @@ def get_data(dataset, start, end):
 def to_timeperiod(ds, dataset, period_type, statistic, timezone_offset=0):
     '''Aggregate given xarray dataset to another period type'''
 
-    print(f'Aggregating period type from {dataset["periodType"]} to {period_type}')
+    logger.info(f'Aggregating period type from {dataset["periodType"]} to {period_type}')
 
     varname = dataset['variable']
     time_dim = get_time_dim(ds)
@@ -89,7 +94,7 @@ def to_timeperiod(ds, dataset, period_type, statistic, timezone_offset=0):
 def to_features(ds, dataset, features, statistic):
     '''Aggregate given xarray to geojson features and return pandas dataframe'''
 
-    print('Aggregating to org units')
+    logger.info('Aggregating to org units')
 
     # load geojson as geopandas
     gdf = gpd.read_file(json.dumps(features))

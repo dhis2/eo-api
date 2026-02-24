@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from titiler.core.factory import (TilerFactory,  MultiBaseTilerFactory)
 from rio_tiler.io import STACReader
@@ -6,6 +8,14 @@ from starlette.middleware.cors import CORSMiddleware
 
 from datasets.api import router as datasets_router
 
+# show info logs
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s     %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+
+# main api
 app = FastAPI()
 
 # Bsed on: 
