@@ -1,50 +1,22 @@
-"""DHIS2 Organization Units feature provider for pygeoapi."""
+"""DHIS2 Organization Units feature provider with CQL filter support."""
 
 from typing import Any
 
-import httpx
 from geojson_pydantic import FeatureCollection
 from pygeoapi.provider.base import BaseProvider, SchemaType
+from pygeofilter.backends.native.evaluate import NativeEvaluator
 
 from eo_api.routers.ogcapi.plugins.dhis2_common import (
-    DHIS2_AUTH,
-    DHIS2_BASE_URL,
     OrgUnitProperties,
     fetch_org_units,
-    flatten_coords,
     get_single_org_unit,
     org_unit_to_feature,
     schema_to_fields,
 )
 
 
-def _fetch_bbox() -> list[float] | None:
-    """Compute bounding box from level-1 org unit geometries."""
-    response = httpx.get(
-        f"{DHIS2_BASE_URL}/organisationUnits",
-        params={
-            "paging": "false",
-            "fields": "geometry",
-            "filter": "level:eq:1",
-        },
-        auth=DHIS2_AUTH,
-        follow_redirects=True,
-    )
-    response.raise_for_status()
-    all_coords: list[list[float]] = []
-    for ou in response.json()["organisationUnits"]:
-        geom = ou.get("geometry")
-        if geom and geom.get("coordinates"):
-            all_coords.extend(flatten_coords(geom["coordinates"]))
-    if not all_coords:
-        return None
-    xs = [c[0] for c in all_coords]
-    ys = [c[1] for c in all_coords]
-    return [min(xs), min(ys), max(xs), max(ys)]
-
-
-class DHIS2OrgUnitsProvider(BaseProvider):
-    """DHIS2 Organization Units Provider."""
+class DHIS2OrgUnitsCqlProvider(BaseProvider):
+    """DHIS2 Organization Units Provider with CQL filter support."""
 
     def __init__(self, provider_def: dict[str, Any]) -> None:
         """Inherit from parent class."""
@@ -72,16 +44,24 @@ class DHIS2OrgUnitsProvider(BaseProvider):
         sortby: list[str] | None = None,
         select_properties: list[str] | None = None,
         skip_geometry: bool = False,
+        filterq: list | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Return feature collection matching the query parameters."""
         org_units = fetch_org_units()
-        number_matched = len(org_units)
-        page = org_units[offset : offset + limit]
+        features = [org_unit_to_feature(ou).model_dump() for ou in org_units]
+
+        if filterq:
+            evaluator = NativeEvaluator(use_getattr=False)
+            match = evaluator.evaluate(filterq)
+            features = [f for f in features if match(f["properties"])]
+
+        number_matched = len(features)
+        page = features[offset : offset + limit]
 
         fc = FeatureCollection(
             type="FeatureCollection",
-            features=[org_unit_to_feature(ou) for ou in page],
+            features=page,
         )
         result = fc.model_dump()
         result["numberMatched"] = number_matched
