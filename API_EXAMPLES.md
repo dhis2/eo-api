@@ -12,6 +12,44 @@ http://127.0.0.1:8000/
 curl "http://127.0.0.1:8000/"
 ```
 
+## Collection -> Process -> Job (Recommended Pipeline)
+
+Use this flow for OGC-style discovery then computation.
+
+```bash
+BASE="http://127.0.0.1:8000"
+
+# 1) Discover collection and linked process routes
+curl -s "$BASE/collections/chirps-daily" | jq '{
+  id,
+  links: [.links[] | select(.rel=="process" or .rel=="process-execute") | {rel, href}]
+}'
+
+# 2) Execute zonal stats for that dataset
+JOB_ID=$(curl -s -X POST "$BASE/processes/raster.zonal_stats/execution" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputs": {
+      "dataset_id": "chirps-daily",
+      "params": ["precip"],
+      "time": "2026-01-31",
+      "aoi": [30.0, -10.0, 31.0, -9.0],
+      "aggregation": "mean"
+    }
+  }' | jq -r '.jobId')
+
+echo "$JOB_ID"
+
+# 3) Inspect computed result
+curl -s "$BASE/jobs/$JOB_ID" | jq '{
+  processId,
+  status,
+  from_cache: .outputs.from_cache,
+  row: .outputs.rows[0],
+  implementation: .outputs.implementation
+}'
+```
+
 ## Landing page runtime summary
 
 Operator-focused view:
@@ -170,78 +208,63 @@ http://127.0.0.1:8000/processes
 curl "http://127.0.0.1:8000/processes"
 ```
 
-Describe aggregate-import process:
+Describe zonal-stats process:
 
-http://127.0.0.1:8000/processes/eo-aggregate-import
+http://127.0.0.1:8000/processes/raster.zonal_stats
 
 ```bash
-curl "http://127.0.0.1:8000/processes/eo-aggregate-import"
+curl "http://127.0.0.1:8000/processes/raster.zonal_stats"
 ```
 
-Execute aggregate-import process (dry-run):
+Run zonal-stats process:
 
-http://127.0.0.1:8000/processes/eo-aggregate-import/execution
+http://127.0.0.1:8000/processes/raster.zonal_stats/execution
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/processes/eo-aggregate-import/execution" \
+curl -X POST "http://127.0.0.1:8000/processes/raster.zonal_stats/execution" \
 	-H "Content-Type: application/json" \
 	-d '{
 		"inputs": {
-			"datasetId": "chirps-daily",
-			"parameters": ["precip"],
-			"datetime": "2026-01-31T00:00:00Z",
-			"orgUnitLevel": 2,
-			"aggregation": "mean",
-			"dhis2": {
-				"dataElementId": "<INSERT-DATA-ELEMENT-ID>",
-				"dryRun": true
-			}
+			"dataset_id": "chirps-daily",
+			"params": ["precip"],
+			"time": "2026-01-31",
+			"aoi": [30.0, -10.0, 31.0, -9.0],
+			"aggregation": "mean"
 		}
 	}'
 ```
 
-Execute xclim CDD process (dry-run):
+Run point-timeseries process:
 
-http://127.0.0.1:8000/processes/xclim-cdd/execution
+http://127.0.0.1:8000/processes/raster.point_timeseries/execution
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/processes/xclim-cdd/execution" \
+curl -X POST "http://127.0.0.1:8000/processes/raster.point_timeseries/execution" \
 	-H "Content-Type: application/json" \
 	-d '{
 		"inputs": {
-			"datasetId": "chirps-daily",
-			"parameter": "precip",
-			"start": "2026-01-01",
-			"end": "2026-01-31",
-			"orgUnitLevel": 2,
-			"threshold": { "value": 1.0, "unit": "mm/day" },
-			"dhis2": {
-				"dataElementId": "<INSERT-CDD-DATA-ELEMENT-ID>",
-				"dryRun": true
-			}
+			"dataset_id": "chirps-daily",
+			"params": ["precip"],
+			"time": "2026-01-31",
+			"aoi": {"bbox": [30.0, -10.0, 32.0, -8.0]}
 		}
 	}'
 ```
 
-Execute xclim warm-days process (dry-run):
+Run temporal-aggregate (harmonization) process:
 
-http://127.0.0.1:8000/processes/xclim-warm-days/execution
+http://127.0.0.1:8000/processes/data.temporal_aggregate/execution
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/processes/xclim-warm-days/execution" \
+curl -X POST "http://127.0.0.1:8000/processes/data.temporal_aggregate/execution" \
 	-H "Content-Type: application/json" \
 	-d '{
 		"inputs": {
-			"datasetId": "era5-land-daily",
-			"parameter": "2m_temperature",
-			"start": "2026-01-01",
-			"end": "2026-01-31",
-			"orgUnitLevel": 2,
-			"threshold": { "value": 35.0, "unit": "degC" },
-			"dhis2": {
-				"dataElementId": "<INSERT-WARM-DAYS-DATA-ELEMENT-ID>",
-				"dryRun": true
-			}
+			"dataset_id": "chirps-daily",
+			"params": ["precip"],
+			"time": "2026-01-31",
+			"frequency": "P1M",
+			"aggregation": "sum"
 		}
 	}'
 ```
@@ -262,6 +285,21 @@ http://127.0.0.1:8000/features/aggregated-results/items?jobId=<JOB_ID>
 curl "http://127.0.0.1:8000/features/aggregated-results/items?jobId=<JOB_ID>"
 ```
 
+Collection-first, process-next (full-circle) quick check:
+
+```bash
+# 1) Discover dataset and process links
+curl -s "http://127.0.0.1:8000/collections/chirps-daily" | jq '.links[] | select(.rel=="process" or .rel=="process-execute")'
+
+# 2) Execute process for that dataset
+JOB_ID=$(curl -s -X POST "http://127.0.0.1:8000/processes/raster.zonal_stats/execution" \
+  -H "Content-Type: application/json" \
+  -d '{"inputs":{"dataset_id":"chirps-daily","params":["precip"],"time":"2026-01-31","aoi":[30.0,-10.0,31.0,-9.0]}}' | jq -r '.jobId')
+
+# 3) Inspect computed output
+curl -s "http://127.0.0.1:8000/jobs/$JOB_ID" | jq '.outputs.rows, .outputs.implementation'
+```
+
 ## Workflows (`/workflows`)
 
 Create a custom workflow with two steps:
@@ -275,37 +313,28 @@ curl -X POST "http://127.0.0.1:8000/workflows" \
 		"name": "climate-indicators-workflow",
 		"steps": [
 			{
-				"name": "aggregate-precip",
-				"processId": "eo-aggregate-import",
+				"name": "zonal",
+				"processId": "raster.zonal_stats",
 				"payload": {
 					"inputs": {
-						"datasetId": "chirps-daily",
-						"parameters": ["precip"],
-						"datetime": "2026-01-31T00:00:00Z",
-						"orgUnitLevel": 2,
+						"dataset_id": "chirps-daily",
+						"params": ["precip"],
+						"time": "2026-01-31",
+						"aoi": [30.0, -10.0, 31.0, -9.0],
 						"aggregation": "mean",
-						"dhis2": {
-							"dataElementId": "<INSERT-DATA-ELEMENT-ID>",
-							"dryRun": true
-						}
+						"frequency": "P1M"
 					}
 				}
 			},
 			{
-				"name": "cdd",
-				"processId": "xclim-cdd",
+				"name": "timeseries",
+				"processId": "raster.point_timeseries",
 				"payload": {
 					"inputs": {
-						"datasetId": "chirps-daily",
-						"parameter": "precip",
-						"start": "2026-01-01",
-						"end": "2026-01-31",
-						"orgUnitLevel": 2,
-						"threshold": { "value": 1.0, "unit": "mm/day" },
-						"dhis2": {
-							"dataElementId": "<INSERT-CDD-DATA-ELEMENT-ID>",
-							"dryRun": true
-						}
+						"dataset_id": "chirps-daily",
+						"params": ["precip"],
+						"time": "2026-01-31",
+						"aoi": {"bbox": [30.0, -10.0, 32.0, -8.0]}
 					}
 				}
 			}
@@ -331,7 +360,7 @@ curl -X POST "http://127.0.0.1:8000/workflows/<WORKFLOW_ID>/run"
 
 ## Schedules (`/schedules`)
 
-Schedules allow user-defined recurring execution of `eo-aggregate-import` (for example nightly imports).
+Schedules allow user-defined recurring execution of a process or workflow.
 
 Create a nightly schedule:
 
@@ -341,20 +370,18 @@ http://127.0.0.1:8000/schedules
 curl -X POST "http://127.0.0.1:8000/schedules" \
 	-H "Content-Type: application/json" \
 	-d '{
-		"name": "nightly-precip-import",
+		"name": "nightly-zonal-stats",
 		"cron": "0 0 * * *",
 		"timezone": "UTC",
 		"enabled": true,
+		"processId": "raster.zonal_stats",
 		"inputs": {
-			"datasetId": "chirps-daily",
-			"parameters": ["precip"],
-			"datetime": "2026-01-31T00:00:00Z",
-			"orgUnitLevel": 2,
+			"dataset_id": "chirps-daily",
+			"params": ["precip"],
+			"time": "2026-01-31",
+			"aoi": [30.0, -10.0, 31.0, -9.0],
 			"aggregation": "mean",
-			"dhis2": {
-				"dataElementId": "<INSERT-DATA-ELEMENT-ID>",
-				"dryRun": true
-			}
+			"frequency": "P1M"
 		}
 	}'
 ```
