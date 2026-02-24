@@ -87,6 +87,16 @@ metadata:
     role: pointOfContact
 
 resources:
+  dhis2-org-units:
+    type: collection
+    title: DHIS2 Org Units
+    description: Get organization units from DHIS2
+    providers:
+      - type: feature
+        name: plugins.dhis2orgUnits.DHIS2OrgUnitsProvider
+        data: tests/data/
+        id_field: id
+
   obs:
     type: collection
     title: Observations
