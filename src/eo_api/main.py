@@ -10,9 +10,8 @@ load_dotenv()
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from pygeoapi.starlette_app import APP as pygeoapi_app  # noqa: E402
 
-from eo_api.routers import cog, root  # noqa: E402
+from eo_api.routers import cog, ogcapi, root  # noqa: E402
 
 app = FastAPI()
 
@@ -26,4 +25,4 @@ app.add_middleware(
 
 app.include_router(root.router)
 app.include_router(cog.router, prefix="/cog", tags=["Cloud Optimized GeoTIFF"])
-app.mount(path="/ogcapi", app=pygeoapi_app)
+app.mount(path="/ogcapi", app=ogcapi.app)

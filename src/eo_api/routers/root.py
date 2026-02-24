@@ -2,12 +2,12 @@
 
 from fastapi import APIRouter
 
-from eo_api.schemas import MessageResponse
+from eo_api.schemas import StatusMessage
 
 router = APIRouter()
 
 
 @router.get("/")
-def read_index() -> MessageResponse:
+def read_index() -> StatusMessage:
     """Return a welcome message for the root endpoint."""
-    return MessageResponse(message="Welcome to DHIS2 EO API")
+    return StatusMessage(message="Welcome to DHIS2 EO API")

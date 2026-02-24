@@ -3,7 +3,7 @@
 from pydantic import BaseModel
 
 
-class MessageResponse(BaseModel):
-    """Generic message response."""
+class StatusMessage(BaseModel):
+    """Simple status message response."""
 
     message: str
