@@ -31,5 +31,8 @@ jobs:
       - name: Run linting
         run: make lint
 
+      - name: Generate OpenAPI spec
+        run: make openapi
+
       - name: Run tests
         run: make test
