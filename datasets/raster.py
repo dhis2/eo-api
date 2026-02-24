@@ -43,10 +43,23 @@ def get_data(dataset, start, end):
 def to_timeperiod(ds, dataset, period_type, statistic, timezone_offset=0):
     '''Aggregate given xarray dataset to another period type'''
 
-    logger.info(f'Aggregating period type from {dataset["periodType"]} to {period_type}')
-
+    # NOTE: This function converts dataset with multiple variables to dataarray for single variable
+    # ...so downstream functions have to consider that
+    # TODO: Should probably change this.
     varname = dataset['variable']
     time_dim = get_time_dim(ds)
+
+    # validate period types
+    valid_period_types = ['hourly', 'monthly', 'yearly']
+    if period_type not in valid_period_types:
+        raise ValueError(f'Period type not supported: {period_type}')
+    
+    # return early if no change
+    if dataset['periodType'] == period_type:
+        return ds[varname]
+
+    # begin
+    logger.info(f'Aggregating period type from {dataset["periodType"]} to {period_type}')
 
     # remember mask of valid pixels from original dataset (only one time point needed)
     valid = ds[varname].isel({time_dim: 0}).notnull()
@@ -83,6 +96,9 @@ def to_timeperiod(ds, dataset, period_type, statistic, timezone_offset=0):
         
         else:
             raise Exception(f'Unsupported period aggregation from {dataset["periodType"]} to {period_type}')
+        
+    else:
+        raise Exception(f'Unsupported period aggregation from {dataset["periodType"]} to {period_type}')
         
     # apply the original mask in case the aggregation turned nan values to 0s
     ds = xr.where(valid, ds, None)
