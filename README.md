@@ -55,6 +55,7 @@ This app demonstrates creating and running scheduled imports (for example nightl
   - Runtime summary example for `GET /`: [`API_EXAMPLES.md#landing-page-runtime-summary`](API_EXAMPLES.md#landing-page-runtime-summary)
 - Project presentation deck: [`PRESENTATION.md`](PRESENTATION.md)
 - Executive presentation deck (10 slides): [`PRESENTATION_EXECUTIVE.md`](PRESENTATION_EXECUTIVE.md)
+- Orchestration tool decision scorecard: [`ORCHESTRATION_DECISION.md`](ORCHESTRATION_DECISION.md)
 - Dataset schema and resolver conventions: [`eoapi/datasets/README.md`](eoapi/datasets/README.md)
 - Product requirements and scope: [`PRD.md`](PRD.md)
 - Prefect orchestration design: [`PREFECT_INTEGRATION.md`](PREFECT_INTEGRATION.md)

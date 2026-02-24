@@ -109,6 +109,27 @@ Outputs include:
 
 ---
 
+# 6b) Orchestrator scorecard (weighted)
+
+Scoring basis:
+- 1–5 score scale across API fit, time to production, ops overhead, reliability, governance, dev speed, scale, and cost.
+
+| Option | Weighted total (/100) |
+|---|---:|
+| Prefect | **87** |
+| Dagster | 68 |
+| Airflow | 67 |
+| Temporal | 66 |
+| Argo Workflows | 61 |
+| Internal scheduler only | 59 |
+
+Decision for current phase:
+- Choose **Prefect** as primary orchestrator.
+- Keep internal scheduler as fallback.
+- Re-evaluate if enterprise governance constraints become dominant.
+
+---
+
 # 7) Operational resilience
 
 - Durable local persistence for jobs/schedules/workflows
