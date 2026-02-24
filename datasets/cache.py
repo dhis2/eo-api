@@ -23,10 +23,7 @@ CACHE_DIR = SCRIPT_DIR / 'cache'
 CACHE_WORKER = ThreadPoolExecutor(max_workers=1)
 atexit.register(CACHE_WORKER.shutdown, wait=True, cancel_futures=True)
 
-def build_dataset_cache(dataset_id, start, end, overwrite):
-    # get dataset
-    dataset = registry.get_dataset(dataset_id)
-
+def build_dataset_cache(dataset, start, end, overwrite):
     # get download function
     cache_info = dataset['cacheInfo']
     eo_download_func_path = cache_info['eoFunction']

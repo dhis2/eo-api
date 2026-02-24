@@ -20,14 +20,20 @@ def list_datasets():
     datasets = registry.list_datasets()
     return datasets
 
+def get_dataset_or_404(dataset_id: str):
+    dataset = registry.get_dataset(dataset_id)
+    if not dataset:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+    return dataset
+
 @router.get("/{dataset_id}", response_model=dict)
 def get_dataset(dataset_id: str):
     """
     Get a single dataset by ID.
     """
-    dataset = registry.get_dataset_with_cache_info(dataset_id)
-    if not dataset:
-        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+    dataset = get_dataset_or_404(dataset_id)
+    cache_info = cache.get_cache_info(dataset)
+    dataset.update(cache_info)
     return dataset
 
 @router.get("/{dataset_id}/build_cache", response_model=dict)
@@ -35,7 +41,8 @@ def build_dataset_cache(dataset_id: str, start: str, end: str, overwrite: bool =
     """
     Download and cache dataset.
     """
-    cache.build_dataset_cache(dataset_id, start=start, end=end, overwrite=overwrite)
+    dataset = get_dataset_or_404(dataset_id)
+    cache.build_dataset_cache(dataset, start=start, end=end, overwrite=overwrite)
     return {'status': 'Dataset caching request submitted for processing'}
 
 @router.get("/{dataset_id}/{period_type}/orgunits", response_model=list)
@@ -44,7 +51,7 @@ def get_dataset_period_type_org_units(dataset_id: str, period_type: str, start: 
     Get a dataset dynamically aggregated to a given period type and org units and return json values.
     """
     # get dataset metadata
-    dataset = registry.get_dataset(dataset_id)
+    dataset = get_dataset_or_404(dataset_id)
     
     # get raster data
     ds = raster.get_data(dataset, start, end)
@@ -68,7 +75,7 @@ def get_dataset_period_type_raster(dataset_id: str, period_type: str, start: str
     Get a dataset dynamically aggregated to a given period type and return as downloadable raster file.
     """
     # get dataset metadata
-    dataset = registry.get_dataset(dataset_id)
+    dataset = get_dataset_or_404(dataset_id)
     
     # get raster data
     ds = raster.get_data(dataset, start, end)
