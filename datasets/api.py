@@ -66,7 +66,7 @@ def get_dataset_period_type_org_units(dataset_id: str, period_type: str, start: 
     df = raster.to_features(ds, dataset, features=constants.ORG_UNITS_GEOJSON, statistic=spatial_aggregation)
 
     # serialize to json
-    data = serialize.dataframe_to_json_data(df, dataset)
+    data = serialize.dataframe_to_json_data(df, dataset, period_type)
     return data
 
 @router.get("/{dataset_id}/{period_type}/raster")

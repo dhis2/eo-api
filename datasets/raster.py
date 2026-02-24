@@ -50,7 +50,7 @@ def to_timeperiod(ds, dataset, period_type, statistic, timezone_offset=0):
     time_dim = get_time_dim(ds)
 
     # validate period types
-    valid_period_types = ['hourly', 'monthly', 'yearly']
+    valid_period_types = ['hourly', 'daily', 'monthly', 'yearly']
     if period_type not in valid_period_types:
         raise ValueError(f'Period type not supported: {period_type}')
     

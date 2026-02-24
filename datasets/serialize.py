@@ -5,22 +5,30 @@ from dhis2eo.integrations.pandas import dataframe_to_dhis2_json
 
 from .utils import get_time_dim
 
-def dataframe_to_json_data(df, dataset):
+def dataframe_to_json_data(df, dataset, period_type):
     time_dim = get_time_dim(df)
     varname = dataset['variable']
 
-    # pretend its a dhis2 payload json
-    data = dataframe_to_dhis2_json(
-        df, 
-        data_element_id='dummy', 
-        org_unit_col='id', 
-        period_col=time_dim, 
-        value_col=varname, 
-    )['dataValues']
+    # create smaller dataframe with known columns
+    temp_df = df[[time_dim, "id", varname]].rename(columns={time_dim:'period', 'id':'orgunit', varname:'value'})
+    
+    # convert period string depending on period type
+    def convert_to_period_string(column, period_type):
+        if period_type == "hourly":
+            return column.dt.strftime('%Y-%m-%dT%H')
 
-    # but remove the data element id which is not needed
-    for item in data:
-        del item['dataElement']
+        if period_type == "daily":
+            return column.dt.strftime('%Y-%m-%d')
+
+        if period_type == "monthly":
+            return column.dt.strftime('%Y-%m')
+        
+        if period_type == "yearly":
+            return column.dt.strftime('%Y')
+    temp_df['period'] = convert_to_period_string(temp_df['period'], period_type)
+
+    # convert to list of json dicts
+    data = temp_df.to_dict(orient="records")
 
     # return
     return data
