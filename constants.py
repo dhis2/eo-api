@@ -1,8 +1,9 @@
-
 import json
+import geopandas as gpd
 
 # constants for org units bbox and country code (hacky hardcoded for now)
 # TODO: these should be defined differently or retrieved from DHIS2 connection
-BBOX = [-13.25, 6.79, -10.23, 10.05]
-COUNTRY_CODE = 'SLE'
-ORG_UNITS_GEOJSON = json.load(open('sierra-leone-districts.geojson'))
+GEOJSON_FILE = 'brazil-regions.geojson'
+COUNTRY_CODE = 'BRA'
+ORG_UNITS_GEOJSON = json.load(open(GEOJSON_FILE))
+BBOX = map(float, gpd.read_file(GEOJSON_FILE).total_bounds)

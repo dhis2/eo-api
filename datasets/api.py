@@ -37,7 +37,7 @@ def get_dataset(dataset_id: str):
     return dataset
 
 @router.get("/{dataset_id}/build_cache", response_model=dict)
-def build_dataset_cache(dataset_id: str, start: str, end: str, overwrite: bool = False):
+def build_dataset_cache(dataset_id: str, start: str, end: str | None = None, overwrite: bool = False):
     """
     Download and cache dataset.
     """

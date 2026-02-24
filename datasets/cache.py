@@ -2,6 +2,7 @@ import atexit
 import importlib
 import inspect
 import logging
+import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
@@ -34,7 +35,7 @@ def build_dataset_cache(dataset, start, end, overwrite):
     params = cache_info['defaultParams']
     params.update({
         'start': start,
-        'end': end,
+        'end': end or datetime.date.today().isoformat(),  # todays date if empty
         'dirname': CACHE_DIR,
         'prefix': get_cache_prefix(dataset),
         'overwrite': overwrite,
