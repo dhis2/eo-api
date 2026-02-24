@@ -258,6 +258,46 @@ paths:
       summary: Collections
       tags:
       - server
+  /collections/chirps-precipitation:
+    get:
+      description: CHIRPS v3 daily precipitation
+      operationId: describeChirps-precipitationCollection
+      parameters:
+      - $ref: '#/components/parameters/f'
+      - $ref: '#/components/parameters/lang'
+      responses:
+        '200':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/Collection
+        '400':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/InvalidParameter
+        '404':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/NotFound
+        '500':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
+      summary: Get CHIRPS v3 daily precipitation metadata
+      tags:
+      - chirps-precipitation
+  /collections/chirps-precipitation/coverage:
+    get:
+      description: CHIRPS v3 daily precipitation
+      operationId: getChirps-precipitationCoverage
+      parameters:
+      - $ref: '#/components/parameters/lang'
+      - $ref: '#/components/parameters/f'
+      - $ref: '#/components/parameters/bbox'
+      - $ref: '#/components/parameters/bbox-crs'
+      responses:
+        '200':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/Features
+        '400':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/InvalidParameter
+        '404':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/NotFound
+        '500':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
+      summary: Get CHIRPS v3 daily precipitation coverage
+      tags:
+      - chirps-precipitation
   /collections/dhis2-org-units:
     get:
       description: Get organization units from DHIS2
@@ -274,7 +314,7 @@ paths:
           $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/NotFound
         '500':
           $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
-      summary: Get DHIS2 Org Units metadata
+      summary: Get DHIS2 organization units metadata
       tags:
       - dhis2-org-units
   /collections/dhis2-org-units/items:
@@ -324,7 +364,7 @@ paths:
           $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/NotFound
         '500':
           $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
-      summary: Get DHIS2 Org Units items
+      summary: Get DHIS2 organization units items
       tags:
       - dhis2-org-units
     options:
@@ -333,7 +373,7 @@ paths:
       responses:
         '200':
           description: options response
-      summary: Options for DHIS2 Org Units items
+      summary: Options for DHIS2 organization units items
       tags:
       - dhis2-org-units
     post:
@@ -353,7 +393,7 @@ paths:
           $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/InvalidParameter
         '500':
           $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
-      summary: Get DHIS2 Org Units items with CQL2
+      summary: Get DHIS2 organization units items with CQL2
       tags:
       - dhis2-org-units
   /collections/dhis2-org-units/items/{featureId}:
@@ -374,7 +414,7 @@ paths:
           $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/NotFound
         '500':
           $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
-      summary: Get DHIS2 Org Units item by id
+      summary: Get DHIS2 organization units item by id
       tags:
       - dhis2-org-units
     options:
@@ -385,9 +425,49 @@ paths:
       responses:
         '200':
           description: options response
-      summary: Options for DHIS2 Org Units item by id
+      summary: Options for DHIS2 organization units item by id
       tags:
       - dhis2-org-units
+  /collections/era5-land:
+    get:
+      description: ERA5-Land hourly data on single levels from 1981 to present
+      operationId: describeEra5-landCollection
+      parameters:
+      - $ref: '#/components/parameters/f'
+      - $ref: '#/components/parameters/lang'
+      responses:
+        '200':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/Collection
+        '400':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/InvalidParameter
+        '404':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/NotFound
+        '500':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
+      summary: Get ERA5-Land hourly metadata
+      tags:
+      - era5-land
+  /collections/era5-land/coverage:
+    get:
+      description: ERA5-Land hourly data on single levels from 1981 to present
+      operationId: getEra5-landCoverage
+      parameters:
+      - $ref: '#/components/parameters/lang'
+      - $ref: '#/components/parameters/f'
+      - $ref: '#/components/parameters/bbox'
+      - $ref: '#/components/parameters/bbox-crs'
+      responses:
+        '200':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/Features
+        '400':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/InvalidParameter
+        '404':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/NotFound
+        '500':
+          $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
+      summary: Get ERA5-Land hourly coverage
+      tags:
+      - era5-land
   /collections/gdps-temperature:
     get:
       description: Global Deterministic Prediction System sample
@@ -1139,6 +1219,10 @@ tags:
   name: server
 - description: Get organization units from DHIS2
   name: dhis2-org-units
+- description: CHIRPS v3 daily precipitation
+  name: chirps-precipitation
+- description: ERA5-Land hourly data on single levels from 1981 to present
+  name: era5-land
 - description: My cool observations
   name: obs
 - description: lakes of the world, public domain

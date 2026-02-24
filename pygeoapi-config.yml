@@ -89,13 +89,62 @@ metadata:
 resources:
   dhis2-org-units:
     type: collection
-    title: DHIS2 Org Units
+    title: DHIS2 organization units
     description: Get organization units from DHIS2
+    keywords:
+      - dhis2
+    extents:
+      spatial:
+        bbox: [-180, -90, 180, 90]
+        crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84
     providers:
       - type: feature
         name: plugins.dhis2orgUnits.DHIS2OrgUnitsProvider
         data: tests/data/
         id_field: id
+
+  chirps-precipitation:
+    type: collection
+    title: CHIRPS v3 daily precipitation
+    description: CHIRPS v3 daily precipitation
+    keywords:
+      - chirps
+      - precipitation
+    extents:
+      spatial:
+        bbox: [-180, -60, 180, 60]
+        crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84
+    links:
+      - type: text/html
+        rel: canonical
+        title: information
+        href: https://www.chc.ucsb.edu/data/chirps3
+        hreflang: en-EN
+    providers:
+      - type: coverage
+        name: plugins.dhis2eo.DHIS2EOProvider
+        data: tests/data/
+
+  era5-land:
+    type: collection
+    title: ERA5-Land hourly
+    description: ERA5-Land hourly data on single levels from 1981 to present
+    keywords:
+      - era5
+    extents:
+      spatial:
+        bbox: [-180, -90, 180, 90]
+        crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84
+    links:
+      - type: text/html
+        rel: canonical
+        title: information
+        href: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land
+        hreflang: en-EN
+    providers:
+      - type: coverage
+        name: plugins.dhis2eo.DHIS2EOProvider
+        data: tests/data/
 
   obs:
     type: collection

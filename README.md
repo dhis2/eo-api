@@ -42,7 +42,13 @@ uvicorn main:app --reload
 - `make sync` — install dependencies with uv
 - `make run` — start the app with uv
 
-### Update pygeoapi-openapi.yml
+### pygeoapi instructions
+
+To validate the configuration:
+
+```
+pygeoapi config validate -c pygeoapi-config.yml`
+```
 
 Run after changes are made in pygeoapi-config.yml:
 
@@ -50,12 +56,6 @@ Run after changes are made in pygeoapi-config.yml:
 
 ```
 PYTHONPATH="$(pwd)" uv run pygeoapi openapi generate ./pygeoapi-config.yml > pygeoapi-openapi.yml
-```
-
-Or use:
-
-```
-make openapi
 ```
 
 ### Endpoints
