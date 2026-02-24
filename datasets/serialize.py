@@ -1,7 +1,7 @@
 
 from dhis2eo.integrations.pandas import dataframe_to_dhis2_json
 
-from .cache import get_time_dim
+from .utils import get_time_dim
 
 def dataframe_to_json_data(df, dataset):
     time_dim = get_time_dim(df)

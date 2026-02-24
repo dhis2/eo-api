@@ -7,7 +7,7 @@ from earthkit import transforms
 from . import preprocess
 from . import cache
 
-from .cache import get_time_dim
+from .utils import get_time_dim
 
 
 def get_data(dataset, start, end):
