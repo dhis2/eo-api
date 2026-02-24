@@ -277,60 +277,6 @@ paths:
       summary: Get CHIRPS v3 daily precipitation metadata
       tags:
       - chirps-precipitation
-  /collections/chirps-precipitation/area:
-    get:
-      description: CHIRPS v3 daily precipitation
-      operationId: queryAreaChirps-precipitation
-      parameters:
-      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/areaCoords.yaml
-      - $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/parameters/datetime
-      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/parameter-name.yaml
-      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/z.yaml
-      - $ref: '#/components/parameters/f'
-      responses:
-        '200':
-          content:
-            application/prs.coverage+json:
-              schema:
-                $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/schemas/coverageJSON.yaml
-          description: Response
-      summary: query CHIRPS v3 daily precipitation by area
-      tags:
-      - chirps-precipitation
-  /collections/chirps-precipitation/cube:
-    get:
-      description: CHIRPS v3 daily precipitation
-      operationId: queryCubeChirps-precipitation
-      parameters:
-      - description: Only features that have a geometry that intersects the bounding
-          box are selected.The bounding box is provided as four or six numbers, depending
-          on whether the coordinate reference system includes a vertical axis (height
-          or depth).
-        explode: false
-        in: query
-        name: bbox
-        required: true
-        schema:
-          items:
-            type: number
-          maxItems: 6
-          minItems: 4
-          type: array
-        style: form
-      - $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/parameters/datetime
-      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/parameter-name.yaml
-      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/z.yaml
-      - $ref: '#/components/parameters/f'
-      responses:
-        '200':
-          content:
-            application/prs.coverage+json:
-              schema:
-                $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/schemas/coverageJSON.yaml
-          description: Response
-      summary: query CHIRPS v3 daily precipitation by cube
-      tags:
-      - chirps-precipitation
   /collections/chirps-precipitation/position:
     get:
       description: CHIRPS v3 daily precipitation
@@ -498,62 +444,6 @@ paths:
         '500':
           $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/responses/ServerError
       summary: Get ERA5-Land hourly metadata
-      tags:
-      - era5-land
-  /collections/era5-land/area:
-    get:
-      description: ERA5-Land hourly data on single levels from 1981 to present
-      operationId: queryAreaEra5-land
-      parameters:
-      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/areaCoords.yaml
-      - $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/parameters/datetime
-      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/parameter-name.yaml
-      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/z.yaml
-      - $ref: '#/components/parameters/f'
-      responses:
-        '200':
-          content:
-            application/prs.coverage+json:
-              schema:
-                $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/schemas/coverageJSON.yaml
-          description: Response
-      summary: query ERA5-Land hourly data on single levels from 1981 to present by
-        area
-      tags:
-      - era5-land
-  /collections/era5-land/cube:
-    get:
-      description: ERA5-Land hourly data on single levels from 1981 to present
-      operationId: queryCubeEra5-land
-      parameters:
-      - description: Only features that have a geometry that intersects the bounding
-          box are selected.The bounding box is provided as four or six numbers, depending
-          on whether the coordinate reference system includes a vertical axis (height
-          or depth).
-        explode: false
-        in: query
-        name: bbox
-        required: true
-        schema:
-          items:
-            type: number
-          maxItems: 6
-          minItems: 4
-          type: array
-        style: form
-      - $ref: https://schemas.opengis.net/ogcapi/features/part1/1.0/openapi/ogcapi-features-1.yaml#/components/parameters/datetime
-      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/parameter-name.yaml
-      - $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/parameters/z.yaml
-      - $ref: '#/components/parameters/f'
-      responses:
-        '200':
-          content:
-            application/prs.coverage+json:
-              schema:
-                $ref: https://schemas.opengis.net/ogcapi/edr/1.0/openapi/schemas/coverageJSON.yaml
-          description: Response
-      summary: query ERA5-Land hourly data on single levels from 1981 to present by
-        cube
       tags:
       - era5-land
   /collections/era5-land/position:
@@ -1256,6 +1146,71 @@ paths:
       summary: Processes
       tags:
       - server
+  /processes/aggregation:
+    get:
+      description: Aggregate NetCDF values by GeoJSON features for each time point.
+      operationId: describeAggregationProcess
+      parameters:
+      - $ref: '#/components/parameters/f'
+      responses:
+        '200':
+          $ref: '#/components/responses/200'
+        default:
+          $ref: '#/components/responses/default'
+      summary: Get process metadata
+      tags:
+      - aggregation
+  /processes/aggregation/execution:
+    post:
+      description: Aggregate NetCDF values by GeoJSON features for each time point.
+      operationId: executeAggregationJob
+      parameters:
+      - description: Indicates client preferences, including whether the client is
+          capable of asynchronous processing.
+        in: header
+        name: Prefer
+        required: false
+        schema:
+          enum:
+          - respond-async
+          type: string
+      requestBody:
+        content:
+          application/json:
+            example:
+              inputs:
+                aggregation: mean
+                all_touched: false
+                feature_id_property: id
+                geojson:
+                  features: []
+                  type: FeatureCollection
+                netcdf: tests/data/chirps.nc
+                output_property: aggregated_values
+                time_dimension: time
+                variable: precip
+            schema:
+              $ref: https://schemas.opengis.net/ogcapi/processes/part1/1.0/openapi/schemas/execute.yaml
+        description: Mandatory execute request JSON
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+          description: Process output schema
+        '201':
+          $ref: https://schemas.opengis.net/ogcapi/processes/part1/1.0/openapi/responses/ExecuteAsync.yaml
+        '404':
+          $ref: https://schemas.opengis.net/ogcapi/processes/part1/1.0/openapi/responses/NotFound.yaml
+        '500':
+          $ref: https://schemas.opengis.net/ogcapi/processes/part1/1.0/openapi/responses/ServerError.yaml
+        default:
+          $ref: '#/components/responses/default'
+      summary: Process Time series zonal aggregation execution
+      tags:
+      - aggregation
   /processes/hello-world:
     get:
       description: An example process that takes a name as input, and echoes it back
