@@ -23,7 +23,24 @@ References:
 - Data publishing:     https://docs.pygeoapi.io/en/latest/data-publishing/
 """
 
+import logging
+
 from pygeoapi.starlette_app import APP as pygeoapi_app
+from pygeoapi.starlette_app import CONFIG
+
+from eo_api.routers.ogcapi.plugins.dhis2_org_units import _fetch_bbox
+
+logger = logging.getLogger(__name__)
+
+try:
+    bbox = _fetch_bbox()
+    if bbox is not None:
+        CONFIG["resources"]["dhis2-org-units"]["extents"]["spatial"]["bbox"] = [bbox]
+        logger.info("DHIS2 org-units bbox set to %s", bbox)
+    else:
+        logger.info("No level-1 org unit geometry found, skipping bbox")
+except Exception:
+    logger.warning("Failed to fetch DHIS2 bbox, using config default", exc_info=True)
 
 # pygeoapi exposes a ready-made Starlette app; we re-export it so the
 # main application can mount it with app.mount().

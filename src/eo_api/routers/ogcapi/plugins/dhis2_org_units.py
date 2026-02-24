@@ -1,5 +1,6 @@
 """DHIS2 Organization Units feature provider for pygeoapi."""
 
+import os
 from datetime import datetime
 from typing import Any
 
@@ -9,8 +10,8 @@ from geojson_pydantic.geometries import Geometry
 from pydantic import BaseModel, Field
 from pygeoapi.provider.base import BaseProvider, SchemaType
 
-DHIS2_BASE_URL = "https://play.im.dhis2.org/dev/api"
-DHIS2_AUTH = ("admin", "district")
+DHIS2_BASE_URL = os.environ["DHIS2_BASE_URL"]
+DHIS2_AUTH = (os.environ["DHIS2_USERNAME"], os.environ["DHIS2_PASSWORD"])
 DHIS2_FIELDS = "id,code,name,shortName,level,openingDate,geometry"
 
 
@@ -53,12 +54,56 @@ def _schema_to_fields(model: type[BaseModel]) -> dict[str, dict[str, str]]:
     return fields
 
 
+def _flatten_coords(coords: list) -> list[list[float]]:
+    """Recursively flatten nested coordinate arrays into a list of [x, y] points."""
+    if coords and isinstance(coords[0], (int, float)):
+        return [coords]
+    result = []
+    for item in coords:
+        result.extend(_flatten_coords(item))
+    return result
+
+
+def _compute_bbox(geometry: Geometry) -> tuple[float, float, float, float]:
+    """Compute bounding box from a GeoJSON geometry."""
+    coords = _flatten_coords(geometry.model_dump()["coordinates"])
+    xs = [c[0] for c in coords]
+    ys = [c[1] for c in coords]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _fetch_bbox() -> list[float] | None:
+    """Compute bounding box from level-1 org unit geometries."""
+    response = httpx.get(
+        f"{DHIS2_BASE_URL}/organisationUnits",
+        params={
+            "paging": "false",
+            "fields": "geometry",
+            "filter": "level:eq:1",
+        },
+        auth=DHIS2_AUTH,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    all_coords: list[list[float]] = []
+    for ou in response.json()["organisationUnits"]:
+        geom = ou.get("geometry")
+        if geom and geom.get("coordinates"):
+            all_coords.extend(_flatten_coords(geom["coordinates"]))
+    if not all_coords:
+        return None
+    xs = [c[0] for c in all_coords]
+    ys = [c[1] for c in all_coords]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
 def _fetch_org_units() -> list[DHIS2OrgUnit]:
     """Fetch all organisation units from the DHIS2 API."""
     response = httpx.get(
         f"{DHIS2_BASE_URL}/organisationUnits",
         params={"paging": "false", "fields": DHIS2_FIELDS},
         auth=DHIS2_AUTH,
+        follow_redirects=True,
     )
     response.raise_for_status()
     return [DHIS2OrgUnit.model_validate(ou) for ou in response.json()["organisationUnits"]]
@@ -73,11 +118,15 @@ def _org_unit_to_feature(org_unit: DHIS2OrgUnit) -> Feature:
         level=org_unit.level,
         openingDate=org_unit.openingDate.isoformat() if org_unit.openingDate else None,
     )
+    bbox = None
+    if org_unit.geometry and org_unit.geometry.type in ("Polygon", "MultiPolygon"):
+        bbox = _compute_bbox(org_unit.geometry)
     return Feature(
         type="Feature",
         id=org_unit.id,
         geometry=org_unit.geometry,
         properties=props.model_dump(),
+        bbox=bbox,
     )
 
 
@@ -101,6 +150,7 @@ class DHIS2OrgUnitsProvider(BaseProvider):
             f"{DHIS2_BASE_URL}/organisationUnits/{identifier}",
             params={"fields": DHIS2_FIELDS},
             auth=DHIS2_AUTH,
+            follow_redirects=True,
         )
         response.raise_for_status()
         org_unit = DHIS2OrgUnit.model_validate(response.json())
