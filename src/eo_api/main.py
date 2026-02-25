@@ -32,6 +32,8 @@ from contextlib import asynccontextmanager  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.responses import RedirectResponse  # noqa: E402
+from fastapi.responses import RedirectResponse  # noqa: E402
 
 from eo_api.routers import cog, ogcapi, pipelines, prefect, root  # noqa: E402
 
@@ -76,5 +78,10 @@ app.add_middleware(
 app.include_router(root.router)
 app.include_router(cog.router, prefix="/cog", tags=["Cloud Optimized GeoTIFF"])
 app.include_router(pipelines.router, prefix="/pipelines", tags=["Pipelines"])
+@app.get("/ogcapi", include_in_schema=False)
+async def ogcapi_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/ogcapi/")
+
+
 app.mount(path="/ogcapi", app=ogcapi.app)
 app.mount(path="/", app=prefect.app)
