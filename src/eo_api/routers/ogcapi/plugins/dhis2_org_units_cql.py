@@ -2,7 +2,6 @@
 
 from typing import Any
 
-from geojson_pydantic import FeatureCollection
 from pygeoapi.provider.base import BaseProvider, SchemaType
 from pygeofilter.backends.native.evaluate import NativeEvaluator
 
@@ -59,14 +58,12 @@ class DHIS2OrgUnitsCqlProvider(BaseProvider):
         number_matched = len(features)
         page = features[offset : offset + limit]
 
-        fc = FeatureCollection(
-            type="FeatureCollection",
-            features=page,
-        )
-        result = fc.model_dump()
-        result["numberMatched"] = number_matched
-        result["numberReturned"] = len(page)
-        return result
+        return {
+            "type": "FeatureCollection",
+            "features": page,
+            "numberMatched": number_matched,
+            "numberReturned": len(page),
+        }
 
     def get_schema(self, schema_type: SchemaType = SchemaType.item) -> tuple[str, dict[str, Any]]:
         """Return a JSON schema for the provider."""
