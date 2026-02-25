@@ -33,7 +33,6 @@ from contextlib import asynccontextmanager  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
-from fastapi.responses import RedirectResponse  # noqa: E402
 
 from eo_api.routers import cog, ogcapi, pipelines, prefect, root  # noqa: E402
 
