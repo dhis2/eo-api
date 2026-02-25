@@ -4,7 +4,7 @@ import io
 import logging
 
 import geopandas as gpd
-import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 
 import constants
 from .utils import get_time_dim, pandas_period_string, numpy_period_array
@@ -46,14 +46,15 @@ def dataframe_to_preview(df, dataset, period_type):
     org_units_with_temp = org_units.merge(temp_df, on='id', how='left')
 
     # plot to map
+    fig = Figure()
+    ax = fig.subplots()
     period = temp_df[time_dim].values[0]
-    ax = org_units_with_temp.plot(column=varname, cmap="YlGnBu", legend=True, legend_kwds={'label': varname})
-    plt.title(f'{period}')
+    org_units_with_temp.plot(ax=ax, column=varname, cmap="YlGnBu", legend=True, legend_kwds={'label': varname})
+    ax.set_title(f'{period}')
 
     # save to in-memory image
     buf = io.BytesIO()
-    plt.savefig(buf, format="png") #, dpi=300)
-    plt.clf()
+    fig.savefig(buf, format="png") #, dpi=300)
     buf.seek(0)
 
     # return as image
@@ -78,14 +79,15 @@ def xarray_to_preview(ds, dataset, period_type):
     assert len(temp_ds[time_dim].values) == 1
 
     # plot to map
+    fig = Figure()
+    ax = fig.subplots()
     period = temp_ds[time_dim].values[0]
-    ax = temp_ds[varname].plot(cmap="YlGnBu")
-    plt.title(f'{period}')
+    temp_ds[varname].plot(ax=ax, cmap="YlGnBu")
+    ax.set_title(f'{period}')
 
     # save to in-memory image
     buf = io.BytesIO()
-    plt.savefig(buf, format="png") #, dpi=300)
-    plt.clf()
+    fig.savefig(buf, format="png") #, dpi=300)
     buf.seek(0)
 
     # return as image

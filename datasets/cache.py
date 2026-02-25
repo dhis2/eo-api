@@ -55,6 +55,10 @@ def optimize_dataset_cache(dataset):
     # open all cache files as xarray
     files = get_cache_files(dataset)
     logger.info(f'Opening {len(files)} files from cache')
+    # for fil in files:
+    #     d = xr.open_dataset(fil)
+    #     print(d)
+    # fdsfs
     ds = xr.open_mfdataset(files)
 
     # trim to only minimal vars and coords
