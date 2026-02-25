@@ -72,23 +72,8 @@ def _execute_process(client: httpx.Client, process_id: str, inputs: dict) -> dic
     raise JobTimeoutError(f"Job {job_id} did not complete within {POLL_TIMEOUT_SECONDS}s")
 
 
-@task(retries=3, retry_delay_seconds=30, name="download-era5-land")
-def download_era5_land(start: str, end: str, bbox: list[float], variables: list[str]) -> dict:
-    """Execute the ERA5-Land download process via OGC API."""
+@task(retries=3, retry_delay_seconds=30, name="run-process")
+def run_process(process_id: str, inputs: dict) -> dict:
+    """Execute any OGC API process by its identifier."""
     with httpx.Client(base_url=OGCAPI_BASE_URL, timeout=POLL_TIMEOUT_SECONDS) as client:
-        return _execute_process(
-            client,
-            "era5-land-download",
-            {"start": start, "end": end, "bbox": bbox, "variables": variables},
-        )
-
-
-@task(retries=3, retry_delay_seconds=30, name="download-chirps3")
-def download_chirps3(start: str, end: str, bbox: list[float], stage: str) -> dict:
-    """Execute the CHIRPS3 download process via OGC API."""
-    with httpx.Client(base_url=OGCAPI_BASE_URL, timeout=POLL_TIMEOUT_SECONDS) as client:
-        return _execute_process(
-            client,
-            "chirps3-download",
-            {"start": start, "end": end, "bbox": bbox, "stage": stage},
-        )
+        return _execute_process(client, process_id, inputs)

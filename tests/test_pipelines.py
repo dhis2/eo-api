@@ -1,46 +1,25 @@
 from fastapi.testclient import TestClient
 
-from eo_api.pipelines.schemas import (
-    CHIRPS3PipelineInput,
-    ERA5LandPipelineInput,
+from eo_api.prefect_flows.schemas import (
+    PipelineInput,
     PipelineResult,
 )
 
 
-def test_era5_land_missing_required_fields(client: TestClient) -> None:
-    response = client.post("/pipelines/era5-land", json={})
+def test_unknown_process_returns_404(client: TestClient) -> None:
+    response = client.post("/pipelines/nonexistent", json={"inputs": {}})
+    assert response.status_code == 404
+
+
+def test_missing_body_returns_422(client: TestClient) -> None:
+    response = client.post("/pipelines/era5-land-download")
     assert response.status_code == 422
 
 
-def test_chirps3_missing_required_fields(client: TestClient) -> None:
-    response = client.post("/pipelines/chirps3", json={})
-    assert response.status_code == 422
-
-
-def test_era5_land_invalid_bbox(client: TestClient) -> None:
-    response = client.post(
-        "/pipelines/era5-land",
-        json={"start": "2024-01", "end": "2024-02", "bbox": [1.0, 2.0]},
-    )
-    assert response.status_code == 422
-
-
-def test_chirps3_invalid_stage(client: TestClient) -> None:
-    response = client.post(
-        "/pipelines/chirps3",
-        json={"start": "2024-01", "end": "2024-02", "bbox": [1, 2, 3, 4], "stage": "invalid"},
-    )
-    assert response.status_code == 422
-
-
-def test_era5_land_input_defaults() -> None:
-    inp = ERA5LandPipelineInput(start="2024-01", end="2024-02", bbox=[1.0, 2.0, 3.0, 4.0])
-    assert inp.variables == ["2m_temperature", "total_precipitation"]
-
-
-def test_chirps3_input_defaults() -> None:
-    inp = CHIRPS3PipelineInput(start="2024-01", end="2024-02", bbox=[1.0, 2.0, 3.0, 4.0])
-    assert inp.stage == "final"
+def test_pipeline_input_model() -> None:
+    inp = PipelineInput(process_id="era5-land-download", inputs={"start": "2024-01"})
+    assert inp.process_id == "era5-land-download"
+    assert inp.inputs == {"start": "2024-01"}
 
 
 def test_pipeline_result_defaults() -> None:
