@@ -99,7 +99,7 @@ resources:
         crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84
     providers:
       - type: feature
-        name: eo_api.routers.ogcapi.plugins.dhis2_org_units.DHIS2OrgUnitsProvider
+        name: eo_api.routers.ogcapi.plugins.providers.dhis2_org_units.DHIS2OrgUnitsProvider
         data: tests/data/
         id_field: id
 
@@ -115,7 +115,7 @@ resources:
         crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84
     providers:
       - type: feature
-        name: eo_api.routers.ogcapi.plugins.dhis2_org_units_cql.DHIS2OrgUnitsCqlProvider
+        name: eo_api.routers.ogcapi.plugins.providers.dhis2_org_units_cql.DHIS2OrgUnitsCqlProvider
         data: tests/data/
         id_field: id
 
@@ -138,7 +138,7 @@ resources:
         hreflang: en-EN
     providers:
       - type: edr
-        name: eo_api.routers.ogcapi.plugins.dhis2eo.DHIS2EOProvider
+        name: eo_api.routers.ogcapi.plugins.providers.dhis2eo.DHIS2EOProvider
         data: tests/data/
 
   era5-land:
@@ -159,7 +159,7 @@ resources:
         hreflang: en-EN
     providers:
       - type: edr
-        name: eo_api.routers.ogcapi.plugins.dhis2eo.DHIS2EOProvider
+        name: eo_api.routers.ogcapi.plugins.providers.dhis2eo.DHIS2EOProvider
         data: tests/data/
 
   obs:
@@ -292,12 +292,17 @@ resources:
           name: GRIB
           mimetype: application/x-grib2
 
-  aggregation:
+  era5-land-download:
     type: process
     processor:
-      name: eo_api.routers.ogcapi.plugins.process.aggregation.AggregationProcessor
+      name: eo_api.routers.ogcapi.plugins.processes.aggregation.AggregationProcessor
 
-  hello-world:
+  era5-land-download:
     type: process
     processor:
-      name: HelloWorld
+      name: eo_api.routers.ogcapi.plugins.processes.era5_land.ERA5LandProcessor
+
+  chirps3-download:
+    type: process
+    processor:
+      name: eo_api.routers.ogcapi.plugins.processes.chirps3.CHIRPS3Processor

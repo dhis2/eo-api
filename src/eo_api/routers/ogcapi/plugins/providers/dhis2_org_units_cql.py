@@ -5,7 +5,7 @@ from typing import Any
 from pygeoapi.provider.base import BaseProvider, SchemaType
 from pygeofilter.backends.native.evaluate import NativeEvaluator
 
-from eo_api.routers.ogcapi.plugins.dhis2_common import (
+from eo_api.routers.ogcapi.plugins.providers.dhis2_common import (
     OrgUnitProperties,
     fetch_org_units,
     get_single_org_unit,

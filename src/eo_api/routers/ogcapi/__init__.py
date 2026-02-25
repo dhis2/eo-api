@@ -28,7 +28,7 @@ import logging
 from pygeoapi.starlette_app import APP as pygeoapi_app
 from pygeoapi.starlette_app import CONFIG
 
-from eo_api.routers.ogcapi.plugins.dhis2_common import fetch_bbox
+from eo_api.routers.ogcapi.plugins.providers.dhis2_common import fetch_bbox
 
 logger = logging.getLogger(__name__)
 
