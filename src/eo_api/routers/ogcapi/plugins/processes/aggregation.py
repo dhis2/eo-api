@@ -1,5 +1,6 @@
-from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
+"""Aggregation process plugin for NetCDF-to-GeoJSON zonal time-series outputs."""
 
+from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
 
 # https://docs.pygeoapi.io/en/stable/publishing/ogcapi-processes.html
 # https://docs.pygeoapi.io/en/stable/plugins.html#example-custom-pygeoapi-processing-plugin
@@ -189,12 +190,11 @@ class AggregationProcessor(BaseProcessor):
     """Time-series zonal aggregation process."""
 
     def __init__(self, processor_def):
-        """
-        Initialize object
+        """Initialize object.
+
         :param processor_def: provider definition
         :returns: plugins.aggregation.AggregationProcessor
         """
-
         super().__init__(processor_def, PROCESS_METADATA)
         self.supports_outputs = True
 

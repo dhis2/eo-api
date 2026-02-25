@@ -292,7 +292,7 @@ resources:
           name: GRIB
           mimetype: application/x-grib2
 
-  era5-land-download:
+  aggregation:
     type: process
     processor:
       name: eo_api.routers.ogcapi.plugins.processes.aggregation.AggregationProcessor
