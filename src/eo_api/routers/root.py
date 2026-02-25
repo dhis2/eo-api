@@ -3,17 +3,25 @@
 import sys
 from importlib.metadata import version
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
-from eo_api.schemas import AppInfo, HealthStatus, Status, StatusMessage
+from eo_api.schemas import AppInfo, HealthStatus, Link, RootResponse, Status
 
 router = APIRouter(tags=["System"])
 
 
 @router.get("/")
-def read_index() -> StatusMessage:
-    """Return a welcome message for the root endpoint."""
-    return StatusMessage(message="Welcome to DHIS2 EO API")
+def read_index(request: Request) -> RootResponse:
+    """Return a welcome message with navigation links."""
+    base = str(request.base_url).rstrip("/")
+    return RootResponse(
+        message="Welcome to DHIS2 EO API",
+        links=[
+            Link(href=f"{base}/ogcapi/", rel="ogcapi", title="OGC API"),
+            Link(href=f"{base}/prefect/", rel="prefect", title="Prefect UI"),
+            Link(href=f"{base}/docs", rel="docs", title="API Docs"),
+        ],
+    )
 
 
 @router.get("/health")

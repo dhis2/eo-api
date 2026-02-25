@@ -25,6 +25,21 @@ class HealthStatus(BaseModel):
     status: Status
 
 
+class Link(BaseModel):
+    """Hypermedia link."""
+
+    href: str
+    rel: str
+    title: str
+
+
+class RootResponse(BaseModel):
+    """Root endpoint response with navigation links."""
+
+    message: str
+    links: list[Link]
+
+
 class AppInfo(BaseModel):
     """Application version and environment info."""
 
