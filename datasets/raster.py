@@ -64,27 +64,30 @@ def to_timeperiod(ds, dataset, period_type, statistic, timezone_offset=0):
     
     # return early if no change
     if dataset['periodType'] == period_type:
-        return ds[varname]
+        return ds
 
     # begin
     logger.info(f'Aggregating period type from {dataset["periodType"]} to {period_type}')
 
+    # process only the array belonging to varname
+    arr = ds[varname]
+
     # remember mask of valid pixels from original dataset (only one time point needed)
-    valid = ds[varname].isel({time_dim: 0}).notnull()
+    valid = arr.isel({time_dim: 0}).notnull()
 
     # hourly datasets
     if dataset['periodType'] == 'hourly':
         if period_type == 'daily':
-            ds = transforms.temporal.daily_reduce(
-                ds[varname],
+            arr = transforms.temporal.daily_reduce(
+                arr,
                 how=statistic,
                 time_shift={"hours": timezone_offset},
                 remove_partial_periods=False,
             )
         
         elif period_type == 'monthly':
-            ds = transforms.temporal.monthly_reduce(
-                ds[varname],
+            arr = transforms.temporal.monthly_reduce(
+                arr,
                 how=statistic,
                 time_shift={"hours": timezone_offset},
                 remove_partial_periods=False,
@@ -96,8 +99,8 @@ def to_timeperiod(ds, dataset, period_type, statistic, timezone_offset=0):
     # daily datasets
     elif dataset['periodType'] == 'daily':
         if period_type == 'monthly':
-            ds = transforms.temporal.monthly_reduce(
-                ds[varname],
+            arr = transforms.temporal.monthly_reduce(
+                arr,
                 how=statistic,
                 remove_partial_periods=False,
             )
@@ -109,13 +112,13 @@ def to_timeperiod(ds, dataset, period_type, statistic, timezone_offset=0):
         raise Exception(f'Unsupported period aggregation from {dataset["periodType"]} to {period_type}')
         
     # apply the original mask in case the aggregation turned nan values to 0s
-    ds = xr.where(valid, ds, None)
+    arr = xr.where(valid, arr, None)
 
     # IMPORTANT: compute to avoid slow dask graphs
-    ds = ds.compute()
+    arr = arr.compute()
 
     # convert back to dataset
-    ds = ds.to_dataset()
+    ds = arr.to_dataset()
 
     # return
     return ds
