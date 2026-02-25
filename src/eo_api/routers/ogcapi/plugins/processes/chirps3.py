@@ -20,7 +20,7 @@ PROCESS_METADATA = {
     "id": "chirps3",
     "title": "CHIRPS3 Daily Precipitation",
     "description": "Download CHIRPS3 daily precipitation data for a bounding box and date range.",
-    "jobControlOptions": ["sync-execute"],
+    "jobControlOptions": ["sync-execute", "async-execute"],
     "keywords": ["climate", "CHIRPS3", "precipitation", "rainfall"],
     "inputs": {
         "start": {
