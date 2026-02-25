@@ -265,6 +265,9 @@ This is the recommended end-to-end demo for:
 
 **DHIS2 GeoJSON features in -> DHIS2 dataValueSet out**
 
+For a milestone-by-milestone architecture presentation, see:
+- `docs/dhis2_pipeline_milestones.md`
+
 ```bash
 BASE="http://127.0.0.1:8000"
 ```
