@@ -10,6 +10,8 @@ caches its settings on first import.
 import logging
 import os
 import warnings
+from importlib.util import find_spec
+from pathlib import Path
 
 os.environ.setdefault("PREFECT_UI_SERVE_BASE", "/prefect/")
 os.environ.setdefault("PREFECT_UI_API_URL", "/prefect/api")
@@ -17,6 +19,24 @@ os.environ.setdefault("PREFECT_SERVER_API_BASE_PATH", "/prefect/api")
 os.environ.setdefault("PREFECT_API_URL", "http://localhost:8000/prefect/api")
 os.environ.setdefault("PREFECT_SERVER_ANALYTICS_ENABLED", "false")
 os.environ.setdefault("PREFECT_SERVER_UI_SHOW_PROMOTIONAL_CONTENT", "false")
+
+
+def _configure_proj_data() -> None:
+    """Point PROJ to rasterio bundled data to avoid mixed-install conflicts."""
+    spec = find_spec("rasterio")
+    if spec is None or spec.origin is None:
+        return
+
+    proj_data = Path(spec.origin).parent / "proj_data"
+    if not proj_data.is_dir():
+        return
+
+    proj_data_path = str(proj_data)
+    os.environ["PROJ_DATA"] = proj_data_path
+    os.environ["PROJ_LIB"] = proj_data_path
+
+
+_configure_proj_data()
 
 warnings.filterwarnings("ignore", message="ecCodes .* or higher is recommended")
 
