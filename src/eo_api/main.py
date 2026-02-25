@@ -8,7 +8,7 @@ import warnings
 
 warnings.filterwarnings("ignore", message="ecCodes .* or higher is recommended")
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()
 
