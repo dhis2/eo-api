@@ -15,6 +15,7 @@ dependencies = [
     "dhis2-client @ git+https://github.com/dhis2/dhis2-python-client.git@V0.3.0",
     "geojson-pydantic>=2.1.0",
     "httpx>=0.28.1",
+    "prefect>=3.6",
 ]
 
 [tool.ruff]
@@ -57,7 +58,7 @@ module = "tests.*"
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-module = ["dhis2eo.*", "dhis2_client.*", "pygeoapi.*", "titiler.*", "rasterio.*", "pygeofilter.*"]
+module = ["dhis2eo.*", "dhis2_client.*", "pygeoapi.*", "titiler.*", "rasterio.*", "pygeofilter.*", "prefect.*"]
 ignore_missing_imports = true
 
 [tool.pyright]
