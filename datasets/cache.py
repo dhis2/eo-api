@@ -87,11 +87,12 @@ def optimize_dataset_cache(dataset):
 
     logger.info('Finished cache optimization')
 
-def compute_time_space_chunks(ds, dataset, max_spatial_chunk=512):
+def compute_time_space_chunks(ds, dataset, max_spatial_chunk=256):
     chunks = {}
 
     # time
     # set to common access patterns depending on original dataset period 
+    # TODO: could potentially allow this to be customized in the dataset yaml file
     dim = get_time_dim(ds)
     period_type = dataset['periodType']
     if period_type == 'hourly':

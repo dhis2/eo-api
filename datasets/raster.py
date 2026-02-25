@@ -51,12 +51,6 @@ def get_data(dataset, start, end):
 def to_timeperiod(ds, dataset, period_type, statistic, timezone_offset=0):
     '''Aggregate given xarray dataset to another period type'''
 
-    # NOTE: This function converts dataset with multiple variables to dataarray for single variable
-    # ...so downstream functions have to consider that
-    # TODO: Should probably change this.
-    varname = dataset['variable']
-    time_dim = get_time_dim(ds)
-
     # validate period types
     valid_period_types = ['hourly', 'daily', 'monthly', 'yearly']
     if period_type not in valid_period_types:
@@ -70,9 +64,11 @@ def to_timeperiod(ds, dataset, period_type, statistic, timezone_offset=0):
     logger.info(f'Aggregating period type from {dataset["periodType"]} to {period_type}')
 
     # process only the array belonging to varname
+    varname = dataset['variable']
     arr = ds[varname]
 
     # remember mask of valid pixels from original dataset (only one time point needed)
+    time_dim = get_time_dim(ds)
     valid = arr.isel({time_dim: 0}).notnull()
 
     # hourly datasets
