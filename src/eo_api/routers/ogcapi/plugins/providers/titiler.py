@@ -20,6 +20,7 @@ from pygeoapi.util import is_url, url_join
 _DEFAULT_TITILER_BASE_URL = "http://127.0.0.1:8000"
 _DEFAULT_TITILER_ENDPOINT = "/cog/tiles"
 
+# Mostly generated with copilot agent, might need some cleanup but serves as a good starting point for a TiTiler-based provider plugin.
 
 class TiTilerProvider(BaseTileProvider):
     """TiTiler-backed OGC API Tiles provider."""
