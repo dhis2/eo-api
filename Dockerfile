@@ -18,6 +18,8 @@ RUN uv sync --frozen --no-dev && \
     mkdir -p /app/.venv/lib/python3.13/site-packages/prefect/server/ui_build && \
     chown eo:eo /app/.venv/lib/python3.13/site-packages/prefect/server/ui_build
 
+RUN mkdir -p /tmp/data && chown eo:eo /tmp/data
+
 COPY pygeoapi-config.yml pygeoapi-openapi.yml ./
 
 ENV PYGEOAPI_CONFIG=/app/pygeoapi-config.yml
