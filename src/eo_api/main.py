@@ -4,6 +4,10 @@ load_dotenv() is called before pygeoapi import because pygeoapi
 reads PYGEOAPI_CONFIG and PYGEOAPI_OPENAPI at import time.
 """
 
+import warnings
+
+warnings.filterwarnings("ignore", message="ecCodes .* or higher is recommended")
+
 from dotenv import load_dotenv
 
 load_dotenv()
