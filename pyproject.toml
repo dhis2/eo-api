@@ -1,3 +1,7 @@
+[build-system]
+requires = ["uv_build>=0.9.0"]
+build-backend = "uv_build"
+
 [project]
 name = "eo-api"
 version = "0.1.0"
@@ -9,4 +13,76 @@ dependencies = [
     "pygeoapi>=0.22.0",
     "dhis2eo @ git+https://github.com/dhis2/dhis2eo.git@v1.1.0",
     "dhis2-client @ git+https://github.com/dhis2/dhis2-python-client.git@V0.3.0",
+    "geojson-pydantic>=2.1.0",
+    "httpx>=0.28.1",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+
+[tool.ruff.lint]
+fixable = ["ALL"]
+select = ["E", "W", "F", "I", "D"]
+ignore = ["D203", "D213"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["D"]
+"**/__init__.py" = ["D104"]
+"src/**/*.py" = ["D102", "D105", "D107"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_unused_ignores = true
+strict_equality = true
+mypy_path = ["src"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = ["dhis2eo.*", "dhis2_client.*", "pygeoapi.*", "titiler.*"]
+ignore_missing_imports = true
+
+[tool.pyright]
+include = ["src", "tests"]
+exclude = ["**/.venv"]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+useLibraryCodeForTypes = true
+reportPrivateUsage = false
+reportUnusedFunction = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownVariableType = false
+reportMissingTypeArgument = false
+reportMissingTypeStubs = false
+reportUnknownLambdaType = false
+reportMissingImports = "warning"
+reportMissingModuleSource = false
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.0",
+    "mypy>=1.19.1",
+    "pyright>=1.1.408",
+    "pytest>=8.0.0",
+    "ruff>=0.15.2",
 ]

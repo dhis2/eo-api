@@ -99,7 +99,23 @@ resources:
         crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84
     providers:
       - type: feature
-        name: plugins.dhis2orgUnits.DHIS2OrgUnitsProvider
+        name: eo_api.routers.ogcapi.plugins.dhis2_org_units.DHIS2OrgUnitsProvider
+        data: tests/data/
+        id_field: id
+
+  dhis2-org-units-cql:
+    type: collection
+    title: DHIS2 organization units (CQL)
+    description: Get organization units from DHIS2 with CQL filter support
+    keywords:
+      - dhis2
+    extents:
+      spatial:
+        bbox: [-180, -90, 180, 90]
+        crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84
+    providers:
+      - type: feature
+        name: eo_api.routers.ogcapi.plugins.dhis2_org_units_cql.DHIS2OrgUnitsCqlProvider
         data: tests/data/
         id_field: id
 
@@ -122,7 +138,7 @@ resources:
         hreflang: en-EN
     providers:
       - type: edr
-        name: plugins.dhis2eo.DHIS2EOProvider
+        name: eo_api.routers.ogcapi.plugins.dhis2eo.DHIS2EOProvider
         data: tests/data/
 
   era5-land:
@@ -143,7 +159,7 @@ resources:
         hreflang: en-EN
     providers:
       - type: edr
-        name: plugins.dhis2eo.DHIS2EOProvider
+        name: eo_api.routers.ogcapi.plugins.dhis2eo.DHIS2EOProvider
         data: tests/data/
 
   obs:
