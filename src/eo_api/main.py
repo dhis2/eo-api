@@ -7,11 +7,11 @@ Prefect UI env vars are set before any imports because Prefect
 caches its settings on first import.
 """
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 import logging
 import os
 import warnings
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, cast
@@ -70,7 +70,6 @@ from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 
 from eo_api.routers import cog, ogcapi, pipelines, prefect, root  # noqa: E402
-
 
 # Keep app progress logs visible while muting noisy third-party info logs.
 eo_logger = logging.getLogger("eo_api")
