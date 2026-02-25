@@ -28,33 +28,35 @@ from contextlib import asynccontextmanager  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from prefect.server.database import provide_database_interface  # noqa: E402
 
 from eo_api.routers import cog, ogcapi, pipelines, prefect, root  # noqa: E402
 
 
-async def _register_deployments() -> None:
-    """Register Prefect deployments after the server is ready."""
-    import asyncio
+async def _serve_flows() -> None:
+    """Register Prefect deployments and start a runner to execute them."""
+    from prefect.runner import Runner
 
     from eo_api.prefect_flows.flows import ALL_FLOWS
 
-    await asyncio.sleep(2)  # wait for server to start accepting connections
+    runner = Runner()
     for fl in ALL_FLOWS:
-        deployment = await fl.to_deployment(name=fl.name)
-        await deployment.apply()
+        await runner.aadd_flow(fl, name=fl.name)
+    await runner.start()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Initialize Prefect database and register pipeline deployments."""
+    """Start Prefect server, then register and serve pipeline deployments."""
     import asyncio
 
-    db = provide_database_interface()
-    await db.create_db()
-    task = asyncio.create_task(_register_deployments())
-    yield
-    task.cancel()
+    # Mounted sub-apps don't get their lifespans called automatically,
+    # so we trigger the Prefect server's lifespan here to initialize
+    # the database, docket, and background workers.
+    prefect_app = prefect.app
+    async with prefect_app.router.lifespan_context(prefect_app):
+        task = asyncio.create_task(_serve_flows())
+        yield
+        task.cancel()
 
 
 app = FastAPI(lifespan=lifespan)
