@@ -12,6 +12,8 @@ run: openapi ## Start the app with uvicorn
 lint: ## Run ruff linting and formatting (autofix)
 	uv run ruff check --fix .
 	uv run ruff format .
+	uv run mypy src/
+	uv run pyright
 
 test: ## Run tests with pytest
 	uv run pytest tests/

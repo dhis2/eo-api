@@ -1,5 +1,7 @@
 """Aggregation process plugin for NetCDF-to-GeoJSON zonal time-series outputs."""
 
+from typing import Any
+
 from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
 
 # https://docs.pygeoapi.io/en/stable/publishing/ogcapi-processes.html
@@ -7,9 +9,9 @@ from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
 # https://pavics-weaver.readthedocs.io/
 
 
-def _to_serializable_time(value):
+def _to_serializable_time(value: Any) -> str:
     if hasattr(value, "isoformat"):
-        return value.isoformat()
+        return str(value.isoformat())
     try:
         import numpy as np
 
@@ -20,7 +22,7 @@ def _to_serializable_time(value):
     return str(value)
 
 
-def _resolve_spatial_dims(data_array):
+def _resolve_spatial_dims(data_array: Any) -> tuple[str, str]:
     candidates = [
         ("lat", "lon"),
         ("latitude", "longitude"),
@@ -35,7 +37,7 @@ def _resolve_spatial_dims(data_array):
     )
 
 
-def _build_affine(x_values, y_values):
+def _build_affine(x_values: Any, y_values: Any) -> Any:
     try:
         import numpy as np
         from rasterio.transform import from_origin
@@ -166,7 +168,7 @@ PROCESS_METADATA = {
 class AggregationProcessor(BaseProcessor):
     """Time-series zonal aggregation process."""
 
-    def __init__(self, processor_def):
+    def __init__(self, processor_def: dict[str, Any]) -> None:
         """Initialize object.
 
         :param processor_def: provider definition
@@ -175,7 +177,7 @@ class AggregationProcessor(BaseProcessor):
         super().__init__(processor_def, PROCESS_METADATA)
         self.supports_outputs = True
 
-    def execute(self, data, outputs=None):
+    def execute(self, data: dict[str, Any], outputs: Any = None) -> tuple[str, Any]:
         try:
             import numpy as np
             import xarray as xr
@@ -281,5 +283,5 @@ class AggregationProcessor(BaseProcessor):
 
         return mimetype, produced_outputs
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<AggregationProcessor> {self.name}"

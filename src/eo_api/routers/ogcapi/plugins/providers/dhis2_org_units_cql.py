@@ -17,6 +17,8 @@ from eo_api.routers.ogcapi.plugins.providers.dhis2_common import (
 class DHIS2OrgUnitsCqlProvider(BaseProvider):
     """DHIS2 Organization Units Provider with CQL filter support."""
 
+    _fields: dict[str, dict[str, str]]
+
     def __init__(self, provider_def: dict[str, Any]) -> None:
         """Inherit from parent class."""
         super().__init__(provider_def)
