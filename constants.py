@@ -12,7 +12,7 @@ import geopandas as gpd
 # brazil
 GEOJSON_FILE = 'brazil-regions.geojson'
 COUNTRY_CODE = 'BRA'
-CACHE_OVERRIDE = None
+CACHE_OVERRIDE = r'C:\Users\karimba\Documents\Github\eo-api\datasets\cache\BRA'
 
 #################################################
 ORG_UNITS_GEOJSON = json.load(open(GEOJSON_FILE))

@@ -44,3 +44,29 @@ def numpy_period_string(t: np.datetime64, period_type: str) -> str:
         return s[:4]         # YYYY
 
     raise ValueError(f"Unknown periodType: {period_type}")
+
+def numpy_period_array(t_array: np.ndarray, period_type: str) -> np.ndarray:
+    # TODO: this and numpy_period_string should be merged
+    # ...
+    
+    # Convert the whole array to strings at once
+    s = np.datetime_as_string(t_array, unit="s")
+    
+    # Map periods to string lengths: YYYY-MM-DDTHH (13), YYYY-MM-DD (10), etc.
+    lengths = {"hourly": 13, "daily": 10, "monthly": 7, "yearly": 4}
+    return s.astype(f"U{lengths[period_type]}")
+
+def pandas_period_string(column, period_type):
+    if period_type == "hourly":
+        return column.dt.strftime('%Y-%m-%dT%H')
+
+    if period_type == "daily":
+        return column.dt.strftime('%Y-%m-%d')
+
+    if period_type == "monthly":
+        return column.dt.strftime('%Y-%m')
+    
+    if period_type == "yearly":
+        return column.dt.strftime('%Y')
+    
+    raise ValueError(f"Unknown periodType: {period_type}")

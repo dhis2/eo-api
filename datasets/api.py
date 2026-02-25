@@ -1,5 +1,5 @@
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Response
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
@@ -54,6 +54,19 @@ def optimize_dataset_cache(dataset_id: str, background_tasks: BackgroundTasks = 
     background_tasks.add_task(cache.optimize_dataset_cache, dataset)
     return {'status': 'Dataset cache optimization submitted for processing'}
 
+def get_dataset_period_type(dataset, period_type, start, end, temporal_aggregation):
+    # TODO: maybe move this and similar somewhere better like a pipelines.py file? 
+    # ... 
+
+    # get raster data
+    ds = raster.get_data(dataset, start, end)
+
+    # aggregate to period type
+    ds = raster.to_timeperiod(ds, dataset, period_type, statistic=temporal_aggregation)
+
+    # return
+    return ds
+
 @router.get("/{dataset_id}/{period_type}/orgunits", response_model=list)
 def get_dataset_period_type_org_units(dataset_id: str, period_type: str, start: str, end: str, temporal_aggregation: str, spatial_aggregation: str):
     """
@@ -61,12 +74,9 @@ def get_dataset_period_type_org_units(dataset_id: str, period_type: str, start: 
     """
     # get dataset metadata
     dataset = get_dataset_or_404(dataset_id)
-    
-    # get raster data
-    ds = raster.get_data(dataset, start, end)
 
-    # aggregate to period type
-    ds = raster.to_timeperiod(ds, dataset, period_type, statistic=temporal_aggregation)
+    # get dataset for period type and start/end period
+    ds = get_dataset_period_type(dataset, period_type, start, end, temporal_aggregation)
 
     # aggregate to geojson features
     df = raster.to_features(ds, dataset, features=constants.ORG_UNITS_GEOJSON, statistic=spatial_aggregation)
@@ -79,6 +89,31 @@ def get_dataset_period_type_org_units(dataset_id: str, period_type: str, start: 
     data = serialize.dataframe_to_json_data(df, dataset, period_type)
     return data
 
+@router.get("/{dataset_id}/{period_type}/orgunits/preview", response_model=list)
+def get_dataset_period_type_org_units_preview(dataset_id: str, period_type: str, period: str, temporal_aggregation: str, spatial_aggregation: str):
+    """
+    Get a dataset dynamically aggregated to a given period type and org units and return json values.
+    """
+    # get dataset metadata
+    dataset = get_dataset_or_404(dataset_id)
+
+    # get dataset for period type and a single period
+    start = end = period
+    ds = get_dataset_period_type(dataset, period_type, start, end, temporal_aggregation)
+
+    # aggregate to geojson features
+    df = raster.to_features(ds, dataset, features=constants.ORG_UNITS_GEOJSON, statistic=spatial_aggregation)
+
+    # convert units if needed (inplace)
+    # NOTE: here we do it after agggregation to dataframe to speedup computation
+    units.convert_pandas_units(df, dataset)
+
+    # serialize to image
+    image_data = serialize.dataframe_to_preview(df, dataset, period_type)
+
+    # return as image
+    return Response(content=image_data, media_type="image/png")
+
 @router.get("/{dataset_id}/{period_type}/raster")
 def get_dataset_period_type_raster(dataset_id: str, period_type: str, start: str, end: str, temporal_aggregation: str):
     """
@@ -87,11 +122,8 @@ def get_dataset_period_type_raster(dataset_id: str, period_type: str, start: str
     # get dataset metadata
     dataset = get_dataset_or_404(dataset_id)
     
-    # get raster data
-    ds = raster.get_data(dataset, start, end)
-
-    # aggregate to period type
-    ds = raster.to_timeperiod(ds, dataset, period_type, statistic=temporal_aggregation)
+    # get dataset for period type and start/end period
+    ds = get_dataset_period_type(dataset, period_type, start, end, temporal_aggregation)
 
     # convert units if needed (inplace)
     units.convert_xarray_units(ds, dataset)
@@ -106,6 +138,27 @@ def get_dataset_period_type_raster(dataset_id: str, period_type: str, start: str
         filename='eo-api-raster-download.nc',
         background=BackgroundTask(serialize.cleanup_file, file_path)
     )
+
+@router.get("/{dataset_id}/{period_type}/raster/preview")
+def get_dataset_period_type_raster_preview(dataset_id: str, period_type: str, period: str, temporal_aggregation: str):
+    """
+    Get a dataset dynamically aggregated to a given period type and return as downloadable raster file.
+    """
+    # get dataset metadata
+    dataset = get_dataset_or_404(dataset_id)
+    
+    # get dataset for period type and a single period
+    start = end = period
+    ds = get_dataset_period_type(dataset, period_type, start, end, temporal_aggregation)
+
+    # convert units if needed (inplace)
+    units.convert_xarray_units(ds, dataset)
+
+    # serialize to image
+    image_data = serialize.xarray_to_preview(ds, dataset, period_type)
+
+    # return as image
+    return Response(content=image_data, media_type="image/png")
 
 @router.get("/{dataset_id}/{period_type}/tiles")
 def get_dataset_period_type_tiles(dataset_id: str, period_type: str, start: str, end: str, temporal_aggregation: str):
