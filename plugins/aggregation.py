@@ -1,6 +1,10 @@
 from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
 
 
+# https://docs.pygeoapi.io/en/stable/publishing/ogcapi-processes.html
+# https://docs.pygeoapi.io/en/stable/plugins.html#example-custom-pygeoapi-processing-plugin
+# https://pavics-weaver.readthedocs.io/
+
 def _to_serializable_time(value):
     if hasattr(value, 'isoformat'):
         return value.isoformat()

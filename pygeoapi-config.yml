@@ -102,6 +102,7 @@ resources:
         name: plugins.dhis2orgUnits.DHIS2OrgUnitsProvider
         data: tests/data/
         id_field: id
+        include_extra_query_parameters: true
 
   chirps-precipitation:
     type: collection
