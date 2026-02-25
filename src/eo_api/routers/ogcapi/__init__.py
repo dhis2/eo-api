@@ -28,12 +28,12 @@ import logging
 from pygeoapi.starlette_app import APP as pygeoapi_app
 from pygeoapi.starlette_app import CONFIG
 
-from eo_api.routers.ogcapi.plugins.dhis2_org_units import _fetch_bbox
+from eo_api.routers.ogcapi.plugins.dhis2_common import fetch_bbox
 
 logger = logging.getLogger(__name__)
 
 try:
-    bbox = _fetch_bbox()
+    bbox = fetch_bbox()
     if bbox is not None:
         CONFIG["resources"]["dhis2-org-units"]["extents"]["spatial"]["bbox"] = [bbox]
         CONFIG["resources"]["dhis2-org-units-cql"]["extents"]["spatial"]["bbox"] = [bbox]

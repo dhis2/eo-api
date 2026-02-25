@@ -2,45 +2,16 @@
 
 from typing import Any
 
-import httpx
 from geojson_pydantic import FeatureCollection
 from pygeoapi.provider.base import BaseProvider, SchemaType
 
 from eo_api.routers.ogcapi.plugins.dhis2_common import (
-    DHIS2_AUTH,
-    DHIS2_BASE_URL,
     OrgUnitProperties,
     fetch_org_units,
-    flatten_coords,
     get_single_org_unit,
     org_unit_to_feature,
     schema_to_fields,
 )
-
-
-def _fetch_bbox() -> list[float] | None:
-    """Compute bounding box from level-1 org unit geometries."""
-    response = httpx.get(
-        f"{DHIS2_BASE_URL}/organisationUnits",
-        params={
-            "paging": "false",
-            "fields": "geometry",
-            "filter": "level:eq:1",
-        },
-        auth=DHIS2_AUTH,
-        follow_redirects=True,
-    )
-    response.raise_for_status()
-    all_coords: list[list[float]] = []
-    for ou in response.json()["organisationUnits"]:
-        geom = ou.get("geometry")
-        if geom and geom.get("coordinates"):
-            all_coords.extend(flatten_coords(geom["coordinates"]))
-    if not all_coords:
-        return None
-    xs = [c[0] for c in all_coords]
-    ys = [c[1] for c in all_coords]
-    return [min(xs), min(ys), max(xs), max(ys)]
 
 
 class DHIS2OrgUnitsProvider(BaseProvider):

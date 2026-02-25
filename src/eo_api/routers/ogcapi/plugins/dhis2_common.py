@@ -71,6 +71,31 @@ def compute_bbox(geometry: Geometry) -> tuple[float, float, float, float]:
     return (min(xs), min(ys), max(xs), max(ys))
 
 
+def fetch_bbox() -> list[float] | None:
+    """Compute bounding box from level-1 org unit geometries."""
+    response = httpx.get(
+        f"{DHIS2_BASE_URL}/organisationUnits",
+        params={
+            "paging": "false",
+            "fields": "geometry",
+            "filter": "level:eq:1",
+        },
+        auth=DHIS2_AUTH,
+        follow_redirects=True,
+    )
+    response.raise_for_status()
+    all_coords: list[list[float]] = []
+    for ou in response.json()["organisationUnits"]:
+        geom = ou.get("geometry")
+        if geom and geom.get("coordinates"):
+            all_coords.extend(flatten_coords(geom["coordinates"]))
+    if not all_coords:
+        return None
+    xs = [c[0] for c in all_coords]
+    ys = [c[1] for c in all_coords]
+    return [min(xs), min(ys), max(xs), max(ys)]
+
+
 def fetch_org_units() -> list[DHIS2OrgUnit]:
     """Fetch all organisation units from the DHIS2 API."""
     response = httpx.get(
