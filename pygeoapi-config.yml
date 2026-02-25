@@ -215,6 +215,9 @@ resources:
           mimetype: image/png
         options:
           scheme: WebMercatorQuad
+          endpoint_base: http://127.0.0.1:8000
+          endpoint: /cog/tiles
+          timeout: 30
           colormap_name: viridis
 
   obs:
