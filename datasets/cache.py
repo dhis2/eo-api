@@ -11,7 +11,7 @@ import numpy as np
 
 from . import registry
 from .utils import get_time_dim, get_lon_lat_dims, numpy_period_string
-from constants import BBOX, COUNTRY_CODE
+from constants import BBOX, COUNTRY_CODE, CACHE_OVERRIDE
 
 # logger
 logger = logging.getLogger(__name__)
@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 # paths
 SCRIPT_DIR = Path(__file__).parent.resolve()
 CACHE_DIR = SCRIPT_DIR / 'cache'
+if CACHE_OVERRIDE: 
+    CACHE_DIR = Path(CACHE_OVERRIDE)
 
 def build_dataset_cache(dataset, start, end, overwrite, background_tasks):
     # get download function
@@ -55,11 +57,25 @@ def optimize_dataset_cache(dataset):
     logger.info(f'Opening {len(files)} files from cache')
     ds = xr.open_mfdataset(files)
 
+    # trim to only minimal vars and coords
+    logger.info('Trimming unnecessary variables and coordinates')
+    varname = dataset['variable']
+    ds = ds[[varname]]
+    keep_coords = [get_time_dim(ds)] + list(get_lon_lat_dims(ds))
+    drop_coords = [
+        c for c in ds.coords
+        if c not in keep_coords
+    ]
+    ds = ds.drop_vars(drop_coords)
+
     # determine optimal chunk sizes
     logger.info(f'Determining optimal chunk size for zarr archive')
     ds_autochunk = ds.chunk('auto').unify_chunks()
     # extract the first chunk size for each dimension to force uniformity
     uniform_chunks = {dim: ds_autochunk.chunks[dim][0] for dim in ds_autochunk.dims}
+    # override with time space chunks
+    time_space_chunks = compute_time_space_chunks(ds, dataset)
+    uniform_chunks.update( time_space_chunks )
     logging.info(f'--> {uniform_chunks}')
 
     # save as zarr
@@ -69,12 +85,33 @@ def optimize_dataset_cache(dataset):
     ds_chunked.to_zarr(zarr_path, mode='w')
     ds_chunked.close()
 
-    logger.info('Optimizing complete')
+    logger.info('Finished cache optimization')
+
+def compute_time_space_chunks(ds, dataset, max_spatial_chunk=512):
+    chunks = {}
+
+    # time
+    # set to common access patterns depending on original dataset period 
+    dim = get_time_dim(ds)
+    period_type = dataset['periodType']
+    if period_type == 'hourly':
+        chunks[dim] = 24 * 7
+    elif period_type == 'daily':
+        chunks[dim] = 30
+    elif period_type == 'monthly':
+        chunks[dim] = 12
+    elif period_type == 'yearly':
+        chunks[dim] = 1
+
+    # space
+    lon_dim,lat_dim = get_lon_lat_dims(ds)
+    chunks[lon_dim] = min(ds.sizes[lon_dim], max_spatial_chunk)
+    chunks[lat_dim] = min(ds.sizes[lat_dim], max_spatial_chunk)
+
+    return chunks
 
 def get_cache_info(dataset):
     # find all files with cache prefix
-    # TODO: this is not bulletproof, eg 2m_temperature would also get 2m_temperature_max which is a different dataset
-    # ...probably need a delimeter to specify end of dataset name... 
     files = get_cache_files(dataset)
     if not files:
         cache_info = dict(
@@ -117,14 +154,17 @@ def get_cache_prefix(dataset):
     return prefix
 
 def get_cache_files(dataset):
+    # TODO: this is not bulletproof, eg 2m_temperature might also get another dataset named 2m_temperature_modified
+    # ...probably need a delimeter to specify end of dataset name... 
+    prefix = get_cache_prefix(dataset)
+    files = list(CACHE_DIR.glob(f'{prefix}*.nc'))
+    return files
+
+def get_zarr_path(dataset):
     prefix = get_cache_prefix(dataset)
     optimized = CACHE_DIR / f'{prefix}.zarr'
     if optimized.exists():
-        files = [optimized]
-    else:
-        logger.warning(f'Could not find optimized zarr file for dataset {dataset["id"]}, using slower netcdf files instead.')
-        files = list(CACHE_DIR.glob(f'{prefix}*.nc'))
-    return files
+        return optimized
 
 def get_dynamic_function(full_path):
     # Split the path into: 'dhis2eo.data.cds.era5_land.hourly' and 'function'

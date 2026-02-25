@@ -19,12 +19,14 @@ def get_data(dataset, start, end):
     '''Get xarray raster dataset for given time range'''
     # load xarray from cache
     logger.info('Opening dataset')
-    files = cache.get_cache_files(dataset)
-    if len(files) == 1 and str(files[0]).endswith('.zarr'):
-        # optimized zarr
-        ds = xr.open_zarr(files[0])
+    # first check for optimized zarr archive
+    zarr_path = cache.get_zarr_path(dataset)
+    if zarr_path:
+        ds = xr.open_zarr(zarr_path, consolidated=True)  # consolidated means caching metadatafa
+    # fallback to reading raw cache files (slower)
     else:
-        # raw cache files (slower)
+        logger.warning(f'Could not find optimized zarr file for dataset {dataset["id"]}, using slower netcdf files instead.')
+        files = cache.get_cache_files(dataset)
         ds = xr.open_mfdataset(
             files,
             data_vars="minimal",
