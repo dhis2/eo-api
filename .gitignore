@@ -4,3 +4,4 @@ __pycache__/
 .env
 eo_api.egg-info/
 pygeoapi-openapi.yml
+target/
