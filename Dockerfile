@@ -4,7 +4,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         git curl \
         build-essential cython3 \
-        libgeos-dev libproj-dev && \
+        libgeos-dev libproj-dev libeccodes-dev && \
     rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --system eo && useradd --system --gid eo --create-home eo
