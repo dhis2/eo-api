@@ -7,6 +7,7 @@ Prefect UI env vars are set before any imports because Prefect
 caches its settings on first import.
 """
 
+import logging
 import os
 import warnings
 
@@ -18,6 +19,9 @@ os.environ.setdefault("PREFECT_SERVER_ANALYTICS_ENABLED", "false")
 os.environ.setdefault("PREFECT_SERVER_UI_SHOW_PROMOTIONAL_CONTENT", "false")
 
 warnings.filterwarnings("ignore", message="ecCodes .* or higher is recommended")
+
+logging.getLogger("pygeoapi.api.processes").setLevel(logging.ERROR)
+logging.getLogger("pygeoapi.l10n").setLevel(logging.ERROR)
 
 from dotenv import load_dotenv  # noqa: E402
 
