@@ -11,7 +11,7 @@ from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
 
 from eo_api.routers.ogcapi.plugins.processes.schemas import ERA5LandInput, ProcessOutput
 
-DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "./target/data")
+DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "/tmp/data")
 
 LOGGER = logging.getLogger(__name__)
 
