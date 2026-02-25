@@ -3,21 +3,14 @@ from typing import Any
 from fastapi import APIRouter, Body, Request
 from pydantic import BaseModel, Field
 
-try:
-    from pygeoapi.api import FORMAT_TYPES, F_JSON
-    from pygeoapi.util import url_join
-except ImportError:
-    F_JSON = "json"
-    FORMAT_TYPES = {F_JSON: "application/json"}
-
-    def url_join(base_url: str, *parts: str) -> str:
-        segments = [base_url.rstrip("/"), *(part.strip("/") for part in parts if part)]
-        return "/".join(segment for segment in segments if segment)
+from pygeoapi.api import FORMAT_TYPES, F_JSON
+from pygeoapi.util import url_join
 
 from eoapi.endpoints.errors import not_found
-from eoapi.jobs import get_job, update_job
+from eoapi.jobs import get_job, list_jobs, update_job
 from eoapi.orchestration.prefect import get_flow_run, prefect_enabled, prefect_state_to_job_status
-from eoapi.processing.process_catalog import PROCESS_IDS, get_process_definition
+from eoapi.processing.pipeline import execute_dhis2_pipeline, get_pipeline_definition
+from eoapi.processing.process_catalog import DHIS2_PIPELINE_PROCESS_ID, PROCESS_IDS, get_process_definition
 from eoapi.processing.runtime import ProcessHandler, ProcessRuntime
 from eoapi.processing.service import execute_skeleton_process
 
@@ -35,6 +28,16 @@ def _base_url(request: Request) -> str:
 def _build_process_runtime() -> ProcessRuntime:
     handlers: list[ProcessHandler] = []
     for process_id in PROCESS_IDS:
+        if process_id == DHIS2_PIPELINE_PROCESS_ID:
+            handlers.append(
+                ProcessHandler(
+                    process_id=process_id,
+                    definition=get_pipeline_definition,
+                    execute=execute_dhis2_pipeline,
+                )
+            )
+            continue
+
         handlers.append(
             ProcessHandler(
                 process_id=process_id,
@@ -116,11 +119,11 @@ def get_process(processId: str, request: Request) -> dict[str, Any]:
 
 @router.post(
     "/processes/{processId}/execution",
-    status_code=202,
+    status_code=200,
     summary="Execute process",
-    description="Queues process execution and returns a job reference for monitoring.",
+    description="Executes a process synchronously and returns the completed job with outputs inline.",
     responses={
-        202: {"description": "Execution accepted and job created."},
+        200: {"description": "Execution complete. Job record and outputs returned inline."},
         404: {"description": "Process not found."},
     },
 )
@@ -131,7 +134,7 @@ def execute_process(
         ...,
         openapi_examples={
             "raster_zonal_stats": {
-                "summary": "Zonal stats skeleton execution",
+                "summary": "Zonal stats execution",
                 "value": {
                     "inputs": {
                         "dataset_id": "chirps-daily",
@@ -142,7 +145,7 @@ def execute_process(
                 },
             },
             "raster_point_timeseries": {
-                "summary": "Point timeseries skeleton execution",
+                "summary": "Point timeseries execution",
                 "value": {
                     "inputs": {
                         "dataset_id": "chirps-daily",
@@ -160,7 +163,33 @@ def execute_process(
                         "params": ["precip"],
                         "time": "2026-01-31",
                         "frequency": "P1M",
-                        "aggregation": "sum"
+                        "aggregation": "sum",
+                    }
+                },
+            },
+            "dhis2_pipeline": {
+                "summary": "DHIS2 org unit GeoJSON to dataValueSet",
+                "value": {
+                    "inputs": {
+                        "features": {
+                            "type": "FeatureCollection",
+                            "features": [
+                                {
+                                    "type": "Feature",
+                                    "id": "O6uvpzGd5pu",
+                                    "geometry": {
+                                        "type": "Polygon",
+                                        "coordinates": [[[30.0, -10.0], [31.0, -10.0], [31.0, -9.0], [30.0, -9.0], [30.0, -10.0]]],
+                                    },
+                                    "properties": {"name": "Bo"},
+                                }
+                            ],
+                        },
+                        "dataset_id": "chirps-daily",
+                        "params": ["precip"],
+                        "time": "2026-01-31",
+                        "aggregation": "mean",
+                        "data_element": "abc123def45",
                     }
                 },
             },
@@ -170,13 +199,41 @@ def execute_process(
     job = run_process(processId, payload.inputs)
 
     base = _base_url(request)
+    job_id = job["jobId"]
     return {
-        "jobId": job["jobId"],
-        "processId": processId,
-        "status": "queued",
+        **job,
         "links": [
-            {"rel": "monitor", "type": FORMAT_TYPES[F_JSON], "href": url_join(base, "jobs", job["jobId"])},
-            {"rel": "results", "type": FORMAT_TYPES[F_JSON], "href": url_join(base, "jobs", job["jobId"])},
+            {"rel": "self", "type": FORMAT_TYPES[F_JSON], "href": url_join(base, "jobs", job_id)},
+        ],
+    }
+
+
+@router.get(
+    "/jobs",
+    summary="List jobs",
+    description="Returns all recorded jobs with their current status.",
+)
+def get_jobs(request: Request) -> dict[str, Any]:
+    base = _base_url(request)
+    jobs = list_jobs()
+    return {
+        "jobs": [
+            {
+                "jobId": job["jobId"],
+                "processId": job["processId"],
+                "status": job["status"],
+                "progress": job["progress"],
+                "created": job["created"],
+                "updated": job["updated"],
+                "links": [
+                    {"rel": "self", "type": FORMAT_TYPES[F_JSON], "href": url_join(base, "jobs", job["jobId"])},
+                ],
+            }
+            for job in jobs
+        ],
+        "links": [
+            {"rel": "self", "type": FORMAT_TYPES[F_JSON], "href": url_join(base, "jobs")},
+            {"rel": "root", "type": FORMAT_TYPES[F_JSON], "href": url_join(base, "/")},
         ],
     }
 
@@ -208,5 +265,6 @@ def get_job_status(jobId: str, request: Request) -> dict[str, Any]:
         "execution": job.get("execution"),
         "links": [
             {"rel": "self", "type": FORMAT_TYPES[F_JSON], "href": url_join(base, "jobs", jobId)},
+            {"rel": "collection", "type": FORMAT_TYPES[F_JSON], "href": url_join(base, "jobs")},
         ],
     }
