@@ -36,6 +36,7 @@ try:
     bbox = _fetch_bbox()
     if bbox is not None:
         CONFIG["resources"]["dhis2-org-units"]["extents"]["spatial"]["bbox"] = [bbox]
+        CONFIG["resources"]["dhis2-org-units-cql"]["extents"]["spatial"]["bbox"] = [bbox]
         logger.info("DHIS2 org-units bbox set to %s", bbox)
     else:
         logger.info("No level-1 org unit geometry found, skipping bbox")
