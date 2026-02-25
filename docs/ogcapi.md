@@ -195,6 +195,105 @@ NULL check combined with comparison:
 /ogcapi/collections/dhis2-org-units-cql/items?filter=code IS NULL AND level=5
 ```
 
+## Processes
+
+OGC API - Processes exposes server-side processing tasks. Each process defines typed inputs and outputs and can be executed synchronously via `POST`.
+
+### Available processes
+
+| Process | ID | Description |
+|---|---|---|
+| ERA5-Land | `era5-land-download` | Download ERA5-Land hourly climate data (temperature, precipitation, etc.) |
+| CHIRPS3 | `chirps3-download` | Download CHIRPS3 daily precipitation data |
+
+### Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/ogcapi/processes` | List all available processes |
+| GET | `/ogcapi/processes/{processId}` | Describe a process (inputs, outputs, metadata) |
+| POST | `/ogcapi/processes/{processId}/execution` | Execute a process |
+
+### Common inputs
+
+All climate processes share these inputs:
+
+| Input | Type | Required | Description |
+|---|---|---|---|
+| `start` | string | yes | Start date in `YYYY-MM` format |
+| `end` | string | yes | End date in `YYYY-MM` format |
+| `bbox` | array[number] | yes | Bounding box `[west, south, east, north]` |
+| `dry_run` | boolean | no | If true (default), return data without pushing to DHIS2 |
+
+### ERA5-Land (`era5-land-download`)
+
+Downloads ERA5-Land hourly climate data via the CDS API.
+
+Additional inputs:
+
+| Input | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `variables` | array[string] | no | `["2m_temperature", "total_precipitation"]` | ERA5-Land variable names |
+
+Example request:
+
+```bash
+curl -X POST http://localhost:8000/ogcapi/processes/era5-land-download/execution \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputs": {
+      "start": "2024-01",
+      "end": "2024-03",
+      "bbox": [32.0, -2.0, 35.0, 1.0],
+      "variables": ["2m_temperature"],
+      "dry_run": true
+    }
+  }'
+```
+
+### CHIRPS3 (`chirps3-download`)
+
+Downloads CHIRPS3 daily precipitation data.
+
+Additional inputs:
+
+| Input | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `stage` | string | no | `"final"` | Product stage: `"final"` or `"prelim"` |
+
+Example request:
+
+```bash
+curl -X POST http://localhost:8000/ogcapi/processes/chirps3-download/execution \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputs": {
+      "start": "2024-01",
+      "end": "2024-03",
+      "bbox": [32.0, -2.0, 35.0, 1.0],
+      "stage": "final",
+      "dry_run": true
+    }
+  }'
+```
+
+### Process output
+
+All processes return a JSON object with:
+
+```json
+{
+  "status": "completed",
+  "files": ["path/to/file1.nc", "path/to/file2.nc"],
+  "summary": {
+    "file_count": 2,
+    "start": "2024-01",
+    "end": "2024-03"
+  },
+  "message": "Data downloaded (dry run)"
+}
+```
+
 ## Plugin system
 
 pygeoapi uses a plugin architecture so that new data backends, output formats, and processing tasks can be added without modifying the core.
@@ -212,30 +311,45 @@ pygeoapi uses a plugin architecture so that new data backends, output formats, a
 
 In the YAML config the `name` field on a provider or processor identifies the plugin. pygeoapi resolves it in two ways:
 
-1. **Short name** -- a built-in alias registered in pygeoapi's plugin registry (e.g. `GeoJSON`, `CSV`, `rasterio`, `HelloWorld`).
+1. **Short name** -- a built-in alias registered in pygeoapi's plugin registry (e.g. `GeoJSON`, `CSV`, `rasterio`).
 2. **Dotted Python path** -- a fully-qualified class name for custom plugins (e.g. `mypackage.providers.MyProvider`).
 
-### Creating a custom plugin
+### Plugin directory layout
 
-A custom provider needs to subclass the appropriate base class and implement the required methods.
+Custom plugins live under `src/eo_api/routers/ogcapi/plugins/`, organized by type:
+
+```
+plugins/
+  __init__.py
+  providers/            # Data access plugins (BaseProvider subclasses)
+    __init__.py
+    dhis2_common.py     # Shared DHIS2 models and helpers
+    dhis2_org_units.py  # Feature provider for DHIS2 org units
+    dhis2_org_units_cql.py  # Feature provider with CQL filter support
+    dhis2eo.py          # EDR provider stub
+  processes/            # Processing plugins (BaseProcessor subclasses)
+    __init__.py
+    schemas.py          # Pydantic models for process inputs/outputs
+    era5_land.py        # ERA5-Land download processor
+    chirps3.py          # CHIRPS3 download processor
+```
+
+### Creating a custom provider
+
+A custom provider subclasses the appropriate base class and implements the required methods.
 
 ```python
 from pygeoapi.provider.base import BaseProvider
 
 
 class MyProvider(BaseProvider):
-    """Custom feature provider."""
-
     def __init__(self, provider_def):
         super().__init__(provider_def)
-        # provider_def contains the YAML provider block
 
     def get(self, identifier, **kwargs):
-        # Return a single feature by ID
         ...
 
     def query(self, **kwargs):
-        # Return a FeatureCollection matching the query parameters
         ...
 ```
 
@@ -244,11 +358,13 @@ Reference it in the config by dotted path:
 ```yaml
 providers:
   - type: feature
-    name: mypackage.providers.MyProvider
+    name: eo_api.routers.ogcapi.plugins.providers.my_provider.MyProvider
     data: /path/to/data
 ```
 
-For processes, subclass `BaseProcessor` and set `PROCESS_METADATA` as a class-level dict describing inputs and outputs:
+### Creating a custom processor
+
+A custom processor subclasses `BaseProcessor`, defines `PROCESS_METADATA`, and implements `execute()`:
 
 ```python
 from pygeoapi.process.base import BaseProcessor
@@ -257,6 +373,7 @@ PROCESS_METADATA = {
     "version": "0.1.0",
     "id": "my-process",
     "title": "My Process",
+    "jobControlOptions": ["sync-execute"],
     "inputs": { ... },
     "outputs": { ... },
 }
@@ -266,9 +383,19 @@ class MyProcessor(BaseProcessor):
     def __init__(self, processor_def):
         super().__init__(processor_def, PROCESS_METADATA)
 
-    def execute(self, data):
-        # Process input data and return results
-        ...
+    def execute(self, data, outputs=None):
+        # Validate inputs, run processing, return (mimetype, result)
+        return "application/json", {"status": "completed"}
+```
+
+Reference it in the config:
+
+```yaml
+resources:
+  my-process:
+    type: process
+    processor:
+      name: eo_api.routers.ogcapi.plugins.processes.my_process.MyProcessor
 ```
 
 ## References
