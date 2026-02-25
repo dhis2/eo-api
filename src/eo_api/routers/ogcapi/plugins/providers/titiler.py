@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode
 
 import requests
@@ -58,9 +58,13 @@ class TiTilerProvider(BaseTileProvider):
         """Return repr string."""
         return f"<TiTilerProvider> {self.data}"
 
-    def get_layer(self) -> str:
-        """Return provider layer name."""
-        return self._layer
+    def get_layer(self) -> None:
+        """Return provider layer name.
+
+        BaseTileProvider defines this method without a typed return contract,
+        and pygeoapi does not rely on this provider's layer value.
+        """
+        return None
 
     def get_fields(self) -> dict[str, Any]:
         """Return field metadata for provider."""
@@ -81,11 +85,8 @@ class TiTilerProvider(BaseTileProvider):
     def get_tiling_schemes(self) -> list[Any]:
         """Return configured tiling schemes."""
         configured = set(self.options.get("schemes", []))
-        tile_matrix_set_links = [
-            enum.value
-            for enum in TileMatrixSetEnum
-            if enum.value.tileMatrixSet in configured
-        ]
+        tile_matrix_set_enum = cast(Any, TileMatrixSetEnum)
+        tile_matrix_set_links = [enum.value for enum in tile_matrix_set_enum if enum.value.tileMatrixSet in configured]
         if not tile_matrix_set_links:
             raise ProviderConnectionError("Could not identify any valid tiling scheme")
         return tile_matrix_set_links
@@ -117,8 +118,7 @@ class TiTilerProvider(BaseTileProvider):
         default_scheme = self.options["schemes"][0]
         query = urlencode(self._titiler_query_params())
         titiler_href = (
-            f"{tileset_endpoint}/{default_scheme}/{{tileMatrix}}/{{tileCol}}/"
-            f"{{tileRow}}.{format_name}?{query}"
+            f"{tileset_endpoint}/{default_scheme}/{{tileMatrix}}/{{tileCol}}/{{tileRow}}.{format_name}?{query}"
         )
 
         metadata_href = self._service_url.split("/{tileMatrix}/{tileRow}/{tileCol}")[0]
@@ -191,8 +191,7 @@ class TiTilerProvider(BaseTileProvider):
         if response.status_code == 404:
             raise ProviderTileNotFoundError
         if response.status_code >= 500 and (
-            self._is_tile_outside_bounds(response)
-            or self._is_tile_outside_dataset_bounds(tileset, z, x, y)
+            self._is_tile_outside_bounds(response) or self._is_tile_outside_dataset_bounds(tileset, z, x, y)
         ):
             raise ProviderTileNotFoundError
         if response.status_code < 500 and not response.ok:
@@ -200,22 +199,22 @@ class TiTilerProvider(BaseTileProvider):
         if response.status_code >= 500:
             raise ProviderGenericError(response.text)
 
-        return response.content
+        return cast(bytes, response.content)
 
-    def get_metadata(
-        self,
-        dataset: str,
-        server_url: str,
-        layer: str | None = None,
-        tileset: str | None = None,
-        metadata_format: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-        keywords: list[str] | None = None,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
+    def get_metadata(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         """Return tile metadata for a collection tileset."""
-        del layer, kwargs
+        dataset = str(kwargs.get("dataset", ""))
+        server_url = str(kwargs.get("server_url", ""))
+        tileset = cast(str | None, kwargs.get("tileset"))
+        metadata_format = cast(str | None, kwargs.get("metadata_format"))
+        title = cast(str | None, kwargs.get("title"))
+        description = cast(str | None, kwargs.get("description"))
+        keywords = cast(list[str] | None, kwargs.get("keywords"))
+
+        if not dataset or not server_url:
+            raise ProviderInvalidQueryError("dataset and server_url are required for tile metadata")
+
+        del args
 
         requested_format = str(metadata_format or TilesMetadataFormat.TILEJSON).upper()
         if requested_format in {TilesMetadataFormat.HTML, "HTML"}:
@@ -342,8 +341,10 @@ class TiTilerProvider(BaseTileProvider):
             return False
 
         try:
-            tms = morecantile.tms.get(tileset)
-            tile = morecantile.Tile(x=int(x), y=int(y), z=int(z))
+            tms_registry = getattr(morecantile, "tms")
+            tms = tms_registry.get(tileset)
+            tile_cls = getattr(morecantile, "Tile")
+            tile = tile_cls(x=int(x), y=int(y), z=int(z))
             tile_bounds = tms.xy_bounds(tile)
             tile_crs = CRS.from_string(str(tms.crs.root))
 
@@ -363,7 +364,7 @@ class TiTilerProvider(BaseTileProvider):
                 src_bounds = src.bounds
 
             tile_left, tile_bottom, tile_right, tile_top = transformed
-            return (
+            return bool(
                 tile_right <= src_bounds.left
                 or tile_left >= src_bounds.right
                 or tile_top <= src_bounds.bottom
