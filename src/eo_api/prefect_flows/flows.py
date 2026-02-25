@@ -9,7 +9,7 @@ from typing import Any
 from prefect import flow
 
 from eo_api.prefect_flows.schemas import PipelineResult
-from eo_api.prefect_flows.tasks import run_process
+from eo_api.prefect_flows.tasks import run_process, summarize_datasets
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +43,13 @@ def _make_flow(process_id: str, description: str, default_inputs: dict[str, Any]
     @flow(name=f"{process_id}-pipeline", description=description)
     def pipeline(inputs: dict[str, Any] = default_inputs) -> PipelineResult:
         result = run_process(process_id, inputs)
+        files = result.get("files", [])
+
+        summarize_datasets(process_id, files)
+
         return PipelineResult(
             status=result.get("status", "completed"),
-            files=result.get("files", []),
+            files=files,
             message=result.get("message", f"{process_id} pipeline completed"),
         )
 
