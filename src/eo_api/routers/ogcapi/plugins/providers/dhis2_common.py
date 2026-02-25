@@ -1,16 +1,19 @@
 """Shared DHIS2 models, constants, and helpers for org-unit providers."""
 
-import os
 from datetime import datetime
 from typing import Any
 
-import httpx
 from geojson_pydantic import Feature
 from geojson_pydantic.geometries import Geometry
 from pydantic import BaseModel, Field
 
-DHIS2_BASE_URL = os.environ["DHIS2_BASE_URL"]
-DHIS2_AUTH = (os.environ["DHIS2_USERNAME"], os.environ["DHIS2_PASSWORD"])
+from eo_api.integrations.dhis2_adapter import (
+    create_client,
+    get_org_units_geojson,
+    get_organisation_unit,
+    list_organisation_units,
+)
+
 DHIS2_FIELDS = "id,code,name,shortName,level,openingDate,geometry"
 
 
@@ -71,22 +74,17 @@ def compute_bbox(geometry: Geometry) -> tuple[float, float, float, float]:
     return (min(xs), min(ys), max(xs), max(ys))
 
 
-def fetch_bbox() -> list[float] | None:
+def fetch_bbox(timeout_seconds: float | None = None) -> list[float] | None:
     """Compute bounding box from level-1 org unit geometries."""
-    response = httpx.get(
-        f"{DHIS2_BASE_URL}/organisationUnits",
-        params={
-            "paging": "false",
-            "fields": "geometry",
-            "filter": "level:eq:1",
-        },
-        auth=DHIS2_AUTH,
-        follow_redirects=True,
-    )
-    response.raise_for_status()
+    client = create_client(timeout_seconds=timeout_seconds)
+    try:
+        feature_collection = get_org_units_geojson(client, level=1)
+    finally:
+        client.close()
+
     all_coords: list[list[float]] = []
-    for ou in response.json()["organisationUnits"]:
-        geom = ou.get("geometry")
+    for feature in feature_collection.get("features", []):
+        geom = feature.get("geometry")
         if geom and geom.get("coordinates"):
             all_coords.extend(flatten_coords(geom["coordinates"]))
     if not all_coords:
@@ -98,14 +96,12 @@ def fetch_bbox() -> list[float] | None:
 
 def fetch_org_units() -> list[DHIS2OrgUnit]:
     """Fetch all organisation units from the DHIS2 API."""
-    response = httpx.get(
-        f"{DHIS2_BASE_URL}/organisationUnits",
-        params={"paging": "false", "fields": DHIS2_FIELDS},
-        auth=DHIS2_AUTH,
-        follow_redirects=True,
-    )
-    response.raise_for_status()
-    return [DHIS2OrgUnit.model_validate(ou) for ou in response.json()["organisationUnits"]]
+    client = create_client()
+    try:
+        organisation_units = list_organisation_units(client, fields=DHIS2_FIELDS)
+    finally:
+        client.close()
+    return [DHIS2OrgUnit.model_validate(ou) for ou in organisation_units]
 
 
 def org_unit_to_feature(org_unit: DHIS2OrgUnit) -> Feature:
@@ -131,12 +127,10 @@ def org_unit_to_feature(org_unit: DHIS2OrgUnit) -> Feature:
 
 def get_single_org_unit(identifier: str) -> dict[str, Any]:
     """Fetch a single org unit by ID and return as a feature dict."""
-    response = httpx.get(
-        f"{DHIS2_BASE_URL}/organisationUnits/{identifier}",
-        params={"fields": DHIS2_FIELDS},
-        auth=DHIS2_AUTH,
-        follow_redirects=True,
-    )
-    response.raise_for_status()
-    org_unit = DHIS2OrgUnit.model_validate(response.json())
+    client = create_client()
+    try:
+        org_unit_data = get_organisation_unit(client, uid=identifier, fields=DHIS2_FIELDS)
+    finally:
+        client.close()
+    org_unit = DHIS2OrgUnit.model_validate(org_unit_data)
     return org_unit_to_feature(org_unit).model_dump()

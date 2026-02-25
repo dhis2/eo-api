@@ -24,6 +24,7 @@ References:
 """
 
 import logging
+import os
 
 from pygeoapi.starlette_app import APP as pygeoapi_app
 from pygeoapi.starlette_app import CONFIG
@@ -32,16 +33,22 @@ from eo_api.routers.ogcapi.plugins.providers.dhis2_common import fetch_bbox
 
 logger = logging.getLogger(__name__)
 
-try:
-    bbox = fetch_bbox()
-    if bbox is not None:
-        CONFIG["resources"]["dhis2-org-units"]["extents"]["spatial"]["bbox"] = [bbox]
-        CONFIG["resources"]["dhis2-org-units-cql"]["extents"]["spatial"]["bbox"] = [bbox]
-        logger.info("DHIS2 org-units bbox set to %s", bbox)
-    else:
-        logger.info("No level-1 org unit geometry found, skipping bbox")
-except Exception:
-    logger.warning("Failed to fetch DHIS2 bbox, using config default", exc_info=True)
+FETCH_BBOX_ON_STARTUP = os.getenv("DHIS2_FETCH_BBOX_ON_STARTUP", "true").lower() in {"1", "true", "yes"}
+STARTUP_BBOX_TIMEOUT_SECONDS = float(os.getenv("DHIS2_STARTUP_BBOX_TIMEOUT_SECONDS", "8"))
+
+if FETCH_BBOX_ON_STARTUP:
+    try:
+        bbox = fetch_bbox(timeout_seconds=STARTUP_BBOX_TIMEOUT_SECONDS)
+        if bbox is not None:
+            CONFIG["resources"]["dhis2-org-units"]["extents"]["spatial"]["bbox"] = [bbox]
+            CONFIG["resources"]["dhis2-org-units-cql"]["extents"]["spatial"]["bbox"] = [bbox]
+            logger.info("DHIS2 org-units bbox set to %s", bbox)
+        else:
+            logger.info("No level-1 org unit geometry found, skipping bbox")
+    except Exception as err:
+        logger.warning("DHIS2 bbox fetch skipped (startup timeout/error: %s). Using config default.", err)
+else:
+    logger.info("DHIS2 bbox fetch on startup disabled by DHIS2_FETCH_BBOX_ON_STARTUP")
 
 # pygeoapi exposes a ready-made Starlette app; we re-export it so the
 # main application can mount it with app.mount().

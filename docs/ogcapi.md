@@ -205,6 +205,7 @@ OGC API - Processes exposes server-side processing tasks. Each process defines t
 |---|---|---|
 | ERA5-Land | `era5-land-download` | Download ERA5-Land hourly climate data (temperature, precipitation, etc.) |
 | CHIRPS3 | `chirps3-download` | Download CHIRPS3 daily precipitation data |
+| CHIRPS3 -> DHIS2 pipeline | `chirps3-dhis2-pipeline` | Fetch features, download CHIRPS3, aggregate by feature, generate DHIS2 dataValueSet (optional auto-import) |
 
 ### Endpoints
 
@@ -218,9 +219,9 @@ OGC API - Processes exposes server-side processing tasks. Each process defines t
 | GET | `/ogcapi/jobs/{jobId}/results` | Get job results |
 | DELETE | `/ogcapi/jobs/{jobId}` | Cancel or delete a job |
 
-### Common inputs
+### Common inputs (download processes)
 
-All climate processes share these inputs:
+`era5-land-download` and `chirps3-download` share these inputs:
 
 | Input | Type | Required | Description |
 |---|---|---|---|
@@ -228,6 +229,8 @@ All climate processes share these inputs:
 | `end` | string | yes | End date in `YYYY-MM` format |
 | `bbox` | array[number] | yes | Bounding box `[west, south, east, north]` |
 | `dry_run` | boolean | no | If true (default), return data without pushing to DHIS2 |
+
+Note: `chirps3-dhis2-pipeline` has its own contract (`start_date`, `end_date`, feature-source selectors, and output options).
 
 ### ERA5-Land (`era5-land-download`)
 
@@ -297,6 +300,49 @@ All processes return a JSON object with:
   "message": "Data downloaded (dry run)"
 }
 ```
+
+### CHIRPS3 to DHIS2 pipeline (`chirps3-dhis2-pipeline`)
+
+Runs four steps in one execution:
+1. Get features (from DHIS2 or provided GeoJSON)
+2. Fetch CHIRPS3 data for union bbox
+3. Process dataset (spatial + temporal aggregation)
+4. Generate DHIS2 `dataValueSet` payload (optional auto-import)
+
+Example request using DHIS2 org units as source features:
+
+```bash
+curl -X POST http://localhost:8000/ogcapi/processes/chirps3-dhis2-pipeline/execution \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputs": {
+      "start_date": "2024-01-01",
+      "end_date": "2024-03-31",
+      "org_unit_level": 3,
+      "data_element": "DEMO_DATA_ELEMENT_UID",
+      "dhis2_timeout_seconds": 180,
+      "dhis2_retries": 4,
+      "temporal_resolution": "monthly",
+      "temporal_reducer": "sum",
+      "spatial_reducer": "mean",
+      "stage": "final",
+      "dry_run": true,
+      "auto_import": false
+    }
+  }'
+```
+
+The response includes:
+- `files`: downloaded CHIRPS3 monthly files
+- `dataValueSet`: DHIS2-compatible payload (`dataValues` array)
+- `importResponse`: populated only when `auto_import=true` and `dry_run=false`
+
+Notes:
+- `parent_org_unit` is optional. For large DHIS2 instances, prefer `parent_org_unit` + `org_unit_level` (or explicit `org_unit_ids`) to avoid fetching very large feature sets.
+- `org_unit_level` alone runs across the full level by default.
+- `category_option_combo` and `attribute_option_combo` are optional. If omitted, they are not sent in `dataValues`, allowing DHIS2 defaults where supported.
+- `temporal_resolution` supports `daily`, `weekly`, and `monthly`.
+- Increase `dhis2_timeout_seconds` if you hit DHIS2 read timeouts.
 
 ## Async execution and job management
 
