@@ -137,7 +137,7 @@ def test_full_pipeline_discover_execute_retrieve(monkeypatch, tmp_path: Path) ->
         {"precip": (("lat", "lon"), [[1.0, 2.0], [3.0, 4.0]])},
         coords={"lat": [-9.75, -9.25], "lon": [30.25, 30.75]},
     )
-    ds.to_netcdf(nc_path)
+    ds.to_netcdf(nc_path, engine="scipy")
 
     class LocalFileProvider:
         provider_id = "local-file"
@@ -242,7 +242,7 @@ def test_pipeline_point_timeseries(monkeypatch, tmp_path: Path) -> None:
         {"precip": (("lat", "lon"), [[1.0, 2.0, 3.0], [4.0, 7.0, 6.0], [7.0, 8.0, 9.0]])},
         coords={"lat": [-9.5, -9.0, -8.5], "lon": [30.5, 31.0, 31.5]},
     )
-    ds.to_netcdf(nc_path)
+    ds.to_netcdf(nc_path, engine="scipy")
 
     class LocalFileProvider:
         provider_id = "local-file"
@@ -301,7 +301,7 @@ def test_pipeline_temporal_aggregate_multi_file(monkeypatch, tmp_path: Path) -> 
             {"precip": (("lat", "lon"), vals)},
             coords={"lat": [-9.5], "lon": [30.25, 30.75]},
         )
-        ds.to_netcdf(nc)
+        ds.to_netcdf(nc, engine="scipy")
 
     class TwoFileProvider:
         provider_id = "two-file"

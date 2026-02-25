@@ -97,6 +97,7 @@ def _run_raster_operation(
         return temporal_aggregate_stub(
             dataset_id=dataset_id,
             time_value=time_value,
+            bbox=bbox,
             assets=assets,
             frequency=frequency,
             aggregation=aggregation,
@@ -121,15 +122,15 @@ def _build_implementation_metadata(process_id: str, provider: Any) -> dict[str, 
         }
     elif process_id == RASTER_POINT_TIMESERIES_PROCESS_ID:
         compute = {
-            "operation": "point time-series placeholder at AOI centroid",
-            "libs": ["python stdlib"],
-            "notes": "Current implementation is a skeleton placeholder pending sampled raster extraction.",
+            "operation": "point value extraction at AOI centroid",
+            "libs": ["xarray"],
+            "notes": "Nearest-neighbour extraction at AOI centroid from resolved raster assets.",
         }
     else:
         compute = {
-            "operation": "temporal harmonization placeholder",
-            "libs": ["python stdlib"],
-            "notes": "Current implementation is a skeleton placeholder pending xarray resample/groupby logic.",
+            "operation": "temporal aggregation over per-file spatial means",
+            "libs": ["xarray"],
+            "notes": "Computes per-file spatial means over AOI and then applies requested temporal aggregation.",
         }
 
     return {

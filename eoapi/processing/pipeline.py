@@ -17,6 +17,7 @@ from pygeoapi.util import url_join
 
 from eoapi.endpoints.errors import invalid_parameter, not_found
 from eoapi.jobs import create_job
+from eoapi.processing.formatters import rows_to_dhis2
 from eoapi.processing.process_catalog import DHIS2_PIPELINE_PROCESS_ID
 from eoapi.processing.providers import RasterFetchRequest, build_provider
 from eoapi.processing.raster_ops import zonal_stats_stub
@@ -332,25 +333,16 @@ def execute_dhis2_pipeline(payload: dict[str, Any]) -> dict[str, Any]:
         for row in feature_rows:
             all_rows.append({**row, "orgUnit": ou_id})
 
-        # Build dataValue entries (only for rows with a computed value)
+        # Build dataValue entries (only rows with non-null value are emitted).
         for row in feature_rows:
-            value = row.get("value")
-            if value is None:
-                continue
-            dv: dict[str, Any] = {
-                "dataElement": inputs.data_element or "<dataElement UID>",
-                "orgUnit": ou_id,
-                "period": period_str,
-                "value": str(value),
-            }
-            if inputs.category_option_combo:
-                dv["categoryOptionCombo"] = inputs.category_option_combo
-            parameter = row.get("parameter", "")
-            stat = row.get("stat", "")
-            comment = f"{parameter} {stat}".strip()
-            if comment:
-                dv["comment"] = comment
-            data_values.append(dv)
+            formatted = rows_to_dhis2(
+                [row],
+                data_element=inputs.data_element,
+                category_option_combo=inputs.category_option_combo,
+                org_unit=ou_id,
+                period=period_str,
+            )
+            data_values.extend(formatted["dataValues"])
 
     data_value_set: dict[str, Any] = {
         "dataSet": inputs.dataset_name or inputs.dataset_id,

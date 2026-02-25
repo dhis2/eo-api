@@ -93,3 +93,10 @@ def update_job(job_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
 def get_job(job_id: str) -> dict[str, Any] | None:
     with _LOCK:
         return _JOBS.get(job_id)
+
+
+def list_jobs() -> list[dict[str, Any]]:
+    """Return jobs in newest-first order."""
+
+    with _LOCK:
+        return sorted(_JOBS.values(), key=lambda job: job.get("created", ""), reverse=True)

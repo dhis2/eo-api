@@ -61,6 +61,37 @@ def _zonal_value(clipped: Any, aggregation: str) -> float | None:
     return float(item)
 
 
+def _apply_aggregation(values: list[float], aggregation: str) -> float | None:
+    if not values:
+        return None
+    if aggregation == "sum":
+        return float(sum(values))
+    if aggregation == "min":
+        return float(min(values))
+    if aggregation == "max":
+        return float(max(values))
+    return float(sum(values) / len(values))
+
+
+def _point_value(da: Any, lon: float, lat: float) -> float | None:
+    x_dim = next((dim for dim in X_DIM_CANDIDATES if dim in da.dims), None)
+    y_dim = next((dim for dim in Y_DIM_CANDIDATES if dim in da.dims), None)
+    if x_dim is None or y_dim is None:
+        return None
+
+    sampled = da.sel({x_dim: lon, y_dim: lat}, method="nearest")
+    loaded = sampled.load()
+    item = loaded.item() if hasattr(loaded, "item") else loaded
+    if item is None:
+        return None
+    try:
+        if item != item:  # NaN
+            return None
+    except Exception:
+        pass
+    return float(item)
+
+
 def zonal_stats_stub(
     *,
     dataset_id: str,
@@ -130,13 +161,41 @@ def point_timeseries_stub(
     bbox: tuple[float, float, float, float],
     assets: dict[str, list[str]],
 ) -> list[dict[str, Any]]:
-    """Return placeholder point-timeseries rows at AOI bbox centroid."""
+    """Compute point value at AOI centroid when possible, with safe fallbacks."""
+
+    try:
+        import xarray as xr
+    except ImportError:
+        xr = None
 
     rows: list[dict[str, Any]] = []
     lon = round((bbox[0] + bbox[2]) / 2.0, 6)
     lat = round((bbox[1] + bbox[3]) / 2.0, 6)
 
     for parameter, files in assets.items():
+        existing_files = [str(path) for path in files if Path(path).exists()]
+        value: float | None = None
+        status = "computed"
+        note = None
+
+        if not existing_files:
+            status = "missing_assets"
+            note = "No readable raster assets found for requested parameter/time."
+        elif xr is None:
+            status = "missing_dependency"
+            note = "xarray is required to compute point time-series."
+        else:
+            try:
+                dataset = xr.open_dataset(existing_files[0])
+                da = _select_dataarray(dataset, parameter)
+                value = _point_value(da, lon, lat)
+                if value is None:
+                    status = "no_data"
+                    note = "No non-null value found at sampled point."
+            except Exception as exc:
+                status = "read_error"
+                note = f"Failed to read/compute point value: {exc}"
+
         rows.append(
             {
                 "dataset_id": dataset_id,
@@ -144,9 +203,10 @@ def point_timeseries_stub(
                 "operation": "point_timeseries",
                 "time": time_value,
                 "point": [lon, lat],
-                "asset_count": len(files),
-                "value": None,
-                "status": "stub",
+                "asset_count": len(existing_files),
+                "value": value,
+                "status": status,
+                "note": note,
             }
         )
     return rows
@@ -156,14 +216,49 @@ def temporal_aggregate_stub(
     *,
     dataset_id: str,
     time_value: str,
+    bbox: tuple[float, float, float, float],
     assets: dict[str, list[str]],
     frequency: str,
     aggregation: str,
 ) -> list[dict[str, Any]]:
-    """Return placeholder temporal-aggregation rows for each requested parameter."""
+    """Compute simple temporal aggregation over per-file spatial means."""
+
+    try:
+        import xarray as xr
+    except ImportError:
+        xr = None
 
     rows: list[dict[str, Any]] = []
     for parameter, files in assets.items():
+        existing_files = [str(path) for path in files if Path(path).exists()]
+        sample_values: list[float] = []
+        value: float | None = None
+        status = "computed"
+        note = None
+
+        if not existing_files:
+            status = "missing_assets"
+            note = "No readable raster assets found for requested parameter/time window."
+        elif xr is None:
+            status = "missing_dependency"
+            note = "xarray is required to compute temporal aggregation."
+        else:
+            try:
+                for file_path in existing_files:
+                    dataset = xr.open_dataset(file_path)
+                    da = _select_dataarray(dataset, parameter)
+                    clipped = _clip_to_bbox(da, bbox)
+                    sample = _zonal_value(clipped, "mean")
+                    if sample is not None:
+                        sample_values.append(sample)
+                value = _apply_aggregation(sample_values, aggregation)
+                if value is None:
+                    status = "no_data"
+                    note = "No non-null samples found across files in temporal window."
+            except Exception as exc:
+                status = "read_error"
+                note = f"Failed to read/compute temporal aggregation: {exc}"
+
         rows.append(
             {
                 "dataset_id": dataset_id,
@@ -172,9 +267,11 @@ def temporal_aggregate_stub(
                 "source_time": time_value,
                 "target_frequency": frequency,
                 "aggregation": aggregation,
-                "asset_count": len(files),
-                "value": None,
-                "status": "stub",
+                "asset_count": len(existing_files),
+                "sample_count": len(sample_values),
+                "value": value,
+                "status": status,
+                "note": note,
             }
         )
     return rows

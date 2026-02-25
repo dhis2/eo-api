@@ -73,7 +73,7 @@ def test_skeleton_zonal_stats_computes_numeric_value(monkeypatch, tmp_path: Path
         {"precip": (("lat", "lon"), [[1.0, 2.0], [3.0, 4.0]])},
         coords={"lat": [-9.75, -9.25], "lon": [30.25, 30.75]},
     )
-    ds.to_netcdf(path)
+    ds.to_netcdf(path, engine="scipy")
 
     class RealFileProvider:
         provider_id = "file-provider"
