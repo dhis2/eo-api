@@ -167,6 +167,8 @@ class TiTilerProvider(BaseTileProvider):
         tms = self.get_tilematrixset(tileset)
         if tms is None or not self.is_in_limits(tms, z, x, y):
             raise ProviderTileNotFoundError
+        if self._is_tile_outside_dataset_bounds(tileset, z, x, y):
+            raise ProviderTileNotFoundError
 
         tile_format = (format_ or self.format_type).lower()
         if tile_format == "jpg":
@@ -187,6 +189,11 @@ class TiTilerProvider(BaseTileProvider):
         if response.status_code == 204:
             return None
         if response.status_code == 404:
+            raise ProviderTileNotFoundError
+        if response.status_code >= 500 and (
+            self._is_tile_outside_bounds(response)
+            or self._is_tile_outside_dataset_bounds(tileset, z, x, y)
+        ):
             raise ProviderTileNotFoundError
         if response.status_code < 500 and not response.ok:
             raise ProviderInvalidQueryError(response.text)
@@ -302,3 +309,65 @@ class TiTilerProvider(BaseTileProvider):
         params = {"url": self.data}
         params.update({k: v for k, v in self.options.items() if k not in ignored})
         return params
+
+    def _is_tile_outside_bounds(self, response: requests.Response) -> bool:
+        """Return true when TiTiler reports a tile outside raster bounds."""
+        text = (response.text or "").lower()
+        if "tileoutsidebounds" in text or "outside bounds" in text:
+            return True
+
+        try:
+            payload = response.json()
+        except ValueError:
+            return False
+
+        detail = str(payload.get("detail", "")).lower()
+        return "tileoutsidebounds" in detail or "outside bounds" in detail
+
+    def _is_tile_outside_dataset_bounds(self, tileset: str, z: int, x: int, y: int) -> bool:
+        """Return true when the requested tile does not intersect local dataset bounds."""
+        if is_url(self.data):
+            return False
+
+        data_path = Path(self.data)
+        if not data_path.exists():
+            return False
+
+        try:
+            import morecantile
+            import rasterio
+            from rasterio.crs import CRS
+            from rasterio.warp import transform_bounds
+        except Exception:
+            return False
+
+        try:
+            tms = morecantile.tms.get(tileset)
+            tile = morecantile.Tile(x=int(x), y=int(y), z=int(z))
+            tile_bounds = tms.xy_bounds(tile)
+            tile_crs = CRS.from_string(str(tms.crs.root))
+
+            with rasterio.open(data_path) as src:
+                if src.crs is None:
+                    return False
+
+                transformed = transform_bounds(
+                    tile_crs,
+                    src.crs,
+                    tile_bounds.left,
+                    tile_bounds.bottom,
+                    tile_bounds.right,
+                    tile_bounds.top,
+                    densify_pts=21,
+                )
+                src_bounds = src.bounds
+
+            tile_left, tile_bottom, tile_right, tile_top = transformed
+            return (
+                tile_right <= src_bounds.left
+                or tile_left >= src_bounds.right
+                or tile_top <= src_bounds.bottom
+                or tile_bottom >= src_bounds.top
+            )
+        except Exception:
+            return False
