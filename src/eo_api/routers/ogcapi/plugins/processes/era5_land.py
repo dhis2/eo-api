@@ -20,7 +20,7 @@ PROCESS_METADATA = {
     "id": "era5-land",
     "title": "ERA5-Land Climate Data",
     "description": "Download ERA5-Land hourly climate data for a bounding box and date range.",
-    "jobControlOptions": ["sync-execute"],
+    "jobControlOptions": ["sync-execute", "async-execute"],
     "keywords": ["climate", "ERA5-Land", "temperature", "precipitation"],
     "inputs": {
         "start": {

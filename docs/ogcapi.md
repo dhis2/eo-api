@@ -197,7 +197,7 @@ NULL check combined with comparison:
 
 ## Processes
 
-OGC API - Processes exposes server-side processing tasks. Each process defines typed inputs and outputs and can be executed synchronously via `POST`.
+OGC API - Processes exposes server-side processing tasks. Each process defines typed inputs and outputs and can be executed synchronously or asynchronously via `POST`.
 
 ### Available processes
 
@@ -212,7 +212,11 @@ OGC API - Processes exposes server-side processing tasks. Each process defines t
 |---|---|---|
 | GET | `/ogcapi/processes` | List all available processes |
 | GET | `/ogcapi/processes/{processId}` | Describe a process (inputs, outputs, metadata) |
-| POST | `/ogcapi/processes/{processId}/execution` | Execute a process |
+| POST | `/ogcapi/processes/{processId}/execution` | Execute a process (sync or async) |
+| GET | `/ogcapi/jobs` | List all jobs |
+| GET | `/ogcapi/jobs/{jobId}` | Get job status |
+| GET | `/ogcapi/jobs/{jobId}/results` | Get job results |
+| DELETE | `/ogcapi/jobs/{jobId}` | Cancel or delete a job |
 
 ### Common inputs
 
@@ -293,6 +297,73 @@ All processes return a JSON object with:
   "message": "Data downloaded (dry run)"
 }
 ```
+
+## Async execution and job management
+
+Climate data downloads (ERA5-Land, CHIRPS3) can take minutes. To avoid HTTP timeouts, processes support asynchronous execution via the `Prefer: respond-async` header.
+
+### Submitting an async request
+
+Add the `Prefer: respond-async` header to a normal execution request. The server returns `201 Created` with a `Location` header pointing to the job status endpoint.
+
+```bash
+curl -X POST http://localhost:8000/ogcapi/processes/chirps3-download/execution \
+  -H "Prefer: respond-async" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputs": {
+      "start": "2024-01",
+      "end": "2024-01",
+      "bbox": [32, -2, 35, 1]
+    }
+  }'
+```
+
+Response (`201 Created`):
+
+```json
+{
+  "jobID": "abc123",
+  "status": "accepted",
+  "type": "process",
+  "message": "Job accepted",
+  "...": "..."
+}
+```
+
+The `Location` response header contains the job URL, e.g. `/ogcapi/jobs/abc123`.
+
+### Polling job status
+
+```bash
+curl http://localhost:8000/ogcapi/jobs/{jobId}
+```
+
+The `status` field progresses through: `accepted` -> `running` -> `successful` (or `failed`).
+
+### Retrieving results
+
+Once status is `successful`:
+
+```bash
+curl http://localhost:8000/ogcapi/jobs/{jobId}/results
+```
+
+### Listing all jobs
+
+```bash
+curl http://localhost:8000/ogcapi/jobs
+```
+
+### Deleting a job
+
+```bash
+curl -X DELETE http://localhost:8000/ogcapi/jobs/{jobId}
+```
+
+### Synchronous execution (default)
+
+Without the `Prefer` header, requests execute synchronously and return results directly. This is unchanged from before.
 
 ## Plugin system
 
