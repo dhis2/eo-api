@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
-from urllib.request import urlopen
 
+import httpx
 import numpy as np
 import rasterio
 from pydantic import ValidationError
@@ -27,7 +25,7 @@ PROCESS_METADATA = {
     "inputs": {
         "geojson": {
             "title": "GeoJSON FeatureCollection",
-            "description": "FeatureCollection object or URI/path to GeoJSON file.",
+            "description": "FeatureCollection object or HTTP(S) URL to GeoJSON file.",
             "schema": {"oneOf": [{"type": "object"}, {"type": "string"}]},
             "minOccurs": 1,
             "maxOccurs": 1,
@@ -109,16 +107,16 @@ def _read_geojson_input(geojson_input: dict[str, Any] | str) -> dict[str, Any]:
     if isinstance(geojson_input, dict):
         return geojson_input
 
-    parsed = urlparse(geojson_input)
-    if parsed.scheme in {"http", "https"}:
-        with urlopen(geojson_input) as response:
-            payload = response.read().decode("utf-8")
-            return _parse_geojson_object(payload)
+    if not geojson_input.startswith(("http://", "https://")):
+        raise ProcessorExecuteError("GeoJSON string input must be an HTTP(S) URL")
 
-    path = Path(geojson_input)
-    if not path.exists():
-        raise ProcessorExecuteError(f"GeoJSON file not found: {geojson_input}")
-    return _parse_geojson_object(path.read_text(encoding="utf-8"))
+    try:
+        response = httpx.get(geojson_input, timeout=30)
+        response.raise_for_status()
+    except httpx.HTTPError as err:
+        raise ProcessorExecuteError(f"Failed to fetch GeoJSON from URL: {err}") from err
+
+    return _parse_geojson_object(response.text)
 
 
 def _parse_geojson_object(payload: str) -> dict[str, Any]:
