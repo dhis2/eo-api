@@ -2,21 +2,74 @@
 
 DHIS2 EO API allows data from multiple sources (primarily earth observation data) to be extracted, transformed and loaded into DHIS2 and the Chap Modelling Platform.
 
-Create conda environment:
+## Setup
 
-`conda create -n dhis2-eo-api python=3.13`
+### Using uv (recommended)
 
-Activate environment:
+Install dependencies (requires [uv](https://docs.astral.sh/uv/)):
 
-`conda activate dhis2-eo-api`
+`uv sync`
 
-Install requirements:
+Environment variables are loaded automatically from `.env` (via `python-dotenv`).
+Copy `.env.example` to `.env` and adjust values as needed.
 
-`pip install -r requirements.txt`
+Key environment variables (used by the OGC API DHIS2 plugin):
+
+- `DHIS2_BASE_URL` -- DHIS2 API base URL (defaults to play server in `.env.example`)
+- `DHIS2_USERNAME` -- DHIS2 username
+- `DHIS2_PASSWORD` -- DHIS2 password
 
 Start the app:
 
-`uvicorn main:app --reload`
+`uv run uvicorn eo_api.main:app --reload`
+
+### Using pip (alternative)
+
+If you can't use uv (e.g. mixed conda/forge environments):
+
+```
+python -m venv .venv
+source .venv/bin/activate
+pip install -e .
+uvicorn eo_api.main:app --reload
+```
+
+### Using conda
+
+```
+conda create -n dhis2-eo-api python=3.13
+conda activate dhis2-eo-api
+pip install -e .
+uvicorn eo_api.main:app --reload
+```
+
+### Makefile targets
+
+- `make sync` -- install dependencies with uv
+- `make run` -- start the app with uvicorn
+- `make lint` -- run ruff linting and format checks
+- `make test` -- run tests with pytest
+- `make openapi` -- generate pygeoapi OpenAPI spec
+- `make start` -- start the Docker stack (builds images first)
+- `make restart` -- tear down, rebuild, and start the Docker stack from scratch
+
+### pygeoapi instructions
+
+To validate the configuration:
+
+```
+pygeoapi config validate -c pygeoapi-config.yml`
+```
+
+Run after changes are made in pygeoapi-config.yml:
+
+`make openapi` or
+
+```
+PYTHONPATH="$(pwd)" uv run pygeoapi openapi generate ./pygeoapi-config.yml > pygeoapi-openapi.yml
+```
+
+### Endpoints
 
 Root endpoint:
 
@@ -25,6 +78,10 @@ http://127.0.0.1:8000/ -> Welcome to DHIS2 EO API
 Docs:
 
 http://127.0.0.1:8000/docs
+
+OGC API
+
+http://127.0.0.1:8000/ogcapi
 
 Examples:
 

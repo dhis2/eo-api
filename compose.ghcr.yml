@@ -1,0 +1,13 @@
+services:
+  api:
+    image: ghcr.io/dhis2/eo-api:latest
+    env_file: .env
+    ports:
+      - "${PORT:-8000}:${PORT:-8000}"
+    init: true
+    restart: unless-stopped
+    volumes:
+      - data:/tmp/data
+
+volumes:
+  data:
