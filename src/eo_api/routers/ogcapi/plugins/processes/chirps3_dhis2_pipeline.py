@@ -11,7 +11,6 @@ import httpx
 import pandas as pd
 import xarray as xr
 from dhis2_client.client import DHIS2Client
-from dhis2eo.data.chc.chirps3 import daily as chirps3_daily
 from dhis2eo.integrations.pandas import format_value_for_dhis2
 from pydantic import ValidationError
 from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
@@ -24,6 +23,7 @@ from eo_api.integrations.dhis2_adapter import (
     get_org_unit_subtree_geojson,
     get_org_units_geojson,
 )
+from eo_api.routers.ogcapi.plugins.processes.chirps3 import download_chirps3_daily
 from eo_api.routers.ogcapi.plugins.processes.schemas import CHIRPS3DHIS2PipelineInput
 
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "/tmp/data")
@@ -422,7 +422,7 @@ class CHIRPS3DHIS2PipelineProcessor(BaseProcessor):
             download_dir = Path(DOWNLOAD_DIR) / "chirps3_dhis2_pipeline" / cache_key
             download_dir.mkdir(parents=True, exist_ok=True)
 
-            files = chirps3_daily.download(
+            files = download_chirps3_daily(
                 start=str(inputs.start_date),
                 end=str(inputs.end_date),
                 bbox=effective_bbox,
