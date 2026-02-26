@@ -4,6 +4,7 @@ import sys
 from importlib.metadata import version
 
 from fastapi import APIRouter, Request
+from fastapi.responses import RedirectResponse
 
 from eo_api.schemas import AppInfo, HealthStatus, Link, RootResponse, Status
 
@@ -40,3 +41,9 @@ def info() -> AppInfo:
         pygeoapi_version=version("pygeoapi"),
         uvicorn_version=version("uvicorn"),
     )
+
+
+@router.get("/ogcapi", include_in_schema=False)
+async def ogcapi_redirect() -> RedirectResponse:
+    """Redirect /ogcapi to /ogcapi/ for trailing-slash consistency."""
+    return RedirectResponse(url="/ogcapi/")

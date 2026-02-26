@@ -52,7 +52,7 @@ class DHIS2OrgUnitsProvider(BaseProvider):
         number_matched = len(org_units)
         page = org_units[offset : offset + limit]
 
-        fc = FeatureCollection(
+        fc: FeatureCollection = FeatureCollection(
             type="FeatureCollection",
             features=[org_unit_to_feature(ou) for ou in page],
         )
