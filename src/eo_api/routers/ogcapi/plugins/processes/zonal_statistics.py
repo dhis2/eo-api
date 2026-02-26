@@ -113,12 +113,19 @@ def _read_geojson_input(geojson_input: dict[str, Any] | str) -> dict[str, Any]:
     if parsed.scheme in {"http", "https"}:
         with urlopen(geojson_input) as response:
             payload = response.read().decode("utf-8")
-            return json.loads(payload)
+            return _parse_geojson_object(payload)
 
     path = Path(geojson_input)
     if not path.exists():
         raise ProcessorExecuteError(f"GeoJSON file not found: {geojson_input}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return _parse_geojson_object(path.read_text(encoding="utf-8"))
+
+
+def _parse_geojson_object(payload: str) -> dict[str, Any]:
+    loaded: object = json.loads(payload)
+    if not isinstance(loaded, dict):
+        raise ProcessorExecuteError("GeoJSON payload must be a JSON object")
+    return loaded
 
 
 def _ensure_feature_collection(geojson: dict[str, Any]) -> list[dict[str, Any]]:
@@ -239,4 +246,3 @@ class ZonalStatisticsProcessor(BaseProcessor):
 
     def __repr__(self) -> str:
         return "<ZonalStatisticsProcessor>"
-
