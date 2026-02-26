@@ -1,17 +1,15 @@
-import atexit
 import importlib
 import inspect
 import logging
 import datetime
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
 
 import xarray as xr
 import numpy as np
 
 from . import registry
 from .utils import get_time_dim, get_lon_lat_dims, numpy_period_string
-from constants import BBOX, COUNTRY_CODE, CACHE_OVERRIDE
+from .constants import BBOX, COUNTRY_CODE, CACHE_OVERRIDE
 
 # logger
 logger = logging.getLogger(__name__)

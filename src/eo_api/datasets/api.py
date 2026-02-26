@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Response
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-import constants
+from . import constants
 from . import registry
 from . import cache
 from . import raster

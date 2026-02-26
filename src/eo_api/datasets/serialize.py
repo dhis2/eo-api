@@ -2,11 +2,12 @@ import os
 import tempfile
 import io
 import logging
+import json
 
 import geopandas as gpd
 from matplotlib.figure import Figure
 
-import constants
+from . import constants
 from .utils import get_time_dim, pandas_period_string, numpy_period_array
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ def dataframe_to_preview(df, dataset, period_type):
     assert len(temp_df[time_dim].unique()) == 1
 
     # merge with org units geojson
-    org_units = gpd.read_file(constants.GEOJSON_FILE)
+    org_units = gpd.read_file(json.dumps(constants.ORG_UNITS_GEOJSON))
     org_units_with_temp = org_units.merge(temp_df, on='id', how='left')
 
     # plot to map
