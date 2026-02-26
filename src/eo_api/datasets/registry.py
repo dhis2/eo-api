@@ -1,5 +1,6 @@
 """Dataset registry backed by YAML config files."""
 
+import functools
 import logging
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 CONFIGS_DIR = SCRIPT_DIR / "registry"
 
 
+@functools.lru_cache(maxsize=1)
 def list_datasets() -> list[dict[str, Any]]:
     """Load all YAML files in the registry folder and return a flat list of datasets."""
     datasets: list[dict[str, Any]] = []
