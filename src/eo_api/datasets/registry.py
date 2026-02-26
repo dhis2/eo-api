@@ -27,7 +27,7 @@ def list_datasets() -> list[dict[str, Any]]:
             with open(file_path, encoding="utf-8") as f:
                 file_datasets = yaml.safe_load(f)
                 datasets.extend(file_datasets)
-        except Exception:
+        except (yaml.YAMLError, OSError):
             logger.exception("Error loading %s", file_path.name)
 
     return datasets
