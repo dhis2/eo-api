@@ -10,8 +10,11 @@ caches its settings on first import.
 import logging
 import os
 import warnings
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from importlib.util import find_spec
 from pathlib import Path
+from typing import Any, cast
 
 os.environ.setdefault("PREFECT_UI_SERVE_BASE", "/prefect/")
 os.environ.setdefault("PREFECT_UI_API_URL", "/prefect/api")
@@ -39,6 +42,7 @@ def _configure_proj_data() -> None:
 _configure_proj_data()
 
 warnings.filterwarnings("ignore", message="ecCodes .* or higher is recommended")
+warnings.filterwarnings("ignore", message=r"Engine 'cfgrib' loading failed:[\s\S]*", category=RuntimeWarning)
 
 logging.getLogger("pygeoapi.api.processes").setLevel(logging.ERROR)
 logging.getLogger("pygeoapi.l10n").setLevel(logging.ERROR)
@@ -47,14 +51,38 @@ from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()
 
-from collections.abc import AsyncIterator  # noqa: E402
-from contextlib import asynccontextmanager  # noqa: E402
+openapi_path = os.getenv("PYGEOAPI_OPENAPI")
+config_path = os.getenv("PYGEOAPI_CONFIG")
+if openapi_path and config_path and not Path(openapi_path).exists():
+    from pygeoapi.openapi import generate_openapi_document  # noqa: E402
+
+    with Path(config_path).open(encoding="utf-8") as config_file:
+        openapi_doc = generate_openapi_document(
+            config_file,
+            output_format=cast(Any, "yaml"),
+            fail_on_invalid_collection=False,
+        )
+    Path(openapi_path).write_text(openapi_doc, encoding="utf-8")
+    warnings.warn(f"Generated missing OpenAPI document at '{openapi_path}'.", RuntimeWarning)
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 
 from eo_api.routers import cog, ogcapi, pipelines, prefect, root  # noqa: E402
+
+# Keep app progress logs visible while muting noisy third-party info logs.
+eo_logger = logging.getLogger("eo_api")
+eo_logger.setLevel(logging.INFO)
+if not eo_logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
+    eo_logger.addHandler(handler)
+eo_logger.propagate = False
+
+logging.getLogger("dhis2eo").setLevel(logging.WARNING)
+logging.getLogger("xarray").setLevel(logging.WARNING)
 
 
 async def _serve_flows() -> None:
