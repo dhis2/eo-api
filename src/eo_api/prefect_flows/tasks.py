@@ -5,6 +5,7 @@ synchronous execution, which returns the result directly in the response.
 """
 
 import logging
+import os
 from pathlib import Path
 
 import httpx
@@ -14,7 +15,7 @@ from prefect.artifacts import create_markdown_artifact
 
 logger = logging.getLogger(__name__)
 
-OGCAPI_BASE_URL = "http://localhost:8000/ogcapi"
+OGCAPI_BASE_URL = os.getenv("OGCAPI_BASE_URL", "http://localhost:8000/ogcapi")
 PROCESS_TIMEOUT_SECONDS = 600
 
 
