@@ -1,14 +1,14 @@
+import io
+import json
+import logging
 import os
 import tempfile
-import io
-import logging
-import json
 
 import geopandas as gpd
 from matplotlib.figure import Figure
 
 from . import constants
-from .utils import get_time_dim, pandas_period_string, numpy_period_array
+from .utils import get_time_dim, numpy_period_array, pandas_period_string
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ def dataframe_to_json_data(df, dataset, period_type):
 
     # create smaller dataframe with known columns
     temp_df = df[[time_dim, "id", varname]].rename(columns={time_dim:'period', 'id':'orgunit', varname:'value'})
-    
+
     # convert period string depending on period type
     temp_df['period'] = pandas_period_string(temp_df['period'], period_type)
 
@@ -35,7 +35,7 @@ def dataframe_to_preview(df, dataset, period_type):
 
     # create smaller dataframe with known columns
     temp_df = df[[time_dim, "id", varname]]
-    
+
     # convert period string depending on period type
     temp_df[time_dim] = pandas_period_string(temp_df[time_dim], period_type)
 
@@ -70,7 +70,7 @@ def xarray_to_preview(ds, dataset, period_type):
 
     # create smaller dataframe with known columns
     temp_ds = ds[[time_dim, varname]]
-    
+
     # convert period string depending on period type
     temp_ds = temp_ds.assign_coords({
         time_dim: lambda x: numpy_period_array(x[time_dim].values, period_type)

@@ -1,21 +1,15 @@
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Response
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
-from . import constants
-from . import registry
-from . import cache
-from . import raster
-from . import units
-from . import serialize
+from . import cache, constants, raster, registry, serialize, units
 
 router = APIRouter()
 
 @router.get("/")
 def list_datasets():
-    """
-    Returned list of available datasets from registry.
+    """Returned list of available datasets from registry.
     """
     datasets = registry.list_datasets()
     return datasets
@@ -28,8 +22,7 @@ def get_dataset_or_404(dataset_id: str):
 
 @router.get("/{dataset_id}", response_model=dict)
 def get_dataset(dataset_id: str):
-    """
-    Get a single dataset by ID.
+    """Get a single dataset by ID.
     """
     dataset = get_dataset_or_404(dataset_id)
     cache_info = cache.get_cache_info(dataset)
@@ -38,8 +31,7 @@ def get_dataset(dataset_id: str):
 
 @router.get("/{dataset_id}/build_cache", response_model=dict)
 def build_dataset_cache(dataset_id: str, start: str, end: str | None = None, overwrite: bool = False, background_tasks: BackgroundTasks = None):
-    """
-    Download and cache dataset as local netcdf files direct from the source.
+    """Download and cache dataset as local netcdf files direct from the source.
     """
     dataset = get_dataset_or_404(dataset_id)
     cache.build_dataset_cache(dataset, start=start, end=end, overwrite=overwrite, background_tasks=background_tasks)
@@ -47,16 +39,15 @@ def build_dataset_cache(dataset_id: str, start: str, end: str | None = None, ove
 
 @router.get("/{dataset_id}/optimize_cache", response_model=dict)
 def optimize_dataset_cache(dataset_id: str, background_tasks: BackgroundTasks = None):
-    """
-    Optimize dataset cache by collecting all cache files to a single zarr archive.
+    """Optimize dataset cache by collecting all cache files to a single zarr archive.
     """
     dataset = get_dataset_or_404(dataset_id)
     background_tasks.add_task(cache.optimize_dataset_cache, dataset)
     return {'status': 'Dataset cache optimization submitted for processing'}
 
 def get_dataset_period_type(dataset, period_type, start, end, temporal_aggregation):
-    # TODO: maybe move this and similar somewhere better like a pipelines.py file? 
-    # ... 
+    # TODO: maybe move this and similar somewhere better like a pipelines.py file?
+    # ...
 
     # get raster data
     ds = raster.get_data(dataset, start, end)
@@ -69,8 +60,7 @@ def get_dataset_period_type(dataset, period_type, start, end, temporal_aggregati
 
 @router.get("/{dataset_id}/{period_type}/orgunits", response_model=list)
 def get_dataset_period_type_org_units(dataset_id: str, period_type: str, start: str, end: str, temporal_aggregation: str, spatial_aggregation: str):
-    """
-    Get a dataset dynamically aggregated to a given period type and org units and return json values.
+    """Get a dataset dynamically aggregated to a given period type and org units and return json values.
     """
     # get dataset metadata
     dataset = get_dataset_or_404(dataset_id)
@@ -91,8 +81,7 @@ def get_dataset_period_type_org_units(dataset_id: str, period_type: str, start: 
 
 @router.get("/{dataset_id}/{period_type}/orgunits/preview", response_model=list)
 def get_dataset_period_type_org_units_preview(dataset_id: str, period_type: str, period: str, temporal_aggregation: str, spatial_aggregation: str):
-    """
-    Preview a PNG map image of a dataset dynamically aggregated to a given period and org units.
+    """Preview a PNG map image of a dataset dynamically aggregated to a given period and org units.
     """
     # get dataset metadata
     dataset = get_dataset_or_404(dataset_id)
@@ -116,12 +105,11 @@ def get_dataset_period_type_org_units_preview(dataset_id: str, period_type: str,
 
 @router.get("/{dataset_id}/{period_type}/raster")
 def get_dataset_period_type_raster(dataset_id: str, period_type: str, start: str, end: str, temporal_aggregation: str):
-    """
-    Get a dataset dynamically aggregated to a given period type and return as downloadable raster file.
+    """Get a dataset dynamically aggregated to a given period type and return as downloadable raster file.
     """
     # get dataset metadata
     dataset = get_dataset_or_404(dataset_id)
-    
+
     # get dataset for period type and start/end period
     ds = get_dataset_period_type(dataset, period_type, start, end, temporal_aggregation)
 
@@ -141,12 +129,11 @@ def get_dataset_period_type_raster(dataset_id: str, period_type: str, start: str
 
 @router.get("/{dataset_id}/{period_type}/raster/preview")
 def get_dataset_period_type_raster_preview(dataset_id: str, period_type: str, period: str, temporal_aggregation: str):
-    """
-    Preview a PNG map image of a dataset dynamically aggregated to a given period.
+    """Preview a PNG map image of a dataset dynamically aggregated to a given period.
     """
     # get dataset metadata
     dataset = get_dataset_or_404(dataset_id)
-    
+
     # get dataset for period type and a single period
     start = end = period
     ds = get_dataset_period_type(dataset, period_type, start, end, temporal_aggregation)

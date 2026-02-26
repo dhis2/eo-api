@@ -69,9 +69,8 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 
+from eo_api.datasets import api as datasets  # noqa: E402
 from eo_api.routers import cog, ogcapi, pipelines, prefect, root  # noqa: E402
-from eo_api.datasets import api as datasets # TODO: to be changed
-
 
 # Keep app progress logs visible while muting noisy third-party info logs.
 eo_logger = logging.getLogger("eo_api")

@@ -9,7 +9,7 @@ def convert_pandas_units(ds, dataset):
     varname = dataset['variable']
     from_units = dataset['units']
     to_units = dataset.get('convertUnits')
-    
+
     if to_units and to_units != from_units:
         logger.info(f"Applying unit conversion from {from_units} to {to_units}...")
         # values with source units
@@ -26,7 +26,7 @@ def convert_xarray_units(ds, dataset):
     varname = dataset['variable']
     from_units = dataset['units']
     to_units = dataset.get('convertUnits')
-    
+
     if to_units and to_units != from_units:
         logger.info(f"Applying unit conversion from {from_units} to {to_units}...")
         # values with source units

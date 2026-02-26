@@ -1,15 +1,13 @@
+import datetime
 import importlib
 import inspect
 import logging
-import datetime
 from pathlib import Path
 
 import xarray as xr
-import numpy as np
 
-from . import registry
-from .utils import get_time_dim, get_lon_lat_dims, numpy_period_string
-from .constants import BBOX, COUNTRY_CODE, CACHE_OVERRIDE
+from .constants import BBOX, CACHE_OVERRIDE, COUNTRY_CODE
+from .utils import get_lon_lat_dims, get_time_dim, numpy_period_string
 
 # logger
 logger = logging.getLogger(__name__)
@@ -17,7 +15,7 @@ logger = logging.getLogger(__name__)
 # paths
 SCRIPT_DIR = Path(__file__).parent.resolve()
 CACHE_DIR = SCRIPT_DIR / 'cache'
-if CACHE_OVERRIDE: 
+if CACHE_OVERRIDE:
     CACHE_DIR = Path(CACHE_OVERRIDE)
 
 def build_dataset_cache(dataset, start, end, overwrite, background_tasks):
@@ -71,7 +69,7 @@ def optimize_dataset_cache(dataset):
     ds = ds.drop_vars(drop_coords)
 
     # determine optimal chunk sizes
-    logger.info(f'Determining optimal chunk size for zarr archive')
+    logger.info('Determining optimal chunk size for zarr archive')
     ds_autochunk = ds.chunk('auto').unify_chunks()
     # extract the first chunk size for each dimension to force uniformity
     uniform_chunks = {dim: ds_autochunk.chunks[dim][0] for dim in ds_autochunk.dims}
@@ -81,7 +79,7 @@ def optimize_dataset_cache(dataset):
     logging.info(f'--> {uniform_chunks}')
 
     # save as zarr
-    logger.info(f'Saving to optimized zarr file')
+    logger.info('Saving to optimized zarr file')
     zarr_path = CACHE_DIR / f'{get_cache_prefix(dataset)}.zarr'
     ds_chunked = ds.chunk(uniform_chunks)
     ds_chunked.to_zarr(zarr_path, mode='w')
@@ -93,7 +91,7 @@ def compute_time_space_chunks(ds, dataset, max_spatial_chunk=256):
     chunks = {}
 
     # time
-    # set to common access patterns depending on original dataset period 
+    # set to common access patterns depending on original dataset period
     # TODO: could potentially allow this to be customized in the dataset yaml file
     dim = get_time_dim(ds)
     period_type = dataset['periodType']
@@ -158,7 +156,7 @@ def get_cache_prefix(dataset):
 
 def get_cache_files(dataset):
     # TODO: this is not bulletproof, eg 2m_temperature might also get another dataset named 2m_temperature_modified
-    # ...probably need a delimeter to specify end of dataset name... 
+    # ...probably need a delimeter to specify end of dataset name...
     prefix = get_cache_prefix(dataset)
     files = list(CACHE_DIR.glob(f'{prefix}*.nc'))
     return files
@@ -177,5 +175,5 @@ def get_dynamic_function(full_path):
 
     # This handles all the intermediate sub-package imports automatically
     module = importlib.import_module(module_path)
-    
+
     return getattr(module, function_name)

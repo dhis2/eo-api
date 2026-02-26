@@ -1,6 +1,7 @@
 
 import numpy as np
 
+
 def get_time_dim(ds):
     # get first available time dim
     time_dim = None
@@ -10,9 +11,9 @@ def get_time_dim(ds):
             break
     if time_dim is None:
         raise Exception(f'Unable to find time dimension: {ds.coordinates}')
-    
+
     return time_dim
-    
+
 def get_lon_lat_dims(ds):
     # get first available spatial dim
     lat_dim = None
@@ -48,10 +49,10 @@ def numpy_period_string(t: np.datetime64, period_type: str) -> str:
 def numpy_period_array(t_array: np.ndarray, period_type: str) -> np.ndarray:
     # TODO: this and numpy_period_string should be merged
     # ...
-    
+
     # Convert the whole array to strings at once
     s = np.datetime_as_string(t_array, unit="s")
-    
+
     # Map periods to string lengths: YYYY-MM-DDTHH (13), YYYY-MM-DD (10), etc.
     lengths = {"hourly": 13, "daily": 10, "monthly": 7, "yearly": 4}
     return s.astype(f"U{lengths[period_type]}")
@@ -65,8 +66,8 @@ def pandas_period_string(column, period_type):
 
     if period_type == "monthly":
         return column.dt.strftime('%Y-%m')
-    
+
     if period_type == "yearly":
         return column.dt.strftime('%Y')
-    
+
     raise ValueError(f"Unknown periodType: {period_type}")

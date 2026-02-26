@@ -1,5 +1,6 @@
-import os
 import json
+import os
+
 import geopandas as gpd
 
 from ..integrations.dhis2_adapter import create_client, get_org_units_geojson
