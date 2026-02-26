@@ -521,7 +521,7 @@ class CHIRPS3DHIS2PipelineProcessor(BaseProcessor):
                 "or increase DHIS2_HTTP_TIMEOUT_SECONDS."
             ) from None
         except Exception as e:
-            raise ProcessorExecuteError(str(e)) from None
+            raise ProcessorExecuteError(str(e)) from e
         finally:
             client.close()
 
