@@ -5,14 +5,14 @@ import geopandas as gpd
 # TODO: these should be defined differently or retrieved from DHIS2 connection
 
 # sierra leone
-# GEOJSON_FILE = 'sierra-leone-districts.geojson'
-# COUNTRY_CODE = 'SLE'
-# CACHE_OVERRIDE = r'C:\Users\karimba\Documents\Github\eo-api\datasets\cache\SLE'
+GEOJSON_FILE = 'sierra-leone-districts.geojson'
+COUNTRY_CODE = 'SLE'
+CACHE_OVERRIDE = r'C:\Users\karimba\Documents\Github\eo-api\datasets\cache\SLE'
 
 # brazil
-GEOJSON_FILE = 'brazil-regions.geojson'
-COUNTRY_CODE = 'BRA'
-CACHE_OVERRIDE = r'C:\Users\karimba\Documents\Github\eo-api\datasets\cache\BRA'
+# GEOJSON_FILE = 'brazil-regions.geojson'
+# COUNTRY_CODE = 'BRA'
+# CACHE_OVERRIDE = r'C:\Users\karimba\Documents\Github\eo-api\datasets\cache\BRA'
 
 #################################################
 ORG_UNITS_GEOJSON = json.load(open(GEOJSON_FILE))

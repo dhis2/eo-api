@@ -49,12 +49,12 @@ def dataframe_to_preview(df, dataset, period_type):
     fig = Figure()
     ax = fig.subplots()
     period = temp_df[time_dim].values[0]
-    org_units_with_temp.plot(ax=ax, column=varname, cmap="YlGnBu", legend=True, legend_kwds={'label': varname})
+    org_units_with_temp.plot(ax=ax, column=varname, legend=True, legend_kwds={'label': varname})
     ax.set_title(f'{period}')
 
     # save to in-memory image
     buf = io.BytesIO()
-    fig.savefig(buf, format="png") #, dpi=300)
+    fig.savefig(buf, format="png", dpi=150)
     buf.seek(0)
 
     # return as image
@@ -82,12 +82,12 @@ def xarray_to_preview(ds, dataset, period_type):
     fig = Figure()
     ax = fig.subplots()
     period = temp_ds[time_dim].values[0]
-    temp_ds[varname].plot(ax=ax, cmap="YlGnBu")
+    temp_ds[varname].plot(ax=ax)
     ax.set_title(f'{period}')
 
     # save to in-memory image
     buf = io.BytesIO()
-    fig.savefig(buf, format="png") #, dpi=300)
+    fig.savefig(buf, format="png", dpi=150)
     buf.seek(0)
 
     # return as image
