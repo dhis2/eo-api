@@ -320,8 +320,6 @@ curl -X POST http://localhost:8000/ogcapi/processes/chirps3-dhis2-pipeline/execu
       "end_date": "2024-03-31",
       "org_unit_level": 3,
       "data_element": "DEMO_DATA_ELEMENT_UID",
-      "dhis2_timeout_seconds": 180,
-      "dhis2_retries": 4,
       "temporal_resolution": "monthly",
       "temporal_reducer": "sum",
       "spatial_reducer": "mean",
@@ -342,7 +340,7 @@ Notes:
 - `org_unit_level` alone runs across the full level by default.
 - `category_option_combo` and `attribute_option_combo` are optional. If omitted, they are not sent in `dataValues`, allowing DHIS2 defaults where supported.
 - `temporal_resolution` supports `daily`, `weekly`, and `monthly`.
-- Increase `dhis2_timeout_seconds` if you hit DHIS2 read timeouts.
+- DHIS2 timeout/retry behavior is configured globally via adapter env vars (`DHIS2_HTTP_TIMEOUT_SECONDS`, `DHIS2_HTTP_RETRIES`).
 
 ## Async execution and job management
 

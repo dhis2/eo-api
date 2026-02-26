@@ -79,27 +79,6 @@ PROCESS_METADATA = {
             "minOccurs": 0,
             "maxOccurs": 1,
         },
-        "allow_global_level_fetch": {
-            "title": "Allow global level fetch",
-            "description": "Allow unscoped level fetch",
-            "schema": {"type": "boolean", "default": True},
-            "minOccurs": 0,
-            "maxOccurs": 1,
-        },
-        "dhis2_timeout_seconds": {
-            "title": "DHIS2 timeout",
-            "description": "Request timeout (seconds)",
-            "schema": {"type": "number", "minimum": 0.1, "default": 120.0},
-            "minOccurs": 0,
-            "maxOccurs": 1,
-        },
-        "dhis2_retries": {
-            "title": "DHIS2 retries",
-            "description": "GET retry count",
-            "schema": {"type": "integer", "minimum": 0, "maximum": 10, "default": 3},
-            "minOccurs": 0,
-            "maxOccurs": 1,
-        },
         "org_unit_id_property": {
             "title": "Org unit ID property",
             "description": "Property name for org unit UID",
@@ -201,13 +180,10 @@ PROCESS_METADATA = {
 }
 
 
-def _dhis2_client_from_env(inputs: CHIRPS3DHIS2PipelineInput) -> DHIS2Client:
+def _dhis2_client_from_env() -> DHIS2Client:
     """Build DHIS2 client from environment settings."""
     try:
-        return create_client(
-            timeout_seconds=inputs.dhis2_timeout_seconds,
-            retries=inputs.dhis2_retries,
-        )
+        return create_client()
     except ValueError as err:
         raise ProcessorExecuteError(str(err)) from None
 
@@ -252,11 +228,6 @@ def _fetch_features_from_dhis2(client: DHIS2Client, inputs: CHIRPS3DHIS2Pipeline
         return _ensure_feature_collection(fc)
 
     if inputs.org_unit_level:
-        if not inputs.allow_global_level_fetch:
-            raise ProcessorExecuteError(
-                "org_unit_level without parent_org_unit can time out on large DHIS2 instances. "
-                "Provide parent_org_unit (recommended) or set allow_global_level_fetch=true."
-            )
         LOGGER.warning(
             "[chirps3-dhis2-pipeline] unscoped org_unit_level=%s fetch requested; "
             "this may be slow on large DHIS2 instances",
@@ -393,7 +364,7 @@ class CHIRPS3DHIS2PipelineProcessor(BaseProcessor):
             inputs.auto_import,
             inputs.dry_run,
         )
-        client = _dhis2_client_from_env(inputs)
+        client = _dhis2_client_from_env()
         try:
             LOGGER.info("[chirps3-dhis2-pipeline] step=1 fetch_features")
             if inputs.features_geojson:
@@ -525,7 +496,7 @@ class CHIRPS3DHIS2PipelineProcessor(BaseProcessor):
         except httpx.ReadTimeout:
             raise ProcessorExecuteError(
                 "DHIS2 request timed out. Narrow feature scope with parent_org_unit/org_unit_ids "
-                "or increase dhis2_timeout_seconds."
+                "or increase DHIS2_HTTP_TIMEOUT_SECONDS."
             ) from None
         except Exception as e:
             raise ProcessorExecuteError(str(e)) from None

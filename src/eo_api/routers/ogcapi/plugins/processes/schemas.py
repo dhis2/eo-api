@@ -51,12 +51,6 @@ class CHIRPS3DHIS2PipelineInput(BaseModel):
     )
     parent_org_unit: str | None = Field(default=None, description="Optional parent org unit UID")
     org_unit_ids: list[str] | None = Field(default=None, description="Optional explicit org unit UIDs")
-    allow_global_level_fetch: bool = Field(
-        default=True,
-        description="Allow unscoped level fetch",
-    )
-    dhis2_timeout_seconds: float = Field(default=120.0, gt=0, description="DHIS2 request timeout in seconds")
-    dhis2_retries: int = Field(default=3, ge=0, le=10, description="DHIS2 GET retries")
     org_unit_id_property: str = Field(default="id", description="Property name for org unit UID")
     data_element: str = Field(..., description="DHIS2 data element UID")
     category_option_combo: str | None = Field(default=None)
