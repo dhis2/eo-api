@@ -38,7 +38,8 @@ def dataframe_to_preview(df: pd.DataFrame, dataset: dict[str, Any], period_type:
     temp_df = df[[time_dim, "id", varname]]
     temp_df[time_dim] = pandas_period_string(temp_df[time_dim], period_type)
 
-    assert len(temp_df[time_dim].unique()) == 1
+    if len(temp_df[time_dim].unique()) != 1:
+        raise ValueError("dataframe_to_preview expects exactly one timestep")
 
     org_units = gpd.read_file(json.dumps(constants.ORG_UNITS_GEOJSON))
     org_units_with_temp = org_units.merge(temp_df, on="id", how="left")
@@ -67,7 +68,8 @@ def xarray_to_preview(ds: xr.Dataset, dataset: dict[str, Any], period_type: str)
     temp_ds = ds[[time_dim, varname]]
     temp_ds = temp_ds.assign_coords({time_dim: lambda x: numpy_period_array(x[time_dim].values, period_type)})
 
-    assert len(temp_ds[time_dim].values) == 1
+    if len(temp_ds[time_dim].values) != 1:
+        raise ValueError("xarray_to_preview expects exactly one timestep")
 
     fig = Figure()
     ax = fig.subplots()
