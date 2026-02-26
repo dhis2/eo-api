@@ -47,15 +47,29 @@ def create_client(*, timeout_seconds: float | None = None, retries: int | None =
 
 def list_organisation_units(client: DHIS2Client, *, fields: str) -> list[dict[str, Any]]:
     """Fetch organisation units using raw endpoint control over fields."""
-    response = client.get(
-        "/api/organisationUnits",
-        params={
-            "paging": "false",
-            "fields": fields,
-        },
-    )
+    response = query_organisation_units(client, fields=fields)
     org_units = response.get("organisationUnits", [])
     return cast(list[dict[str, Any]], org_units)
+
+
+def query_organisation_units(
+    client: DHIS2Client,
+    *,
+    fields: str,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Fetch organisation units with optional pass-through query params."""
+    query_params: dict[str, Any] = {
+        "paging": "false",
+        "fields": fields,
+    }
+    if params:
+        query_params.update(params)
+    response = client.get(
+        "/api/organisationUnits",
+        params=query_params,
+    )
+    return dict(response)
 
 
 def get_organisation_unit(client: DHIS2Client, *, uid: str, fields: str) -> dict[str, Any]:
