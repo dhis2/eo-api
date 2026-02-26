@@ -15,6 +15,7 @@ from dhis2eo.data.chc.chirps3 import daily as chirps3_daily
 from dhis2eo.integrations.pandas import format_value_for_dhis2
 from pydantic import ValidationError
 from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
+from rioxarray.exceptions import NoDataInBounds
 from shapely.geometry import shape
 
 from eo_api.integrations.dhis2_adapter import (
@@ -276,7 +277,10 @@ def _clip_spatial_series(
     spatial_reducer: str,
 ) -> pd.Series:
     """Clip a data array by geometry and reduce over spatial dimensions."""
-    clipped = data_array.rio.clip([geometry], crs="EPSG:4326", drop=True)
+    try:
+        clipped = data_array.rio.clip([geometry], crs="EPSG:4326", drop=True)
+    except NoDataInBounds:
+        return pd.Series(dtype=float)
     spatial_dims = [dim for dim in clipped.dims if dim != "time"]
     if not spatial_dims:
         raise ProcessorExecuteError("Unable to resolve spatial dimensions in CHIRPS3 dataset")
@@ -345,6 +349,18 @@ def _apply_temporal_aggregation(
     return [(f"{int(year):04d}W{int(week):02d}", float(value)) for (year, week), value in weekly.items()]
 
 
+def _chirps_cache_key(
+    *,
+    stage: str,
+    start_date: Any,
+    end_date: Any,
+    bbox: tuple[float, float, float, float],
+) -> str:
+    """Build a deterministic cache key to avoid bbox/date collisions in downloads."""
+    bbox_part = "_".join(f"{coord:.4f}".replace("-", "m").replace(".", "p") for coord in bbox)
+    return f"{stage}_{start_date}_{end_date}_{bbox_part}"
+
+
 class CHIRPS3DHIS2PipelineProcessor(BaseProcessor):
     """One-go CHIRPS3 processing pipeline for DHIS2 data values."""
 
@@ -397,7 +413,13 @@ class CHIRPS3DHIS2PipelineProcessor(BaseProcessor):
             else:
                 effective_bbox = union_bbox
             LOGGER.info("[chirps3-dhis2-pipeline] step=2 download_chirps3 bbox=%s", effective_bbox)
-            download_dir = Path(DOWNLOAD_DIR) / "chirps3_dhis2_pipeline"
+            cache_key = _chirps_cache_key(
+                stage=inputs.stage,
+                start_date=inputs.start_date,
+                end_date=inputs.end_date,
+                bbox=effective_bbox,
+            )
+            download_dir = Path(DOWNLOAD_DIR) / "chirps3_dhis2_pipeline" / cache_key
             download_dir.mkdir(parents=True, exist_ok=True)
 
             files = chirps3_daily.download(
@@ -405,7 +427,7 @@ class CHIRPS3DHIS2PipelineProcessor(BaseProcessor):
                 end=str(inputs.end_date),
                 bbox=effective_bbox,
                 dirname=str(download_dir),
-                prefix="chirps3_pipeline",
+                prefix=f"chirps3_pipeline_{cache_key}",
                 stage=inputs.stage,
             )
             if not files:
