@@ -16,11 +16,17 @@ dependencies = [
     "geojson-pydantic>=2.1.0",
     "httpx>=0.28.1",
     "prefect>=3.6",
+    "earthkit-transforms==0.5.*",
+    "metpy>=1.7,<2",
+    "zarr==3.1.5",
 ]
 
 [tool.ruff]
 target-version = "py313"
 line-length = 120
+exclude = [
+    "src/eo_api/datasets"
+]
 
 [tool.ruff.lint]
 fixable = ["ALL"]
@@ -52,6 +58,9 @@ no_implicit_optional = true
 warn_unused_ignores = true
 strict_equality = true
 mypy_path = ["src"]
+exclude = [
+    "src/eo_api/datasets"
+]
 
 [[tool.mypy.overrides]]
 module = "tests.*"

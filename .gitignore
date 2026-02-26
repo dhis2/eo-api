@@ -1,5 +1,6 @@
 .DS_Store
 __pycache__/
+src/eo_api/datasets/cache
 .venv/
 .env
 eo_api.egg-info/

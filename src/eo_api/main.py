@@ -69,6 +69,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 
+from eo_api.datasets import api as datasets  # noqa: E402
 from eo_api.routers import cog, ogcapi, pipelines, prefect, root  # noqa: E402
 
 # Keep app progress logs visible while muting noisy third-party info logs.
@@ -125,6 +126,7 @@ app.add_middleware(
 app.include_router(root.router)
 app.include_router(cog.router, prefix="/cog", tags=["Cloud Optimized GeoTIFF"])
 app.include_router(pipelines.router, prefix="/pipelines", tags=["Pipelines"])
+app.include_router(datasets.router, prefix="/datasets", tags=['Datasets'])
 
 
 @app.get("/ogcapi", include_in_schema=False)
