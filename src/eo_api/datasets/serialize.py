@@ -91,7 +91,11 @@ def xarray_to_temporary_netcdf(ds: xr.Dataset) -> str:
     fd = tempfile.NamedTemporaryFile(suffix=".nc", delete=False)
     path = fd.name
     fd.close()
-    ds.to_netcdf(path)
+    try:
+        ds.to_netcdf(path)
+    except Exception:
+        os.remove(path)
+        raise
     return path
 
 
