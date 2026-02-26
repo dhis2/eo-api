@@ -4,15 +4,15 @@
 
 OGC API is a family of standards from the [Open Geospatial Consortium](https://www.ogc.org/) that define RESTful interfaces for geospatial data. Each standard covers a specific data type or interaction pattern:
 
-| Standard | Purpose |
-|---|---|
-| [Features](https://ogcapi.ogc.org/features/) | Vector feature access (GeoJSON, etc.) |
-| [Coverages](https://ogcapi.ogc.org/coverages/) | Gridded / raster data |
-| [EDR](https://ogcapi.ogc.org/edr/) | Environmental Data Retrieval (point, trajectory, corridor queries) |
-| [Processes](https://ogcapi.ogc.org/processes/) | Server-side processing / workflows |
-| [Maps](https://ogcapi.ogc.org/maps/) | Rendered map images |
-| [Tiles](https://ogcapi.ogc.org/tiles/) | Tiled data (vector and map tiles) |
-| [Records](https://ogcapi.ogc.org/records/) | Catalogue / metadata search |
+| Standard                                       | Purpose                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------ |
+| [Features](https://ogcapi.ogc.org/features/)   | Vector feature access (GeoJSON, etc.)                              |
+| [Coverages](https://ogcapi.ogc.org/coverages/) | Gridded / raster data                                              |
+| [EDR](https://ogcapi.ogc.org/edr/)             | Environmental Data Retrieval (point, trajectory, corridor queries) |
+| [Processes](https://ogcapi.ogc.org/processes/) | Server-side processing / workflows                                 |
+| [Maps](https://ogcapi.ogc.org/maps/)           | Rendered map images                                                |
+| [Tiles](https://ogcapi.ogc.org/tiles/)         | Tiled data (vector and map tiles)                                  |
+| [Records](https://ogcapi.ogc.org/records/)     | Catalogue / metadata search                                        |
 
 All standards share a common core: JSON/HTML responses, OpenAPI-described endpoints, and content negotiation. The full specification catalogue is at <https://ogcapi.ogc.org>.
 
@@ -40,10 +40,10 @@ pygeoapi is configured through a single YAML file whose path is set by the `PYGE
 ### Top-level sections
 
 ```yaml
-server:     # host, port, URL, limits, CORS, languages, admin toggle
-logging:    # log level and optional log file
-metadata:   # service identification, contact, license
-resources:  # datasets and processes exposed by the API
+server: # host, port, URL, limits, CORS, languages, admin toggle
+logging: # log level and optional log file
+metadata: # service identification, contact, license
+resources: # datasets and processes exposed by the API
 ```
 
 ### `server`
@@ -113,12 +113,12 @@ Full configuration reference: <https://docs.pygeoapi.io/en/latest/configuration.
 
 The `type` field on a provider determines which OGC API standard the collection exposes.
 
-| Provider type | OGC API standard | Description |
-|---|---|---|
-| `feature` | Features | Vector data (points, lines, polygons). Backends include CSV, GeoJSON, PostGIS, Elasticsearch, and others. |
-| `coverage` | Coverages | Gridded / raster data. Backends include rasterio, xarray, and S3-hosted COGs. |
-| `map` | Maps | Rendered map images, typically proxied from an upstream WMS via `WMSFacade`. |
-| `process` | Processes | Server-side processing tasks. Defined by a `processor` rather than a `providers` list. |
+| Provider type | OGC API standard | Description                                                                                               |
+| ------------- | ---------------- | --------------------------------------------------------------------------------------------------------- |
+| `feature`     | Features         | Vector data (points, lines, polygons). Backends include CSV, GeoJSON, PostGIS, Elasticsearch, and others. |
+| `coverage`    | Coverages        | Gridded / raster data. Backends include rasterio, xarray, and S3-hosted COGs.                             |
+| `map`         | Maps             | Rendered map images, typically proxied from an upstream WMS via `WMSFacade`.                              |
+| `process`     | Processes        | Server-side processing tasks. Defined by a `processor` rather than a `providers` list.                    |
 
 A single collection can have multiple providers (e.g. both `feature` and `tile` on the same resource).
 
@@ -134,14 +134,14 @@ The `dhis2-org-units-cql` collection exposes this capability. Its filterable pro
 
 ### Supported operators
 
-| Category | Operators | Example |
-|---|---|---|
-| Comparison | `=`, `<>`, `<`, `<=`, `>`, `>=` | `level=2` |
-| Pattern matching | `LIKE`, `ILIKE` (`%` = any chars, `_` = single char) | `name LIKE '%Hospital%'` |
-| Range | `BETWEEN ... AND ...` | `level BETWEEN 2 AND 3` |
-| Set membership | `IN (...)` | `level IN (1,2)` |
-| Null checks | `IS NULL`, `IS NOT NULL` | `code IS NOT NULL` |
-| Logical | `AND`, `OR`, `NOT` | `level=3 AND name LIKE '%CH%'` |
+| Category         | Operators                                            | Example                        |
+| ---------------- | ---------------------------------------------------- | ------------------------------ |
+| Comparison       | `=`, `<>`, `<`, `<=`, `>`, `>=`                      | `level=2`                      |
+| Pattern matching | `LIKE`, `ILIKE` (`%` = any chars, `_` = single char) | `name LIKE '%Hospital%'`       |
+| Range            | `BETWEEN ... AND ...`                                | `level BETWEEN 2 AND 3`        |
+| Set membership   | `IN (...)`                                           | `level IN (1,2)`               |
+| Null checks      | `IS NULL`, `IS NOT NULL`                             | `code IS NOT NULL`             |
+| Logical          | `AND`, `OR`, `NOT`                                   | `level=3 AND name LIKE '%CH%'` |
 
 String values must be enclosed in **single quotes**.
 
@@ -201,34 +201,35 @@ OGC API - Processes exposes server-side processing tasks. Each process defines t
 
 ### Available processes
 
-| Process | ID | Description |
-|---|---|---|
-| ERA5-Land | `era5-land-download` | Download ERA5-Land hourly climate data (temperature, precipitation, etc.) |
-| CHIRPS3 | `chirps3-download` | Download CHIRPS3 daily precipitation data |
+| Process                   | ID                       | Description                                                                                                |
+| ------------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Zonal statistics          | `zonal-statistics`       | Compute zonal stats from GeoJSON features and a raster source                                              |
+| ERA5-Land                 | `era5-land-download`     | Download ERA5-Land hourly climate data (temperature, precipitation, etc.)                                  |
+| CHIRPS3                   | `chirps3-download`       | Download CHIRPS3 daily precipitation data                                                                  |
 | CHIRPS3 -> DHIS2 pipeline | `chirps3-dhis2-pipeline` | Fetch features, download CHIRPS3, aggregate by feature, generate DHIS2 dataValueSet (optional auto-import) |
 
 ### Endpoints
 
-| Method | Path | Description |
-|---|---|---|
-| GET | `/ogcapi/processes` | List all available processes |
-| GET | `/ogcapi/processes/{processId}` | Describe a process (inputs, outputs, metadata) |
-| POST | `/ogcapi/processes/{processId}/execution` | Execute a process (sync or async) |
-| GET | `/ogcapi/jobs` | List all jobs |
-| GET | `/ogcapi/jobs/{jobId}` | Get job status |
-| GET | `/ogcapi/jobs/{jobId}/results` | Get job results |
-| DELETE | `/ogcapi/jobs/{jobId}` | Cancel or delete a job |
+| Method | Path                                      | Description                                    |
+| ------ | ----------------------------------------- | ---------------------------------------------- |
+| GET    | `/ogcapi/processes`                       | List all available processes                   |
+| GET    | `/ogcapi/processes/{processId}`           | Describe a process (inputs, outputs, metadata) |
+| POST   | `/ogcapi/processes/{processId}/execution` | Execute a process (sync or async)              |
+| GET    | `/ogcapi/jobs`                            | List all jobs                                  |
+| GET    | `/ogcapi/jobs/{jobId}`                    | Get job status                                 |
+| GET    | `/ogcapi/jobs/{jobId}/results`            | Get job results                                |
+| DELETE | `/ogcapi/jobs/{jobId}`                    | Cancel or delete a job                         |
 
 ### Common inputs (download processes)
 
 `era5-land-download` and `chirps3-download` share these inputs:
 
-| Input | Type | Required | Description |
-|---|---|---|---|
-| `start` | string | yes | Start date in `YYYY-MM` format |
-| `end` | string | yes | End date in `YYYY-MM` format |
-| `bbox` | array[number] | yes | Bounding box `[west, south, east, north]` |
-| `dry_run` | boolean | no | If true (default), return data without pushing to DHIS2 |
+| Input     | Type          | Required | Description                                             |
+| --------- | ------------- | -------- | ------------------------------------------------------- |
+| `start`   | string        | yes      | Start date in `YYYY-MM` format                          |
+| `end`     | string        | yes      | End date in `YYYY-MM` format                            |
+| `bbox`    | array[number] | yes      | Bounding box `[west, south, east, north]`               |
+| `dry_run` | boolean       | no       | If true (default), return data without pushing to DHIS2 |
 
 Note: `chirps3-dhis2-pipeline` has its own contract (`start_date`, `end_date`, feature-source selectors, and output options).
 
@@ -238,9 +239,9 @@ Downloads ERA5-Land hourly climate data via the CDS API.
 
 Additional inputs:
 
-| Input | Type | Required | Default | Description |
-|---|---|---|---|---|
-| `variables` | array[string] | no | `["2m_temperature", "total_precipitation"]` | ERA5-Land variable names |
+| Input       | Type          | Required | Default                                     | Description              |
+| ----------- | ------------- | -------- | ------------------------------------------- | ------------------------ |
+| `variables` | array[string] | no       | `["2m_temperature", "total_precipitation"]` | ERA5-Land variable names |
 
 Example request:
 
@@ -264,9 +265,9 @@ Downloads CHIRPS3 daily precipitation data.
 
 Additional inputs:
 
-| Input | Type | Required | Default | Description |
-|---|---|---|---|---|
-| `stage` | string | no | `"final"` | Product stage: `"final"` or `"prelim"` |
+| Input   | Type   | Required | Default   | Description                            |
+| ------- | ------ | -------- | --------- | -------------------------------------- |
+| `stage` | string | no       | `"final"` | Product stage: `"final"` or `"prelim"` |
 
 Example request:
 
@@ -282,6 +283,72 @@ curl -X POST http://localhost:8000/ogcapi/processes/chirps3-download/execution \
       "dry_run": true
     }
   }'
+```
+
+### Zonal statistics (`zonal-statistics`)
+
+Calculates statistics over raster values for each input GeoJSON feature.
+
+This can be used with:
+
+- features from the `sierra-leone-districts` collection
+- raster from the `sierra-leone-population` collection (`tests/data/sle_pop_2026_CN_1km_R2025A_UA_v1.tif`)
+
+Inputs:
+
+| Input                 | Type             | Required | Default              | Description                                                       |
+| --------------------- | ---------------- | -------- | -------------------- | ----------------------------------------------------------------- |
+| `geojson`             | object or string | yes      | -                    | GeoJSON `FeatureCollection` object, or path/URL to a GeoJSON file |
+| `raster`              | string           | yes      | -                    | Raster path or URL                                                |
+| `band`                | integer          | no       | `1`                  | 1-based band index                                                |
+| `stats`               | array[string]    | no       | `["mean"]`           | Any of: `count`, `sum`, `mean`, `min`, `max`, `median`, `std`     |
+| `feature_id_property` | string           | no       | `"id"`               | Fallback property key for feature IDs                             |
+| `output_property`     | string           | no       | `"zonal_statistics"` | Property name for computed statistics                             |
+| `all_touched`         | boolean          | no       | `false`              | Include all pixels touched by geometry                            |
+| `include_nodata`      | boolean          | no       | `false`              | Include nodata values in calculations                             |
+| `nodata`              | number           | no       | raster nodata        | Optional nodata override                                          |
+
+Example request using local Sierra Leone resources:
+
+```bash
+curl -X POST http://localhost:8000/ogcapi/processes/zonal-statistics/execution \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputs": {
+      "geojson": "tests/data/sierra_leone_districts.geojson",
+      "raster": "tests/data/sle_pop_2026_CN_1km_R2025A_UA_v1.tif",
+      "stats": ["count", "sum", "mean", "min", "max"],
+      "output_property": "population_stats"
+    }
+  }'
+```
+
+Example response shape:
+
+```json
+{
+  "id": "features",
+  "value": {
+    "type": "FeatureCollection",
+    "features": [
+      {
+        "type": "Feature",
+        "id": "district-id",
+        "properties": {
+          "name": "District name",
+          "population_stats": {
+            "count": 1234.0,
+            "sum": 567890.12,
+            "mean": 460.2,
+            "min": 1.0,
+            "max": 999.0
+          }
+        },
+        "geometry": { "type": "Polygon", "coordinates": [] }
+      }
+    ]
+  }
+}
 ```
 
 ### Process output
@@ -304,6 +371,7 @@ All processes return a JSON object with:
 ### CHIRPS3 to DHIS2 pipeline (`chirps3-dhis2-pipeline`)
 
 Runs four steps in one execution:
+
 1. Get features (from DHIS2 or provided GeoJSON)
 2. Fetch CHIRPS3 data for union bbox
 3. Process dataset (spatial + temporal aggregation)
@@ -331,11 +399,13 @@ curl -X POST http://localhost:8000/ogcapi/processes/chirps3-dhis2-pipeline/execu
 ```
 
 The response includes:
+
 - `files`: downloaded CHIRPS3 monthly files
 - `dataValueSet`: DHIS2-compatible payload (`dataValues` array)
 - `importResponse`: populated only when `auto_import=true` and `dry_run=false`
 
 Notes:
+
 - `parent_org_unit` is optional. For large DHIS2 instances, prefer `parent_org_unit` + `org_unit_level` (or explicit `org_unit_ids`) to avoid fetching very large feature sets.
 - `org_unit_level` alone runs across the full level by default.
 - `category_option_combo` and `attribute_option_combo` are optional. If omitted, they are not sent in `dataValues`, allowing DHIS2 defaults where supported.
@@ -415,12 +485,12 @@ pygeoapi uses a plugin architecture so that new data backends, output formats, a
 
 ### Plugin categories
 
-| Category | Base class | Purpose |
-|---|---|---|
-| **provider** | `pygeoapi.provider.base.BaseProvider` | Data access (read features, coverages, tiles, etc.) |
-| **formatter** | `pygeoapi.formatter.base.BaseFormatter` | Output format conversion (e.g. CSV export) |
-| **process** | `pygeoapi.process.base.BaseProcessor` | Server-side processing logic |
-| **process_manager** | `pygeoapi.process.manager.base.BaseManager` | Job tracking and async execution |
+| Category            | Base class                                  | Purpose                                             |
+| ------------------- | ------------------------------------------- | --------------------------------------------------- |
+| **provider**        | `pygeoapi.provider.base.BaseProvider`       | Data access (read features, coverages, tiles, etc.) |
+| **formatter**       | `pygeoapi.formatter.base.BaseFormatter`     | Output format conversion (e.g. CSV export)          |
+| **process**         | `pygeoapi.process.base.BaseProcessor`       | Server-side processing logic                        |
+| **process_manager** | `pygeoapi.process.manager.base.BaseManager` | Job tracking and async execution                    |
 
 ### How loading works
 
