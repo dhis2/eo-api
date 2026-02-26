@@ -92,7 +92,7 @@ def get_dataset_period_type_org_units(dataset_id: str, period_type: str, start: 
 @router.get("/{dataset_id}/{period_type}/orgunits/preview", response_model=list)
 def get_dataset_period_type_org_units_preview(dataset_id: str, period_type: str, period: str, temporal_aggregation: str, spatial_aggregation: str):
     """
-    Get a dataset dynamically aggregated to a given period type and org units and return json values.
+    Preview a PNG map image of a dataset dynamically aggregated to a given period and org units.
     """
     # get dataset metadata
     dataset = get_dataset_or_404(dataset_id)
@@ -142,7 +142,7 @@ def get_dataset_period_type_raster(dataset_id: str, period_type: str, start: str
 @router.get("/{dataset_id}/{period_type}/raster/preview")
 def get_dataset_period_type_raster_preview(dataset_id: str, period_type: str, period: str, temporal_aggregation: str):
     """
-    Get a dataset dynamically aggregated to a given period type and return as downloadable raster file.
+    Preview a PNG map image of a dataset dynamically aggregated to a given period.
     """
     # get dataset metadata
     dataset = get_dataset_or_404(dataset_id)
