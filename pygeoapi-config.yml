@@ -102,6 +102,7 @@ resources:
         name: eo_api.routers.ogcapi.plugins.providers.dhis2_org_units.DHIS2OrgUnitsProvider
         data: tests/data/
         id_field: id
+        include_extra_query_parameters: true
 
   dhis2-org-units-cql:
     type: collection
@@ -118,6 +119,7 @@ resources:
         name: eo_api.routers.ogcapi.plugins.providers.dhis2_org_units_cql.DHIS2OrgUnitsCqlProvider
         data: tests/data/
         id_field: id
+        include_extra_query_parameters: true
 
   sierra-leone-districts:
     type: collection

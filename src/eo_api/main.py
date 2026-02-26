@@ -11,7 +11,7 @@ import logging
 import os
 import warnings
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, cast
@@ -69,7 +69,9 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import RedirectResponse  # noqa: E402
 
-from eo_api.routers import cog, ogcapi, pipelines, prefect, root  # noqa: E402
+from eo_api.routers import cog, ogcapi, pipelines, root  # noqa: E402
+
+EO_API_ENABLE_PREFECT = os.getenv("EO_API_ENABLE_PREFECT", "true").strip().lower() in {"1", "true", "yes"}
 
 # Keep app progress logs visible while muting noisy third-party info logs.
 eo_logger = logging.getLogger("eo_api")
@@ -102,14 +104,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Start Prefect server, then register and serve pipeline deployments."""
     import asyncio
 
+    if not EO_API_ENABLE_PREFECT:
+        yield
+        return
+
     # Mounted sub-apps don't get their lifespans called automatically,
     # so we trigger the Prefect server's lifespan here to initialize
     # the database, docket, and background workers.
+    from eo_api.routers import prefect
+
     prefect_app = prefect.app
     async with prefect_app.router.lifespan_context(prefect_app):
         task = asyncio.create_task(_serve_flows())
         yield
         task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 app = FastAPI(lifespan=lifespan)
@@ -134,4 +144,7 @@ async def ogcapi_redirect() -> RedirectResponse:
 
 
 app.mount(path="/ogcapi", app=ogcapi.app)
-app.mount(path="/", app=prefect.app)
+if EO_API_ENABLE_PREFECT:
+    from eo_api.routers import prefect
+
+    app.mount(path="/", app=prefect.app)

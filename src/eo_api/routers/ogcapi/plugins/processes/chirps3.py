@@ -68,6 +68,29 @@ PROCESS_METADATA = {
 }
 
 
+def download_chirps3_daily(
+    *,
+    start: str,
+    end: str,
+    bbox: tuple[float, float, float, float],
+    stage: str = "final",
+    dirname: str | None = None,
+    prefix: str = "chirps3",
+) -> list[Path]:
+    """Download CHIRPS3 daily files through the canonical process implementation."""
+    target_dir = Path(dirname) if dirname else Path(DOWNLOAD_DIR)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    files = chirps3_daily.download(
+        start=start,
+        end=end,
+        bbox=bbox,
+        dirname=str(target_dir),
+        prefix=prefix,
+        stage=stage,
+    )
+    return [Path(f) for f in files]
+
+
 class CHIRPS3Processor(BaseProcessor):
     """Processor for downloading CHIRPS3 daily precipitation data."""
 
@@ -88,16 +111,13 @@ class CHIRPS3Processor(BaseProcessor):
             inputs.stage,
         )
 
-        download_dir = Path(DOWNLOAD_DIR)
-        download_dir.mkdir(parents=True, exist_ok=True)
-
-        files = chirps3_daily.download(
+        files = download_chirps3_daily(
             start=inputs.start,
             end=inputs.end,
             bbox=(inputs.bbox[0], inputs.bbox[1], inputs.bbox[2], inputs.bbox[3]),
-            dirname=str(download_dir),
-            prefix="chirps3",
             stage=inputs.stage,
+            dirname=DOWNLOAD_DIR,
+            prefix="chirps3",
         )
         output = ProcessOutput(
             status="completed",
