@@ -26,40 +26,6 @@ def run_step(name: str, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     return result
 
 
-def run_step_with_trace(
-    trace: list[dict[str, Any]],
-    name: str,
-    fn: Callable[..., T],
-    *args: Any,
-    **kwargs: Any,
-) -> T:
-    """Run a step and append status/duration details to workflow trace."""
-    start = time.perf_counter()
-    try:
-        result = run_step(name, fn, *args, **kwargs)
-    except Exception as exc:
-        duration_ms = round((time.perf_counter() - start) * 1000.0, 2)
-        trace.append(
-            {
-                "step": name,
-                "status": "failed",
-                "durationMs": duration_ms,
-                "error": str(exc),
-            }
-        )
-        raise
-
-    duration_ms = round((time.perf_counter() - start) * 1000.0, 2)
-    trace.append(
-        {
-            "step": name,
-            "status": "completed",
-            "durationMs": duration_ms,
-        }
-    )
-    return result
-
-
 def run_process_with_trace(
     trace: list[dict[str, Any]],
     *,
@@ -69,8 +35,28 @@ def run_process_with_trace(
     data: dict[str, Any],
 ) -> dict[str, Any]:
     """Execute an OGC processor class as a step and capture workflow trace."""
+    start = time.perf_counter()
     processor = processor_cls({"name": process_name})
-    mimetype, output = run_step_with_trace(trace, step_name, processor.execute, data, None)
+    try:
+        mimetype, output = run_step(step_name, processor.execute, data, None)
+    except Exception as exc:
+        trace.append(
+            {
+                "step": step_name,
+                "status": "failed",
+                "durationMs": round((time.perf_counter() - start) * 1000.0, 2),
+                "error": str(exc),
+            }
+        )
+        raise
+
+    trace.append(
+        {
+            "step": step_name,
+            "status": "completed",
+            "durationMs": round((time.perf_counter() - start) * 1000.0, 2),
+        }
+    )
     if mimetype != "application/json":
         raise ProcessorExecuteError(f"Step '{step_name}' returned unsupported mimetype: {mimetype}")
     if not isinstance(output, dict):
