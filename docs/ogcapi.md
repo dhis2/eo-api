@@ -206,7 +206,10 @@ OGC API - Processes exposes server-side processing tasks. Each process defines t
 | Zonal statistics          | `zonal-statistics`       | Compute zonal stats from GeoJSON features and a raster source                                              |
 | ERA5-Land                 | `era5-land-download`     | Download ERA5-Land hourly climate data (temperature, precipitation, etc.)                                  |
 | CHIRPS3                   | `chirps3-download`       | Download CHIRPS3 daily precipitation data                                                                  |
-| CHIRPS3 -> DHIS2 pipeline | `chirps3-dhis2-pipeline` | Fetch features, download CHIRPS3, aggregate by feature, generate DHIS2 dataValueSet (optional auto-import) |
+| Feature fetch             | `feature-fetch`          | Normalize features from inline GeoJSON or DHIS2 selectors                                                  |
+| Data aggregate            | `data-aggregate`         | Aggregate downloaded raster data over workflow features                                                     |
+| DHIS2 dataValue build     | `dhis2-datavalue-build`  | Build DHIS2 `dataValueSet` and table output from aggregated rows                                           |
+| CHIRPS3 -> DHIS2 workflow | `chirps3-dhis2-workflow` | Process-first assembly: feature-fetch -> chirps3-download -> data-aggregate -> dhis2-datavalue-build      |
 
 ### Endpoints
 
@@ -231,7 +234,7 @@ OGC API - Processes exposes server-side processing tasks. Each process defines t
 | `bbox`    | array[number] | yes      | Bounding box `[west, south, east, north]`               |
 | `dry_run` | boolean       | no       | If true (default), return data without pushing to DHIS2 |
 
-Note: `chirps3-dhis2-pipeline` has its own contract (`start_date`, `end_date`, feature-source selectors, and output options).
+Note: `chirps3-dhis2-workflow` uses the `start_date` / `end_date` contract.
 
 ### ERA5-Land (`era5-land-download`)
 
@@ -265,9 +268,10 @@ Downloads CHIRPS3 daily precipitation data.
 
 Additional inputs:
 
-| Input   | Type   | Required | Default   | Description                            |
-| ------- | ------ | -------- | --------- | -------------------------------------- |
-| `stage` | string | no       | `"final"` | Product stage: `"final"` or `"prelim"` |
+| Input    | Type   | Required | Default   | Description                                              |
+| -------- | ------ | -------- | --------- | -------------------------------------------------------- |
+| `stage`  | string | no       | `"final"` | Product stage: `"final"` or `"prelim"`                  |
+| `flavor` | string | no       | `"rnl"`   | Product flavor: `"rnl"` or `"sat"` (`prelim` -> `sat`) |
 
 Example request:
 
@@ -280,6 +284,7 @@ curl -X POST http://localhost:8000/ogcapi/processes/chirps3-download/execution \
       "end": "2024-03",
       "bbox": [32.0, -2.0, 35.0, 1.0],
       "stage": "final",
+      "flavor": "rnl",
       "dry_run": true
     }
   }'
@@ -368,19 +373,19 @@ All processes return a JSON object with:
 }
 ```
 
-### CHIRPS3 to DHIS2 pipeline (`chirps3-dhis2-pipeline`)
+### CHIRPS3 to DHIS2 workflow (`chirps3-dhis2-workflow`)
 
-Runs four steps in one execution:
+Runs process-first orchestration in one execution:
 
-1. Get features (from DHIS2 or provided GeoJSON)
-2. Fetch CHIRPS3 data for union bbox
-3. Process dataset (spatial + temporal aggregation)
-4. Generate DHIS2 `dataValueSet` payload (optional auto-import)
+1. `feature-fetch`
+2. `chirps3-download`
+3. `data-aggregate`
+4. `dhis2-datavalue-build`
 
 Example request using DHIS2 org units as source features:
 
 ```bash
-curl -X POST http://localhost:8000/ogcapi/processes/chirps3-dhis2-pipeline/execution \
+curl -X POST http://localhost:8000/ogcapi/processes/chirps3-dhis2-workflow/execution \
   -H "Content-Type: application/json" \
   -d '{
     "inputs": {
@@ -392,6 +397,7 @@ curl -X POST http://localhost:8000/ogcapi/processes/chirps3-dhis2-pipeline/execu
       "temporal_reducer": "sum",
       "spatial_reducer": "mean",
       "stage": "final",
+      "flavor": "rnl",
       "dry_run": true,
       "auto_import": false
     }
@@ -402,7 +408,8 @@ The response includes:
 
 - `files`: downloaded CHIRPS3 monthly files
 - `dataValueSet`: DHIS2-compatible payload (`dataValues` array)
-- `importResponse`: populated only when `auto_import=true` and `dry_run=false`
+- `dataValueTable`: table-friendly rows/columns
+- `workflowTrace`: per-step status and duration
 
 Notes:
 
@@ -410,6 +417,7 @@ Notes:
 - `org_unit_level` alone runs across the full level by default.
 - `category_option_combo` and `attribute_option_combo` are optional. If omitted, they are not sent in `dataValues`, allowing DHIS2 defaults where supported.
 - `temporal_resolution` supports `daily`, `weekly`, and `monthly`.
+- `flavor` supports `rnl` and `sat`. If `stage` is `prelim`, `flavor` must be `sat`.
 - DHIS2 timeout/retry behavior is configured globally via adapter env vars (`DHIS2_HTTP_TIMEOUT_SECONDS`, `DHIS2_HTTP_RETRIES`).
 
 ## Async execution and job management
