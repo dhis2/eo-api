@@ -20,6 +20,7 @@ def get_data(dataset: dict[str, Any], start: str, end: str) -> xr.Dataset:
     logger.info("Opening dataset")
     zarr_path = cache.get_zarr_path(dataset)
     if zarr_path:
+        logger.info(f'Using optimized zarr file: {zarr_path}')
         ds = xr.open_zarr(zarr_path, consolidated=True)
     else:
         logger.warning(

@@ -355,6 +355,11 @@ resources:
     processor:
       name: eo_api.routers.ogcapi.plugins.processes.zonal_statistics.ZonalStatisticsProcessor
 
+  temporal-reduce:
+    type: process
+    processor:
+      name: eo_api.routers.ogcapi.plugins.processes.temporal_reduce.TemporalReduceProcessor
+
   aggregation:
     type: process
     processor:

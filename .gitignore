@@ -5,3 +5,4 @@ __pycache__/
 eo_api.egg-info/
 pygeoapi-openapi.yml
 target/
+src/eo_api/datasets/cache/

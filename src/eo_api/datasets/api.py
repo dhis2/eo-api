@@ -41,7 +41,7 @@ def build_dataset_cache(
     start: str,
     end: str | None = None,
     overwrite: bool = False,
-    background_tasks: BackgroundTasks | None = None,
+    background_tasks: BackgroundTasks = None,
 ) -> dict[str, str]:
     """Download and cache dataset as local netcdf files direct from the source."""
     dataset = _get_dataset_or_404(dataset_id)
@@ -52,7 +52,7 @@ def build_dataset_cache(
 @router.get("/{dataset_id}/optimize_cache", response_model=dict)
 def optimize_dataset_cache(
     dataset_id: str,
-    background_tasks: BackgroundTasks | None = None,
+    background_tasks: BackgroundTasks = None,
 ) -> dict[str, str]:
     """Optimize dataset cache by collecting all cache files to a single zarr archive."""
     dataset = _get_dataset_or_404(dataset_id)

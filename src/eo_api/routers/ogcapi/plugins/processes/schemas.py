@@ -61,6 +61,29 @@ class ZonalStatisticsInput(BaseModel):
         return self
 
 
+class TemporalReduceInput(BaseModel):
+    """Inputs for raster temporal reduce process."""
+
+    raster: str = Field(..., description="Raster path or URI")
+    band: str = Field(default=1, description="Raster band name")
+    period_type: str = Field(default=1, description="Period type")
+    time_period: str = Field(default=1, description="Time period")
+    stats: list[str] = Field(
+        default_factory=lambda: ["mean"],
+        min_length=1,
+        description="Statistics to compute",
+    )
+
+    @model_validator(mode="after")
+    def validate_stats(self) -> "TemporalReduceInput":
+        """Ensure all requested statistics are supported."""
+        supported = {"count", "sum", "mean", "min", "max"}
+        invalid = [stat for stat in self.stats if stat not in supported]
+        if invalid:
+            raise ValueError(f"Unsupported stats requested: {invalid}. Allowed stats: {sorted(supported)}")
+        return self
+
+
 class CHIRPS3DHIS2PipelineInput(BaseModel):
     """Inputs for CHIRPS3 -> DHIS2 data value pipeline."""
 

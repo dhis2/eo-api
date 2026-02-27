@@ -51,7 +51,7 @@ def numpy_period_array(t_array: np.ndarray[Any, Any], period_type: str) -> np.nd
     return s.astype(f"U{lengths[period_type]}")
 
 
-def pandas_period_string(column: pd.Series[Any], period_type: str) -> pd.Series[Any]:
+def pandas_period_string(column: 'pd.Series[Any]', period_type: str) -> 'pd.Series[Any]':
     """Format a pandas datetime column as period strings."""
     if period_type == "hourly":
         return column.dt.strftime("%Y-%m-%dT%H")  # type: ignore[no-any-return]
