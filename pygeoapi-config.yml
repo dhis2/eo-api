@@ -370,7 +370,22 @@ resources:
     processor:
       name: eo_api.routers.ogcapi.plugins.processes.chirps3.CHIRPS3Processor
 
-  chirps3-dhis2-pipeline:
+  chirps3-dhis2-workflow:
     type: process
     processor:
-      name: eo_api.routers.ogcapi.plugins.processes.chirps3_dhis2_pipeline.CHIRPS3DHIS2PipelineProcessor
+      name: eo_api.routers.ogcapi.plugins.processes.chirps3_workflow.Chirps3WorkflowProcessor
+
+  feature-fetch:
+    type: process
+    processor:
+      name: eo_api.routers.ogcapi.plugins.processes.feature_fetch.FeatureFetchProcessor
+
+  data-aggregate:
+    type: process
+    processor:
+      name: eo_api.routers.ogcapi.plugins.processes.data_aggregate.DataAggregateProcessor
+
+  dhis2-datavalue-build:
+    type: process
+    processor:
+      name: eo_api.routers.ogcapi.plugins.processes.datavalue_build.DataValueBuildProcessor

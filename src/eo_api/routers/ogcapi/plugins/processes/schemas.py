@@ -29,6 +29,13 @@ class CHIRPS3Input(ClimateProcessInput):
     """CHIRPS3 specific inputs."""
 
     stage: str = Field(default="final", pattern=r"^(final|prelim)$", description="Product stage")
+    flavor: str = Field(default="rnl", pattern=r"^(rnl|sat)$", description="Product flavor")
+
+    @model_validator(mode="after")
+    def validate_stage_flavor(self) -> "CHIRPS3Input":
+        if self.stage == "prelim" and self.flavor != "sat":
+            raise ValueError("For stage='prelim', flavor must be 'sat'")
+        return self
 
 
 class ZonalStatisticsInput(BaseModel):
@@ -61,8 +68,8 @@ class ZonalStatisticsInput(BaseModel):
         return self
 
 
-class CHIRPS3DHIS2PipelineInput(BaseModel):
-    """Inputs for CHIRPS3 -> DHIS2 data value pipeline."""
+class ClimateDhis2WorkflowInput(BaseModel):
+    """Inputs for climate -> DHIS2 workflow."""
 
     start_date: date = Field(..., description="Inclusive start date (YYYY-MM-DD)")
     end_date: date = Field(..., description="Inclusive end date (YYYY-MM-DD)")
@@ -87,6 +94,7 @@ class CHIRPS3DHIS2PipelineInput(BaseModel):
     attribute_option_combo: str | None = Field(default=None)
     data_set: str | None = Field(default=None)
     stage: str = Field(default="final", pattern=r"^(final|prelim)$")
+    flavor: str = Field(default="rnl", pattern=r"^(rnl|sat)$")
     spatial_reducer: str = Field(default="mean", pattern=r"^(mean|sum)$")
     temporal_resolution: str = Field(
         default="monthly",
@@ -103,10 +111,56 @@ class CHIRPS3DHIS2PipelineInput(BaseModel):
     import_strategy: str = Field(default="CREATE_AND_UPDATE")
 
     @model_validator(mode="after")
-    def validate_date_window(self) -> "CHIRPS3DHIS2PipelineInput":
+    def validate_date_window(self) -> "ClimateDhis2WorkflowInput":
         """Ensure date window is valid."""
         if self.end_date < self.start_date:
             raise ValueError("end_date must be greater than or equal to start_date")
+        if self.stage == "prelim" and self.flavor != "sat":
+            raise ValueError("For stage='prelim', flavor must be 'sat'")
+        return self
+
+
+class FeatureFetchInput(BaseModel):
+    """Inputs for feature fetching step (DHIS2 or inline GeoJSON)."""
+
+    bbox: list[float] | None = Field(default=None, min_length=4, max_length=4)
+    features_geojson: dict[str, Any] | None = Field(default=None)
+    org_unit_level: int | None = Field(default=None, ge=1)
+    parent_org_unit: str | None = Field(default=None)
+    org_unit_ids: list[str] | None = Field(default=None)
+    org_unit_id_property: str = Field(default="id")
+
+
+class DataValueBuildInput(BaseModel):
+    """Inputs for dataValueSet builder step."""
+
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    data_element: str = Field(..., description="DHIS2 data element UID")
+    category_option_combo: str | None = Field(default=None)
+    attribute_option_combo: str | None = Field(default=None)
+    data_set: str | None = Field(default=None)
+
+
+class DataAggregateInput(BaseModel):
+    """Inputs for data aggregation step."""
+
+    start_date: date = Field(..., description="Inclusive start date (YYYY-MM-DD)")
+    end_date: date = Field(..., description="Inclusive end date (YYYY-MM-DD)")
+    files: list[str] = Field(default_factory=list, description="Downloaded CHIRPS3 file paths")
+    valid_features: list[dict[str, Any]] = Field(default_factory=list, description="Feature rows with orgUnit/geometry")
+    stage: str = Field(default="final", pattern=r"^(final|prelim)$")
+    flavor: str = Field(default="rnl", pattern=r"^(rnl|sat)$")
+    spatial_reducer: str = Field(default="mean", pattern=r"^(mean|sum)$")
+    temporal_resolution: str = Field(default="monthly", pattern=r"^(daily|weekly|monthly)$")
+    temporal_reducer: str = Field(default="sum", pattern=r"^(sum|mean)$")
+    value_rounding: int = Field(default=3, ge=0, le=10)
+
+    @model_validator(mode="after")
+    def validate_date_window(self) -> "DataAggregateInput":
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must be greater than or equal to start_date")
+        if self.stage == "prelim" and self.flavor != "sat":
+            raise ValueError("For stage='prelim', flavor must be 'sat'")
         return self
 
 
