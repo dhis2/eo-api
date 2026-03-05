@@ -375,17 +375,7 @@ resources:
     processor:
       name: eo_api.routers.ogcapi.plugins.processes.chirps3_workflow.Chirps3WorkflowProcessor
 
-  feature-fetch:
+  worldpop-dhis2-workflow:
     type: process
     processor:
-      name: eo_api.routers.ogcapi.plugins.processes.feature_fetch.FeatureFetchProcessor
-
-  data-aggregate:
-    type: process
-    processor:
-      name: eo_api.routers.ogcapi.plugins.processes.data_aggregate.DataAggregateProcessor
-
-  dhis2-datavalue-build:
-    type: process
-    processor:
-      name: eo_api.routers.ogcapi.plugins.processes.datavalue_build.DataValueBuildProcessor
+      name: eo_api.routers.ogcapi.plugins.processes.worldpop_dhis2_workflow.WorldPopDhis2WorkflowProcessor

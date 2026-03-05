@@ -62,3 +62,35 @@ def run_process_with_trace(
     if not isinstance(output, dict):
         raise ProcessorExecuteError(f"Step '{step_name}' returned non-object output")
     return output
+
+
+def run_component_with_trace(
+    trace: list[dict[str, Any]],
+    *,
+    step_name: str,
+    fn: Callable[..., dict[str, Any]],
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Execute a component function as a step and capture workflow trace."""
+    start = time.perf_counter()
+    try:
+        output = run_step(step_name, fn, **kwargs)
+    except Exception as exc:
+        trace.append(
+            {
+                "step": step_name,
+                "status": "failed",
+                "durationMs": round((time.perf_counter() - start) * 1000.0, 2),
+                "error": str(exc),
+            }
+        )
+        raise
+
+    trace.append(
+        {
+            "step": step_name,
+            "status": "completed",
+            "durationMs": round((time.perf_counter() - start) * 1000.0, 2),
+        }
+    )
+    return output

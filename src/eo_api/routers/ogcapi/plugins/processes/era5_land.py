@@ -5,10 +5,11 @@ import os
 from pathlib import Path
 from typing import Any
 
-from dhis2eo.data.cds.era5_land import hourly as era5_land_hourly
 from pydantic import ValidationError
 from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
 
+from eo_api.integrations.era5_land_fetch import download_era5_land
+from eo_api.integrations.workflow_runtime import run_component_with_trace
 from eo_api.routers.ogcapi.plugins.processes.schemas import ERA5LandInput, ProcessOutput
 
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "/tmp/data")
@@ -79,6 +80,7 @@ class ERA5LandProcessor(BaseProcessor):
             inputs = ERA5LandInput.model_validate(data)
         except ValidationError as e:
             raise ProcessorExecuteError(str(e)) from e
+        workflow_trace: list[dict[str, Any]] = []
 
         LOGGER.info(
             "ERA5-Land download: start=%s end=%s bbox=%s variables=%s",
@@ -88,30 +90,25 @@ class ERA5LandProcessor(BaseProcessor):
             inputs.variables,
         )
 
-        download_dir = Path(DOWNLOAD_DIR)
-        download_dir.mkdir(parents=True, exist_ok=True)
-
-        files = era5_land_hourly.download(
+        result = run_component_with_trace(
+            workflow_trace,
+            step_name="era5_land_download",
+            fn=download_era5_land,
             start=inputs.start,
             end=inputs.end,
-            bbox=(inputs.bbox[0], inputs.bbox[1], inputs.bbox[2], inputs.bbox[3]),
-            dirname=str(download_dir),
-            prefix="era5",
+            bbox=inputs.bbox,
             variables=inputs.variables,
+            download_root=Path(DOWNLOAD_DIR),
         )
         output = ProcessOutput(
             status="completed",
-            files=[str(f) for f in files],
-            summary={
-                "file_count": len(files),
-                "variables": inputs.variables,
-                "start": inputs.start,
-                "end": inputs.end,
-            },
+            files=result["files"],
+            summary=result["summary"],
             message="Data downloaded" + (" (dry run)" if inputs.dry_run else ""),
         )
-
-        return "application/json", output.model_dump()
+        response = output.model_dump()
+        response["workflowTrace"] = workflow_trace
+        return "application/json", response
 
     def __repr__(self) -> str:
         return "<ERA5LandProcessor>"

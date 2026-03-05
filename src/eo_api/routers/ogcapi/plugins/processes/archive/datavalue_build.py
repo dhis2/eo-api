@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from dhis2eo.integrations.pandas import format_value_for_dhis2
 from pydantic import ValidationError
 from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
 
+from eo_api.integrations.dhis2_datavalues import build_data_value_set
 from eo_api.routers.ogcapi.plugins.processes.schemas import DataValueBuildInput
 
 PROCESS_METADATA = {
@@ -75,34 +75,13 @@ class DataValueBuildProcessor(BaseProcessor):
         except ValidationError as err:
             raise ProcessorExecuteError(str(err)) from err
 
-        data_values: list[dict[str, Any]] = []
-        for row in inputs.rows:
-            data_value = {
-                "dataElement": inputs.data_element,
-                "orgUnit": row["orgUnit"],
-                "period": row["period"],
-                "value": format_value_for_dhis2(row["value"]),
-            }
-            if inputs.category_option_combo:
-                data_value["categoryOptionCombo"] = inputs.category_option_combo
-            if inputs.attribute_option_combo:
-                data_value["attributeOptionCombo"] = inputs.attribute_option_combo
-            data_values.append(data_value)
-
-        payload: dict[str, Any] = {"dataValues": data_values}
-        if inputs.data_set:
-            payload["dataSet"] = inputs.data_set
-
-        columns = ["orgUnit", "period", "value", "dataElement", "categoryOptionCombo", "attributeOptionCombo"]
-        table_rows = [{column: value.get(column) for column in columns} for value in data_values]
-
-        return "application/json", {
-            "dataValueSet": payload,
-            "table": {
-                "columns": columns,
-                "rows": table_rows,
-            },
-        }
+        return "application/json", build_data_value_set(
+            rows=inputs.rows,
+            data_element=inputs.data_element,
+            category_option_combo=inputs.category_option_combo,
+            attribute_option_combo=inputs.attribute_option_combo,
+            data_set=inputs.data_set,
+        )
 
     def __repr__(self) -> str:
         return "<DataValueBuildProcessor>"
