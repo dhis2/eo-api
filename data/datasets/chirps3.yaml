@@ -1,0 +1,11 @@
+- id: chirps3_precipitation_daily
+  name: Total precipitation (CHIRPS3)
+  short_name: Total precipitation
+  variable: precip
+  period_type: daily
+  cache_info: 
+    eo_function: dhis2eo.data.chc.chirps3.daily.download
+  units: mm
+  resolution: 5 km x 5 km
+  source: CHIRPS v3
+  source_url: https://www.chc.ucsb.edu/data/chirps3

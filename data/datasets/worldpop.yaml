@@ -1,0 +1,13 @@
+- id: worldpop_population_yearly
+  name: Total population (WorldPop Global2)
+  short_name: Total population
+  variable: pop_total
+  period_type: yearly
+  cache_info: 
+    eo_function: dhis2eo.data.worldpop.pop_total.yearly.download
+    default_params:
+      version: global2
+  units: people
+  resolution: 100m x 100m
+  source: WorldPop Global2
+  source_url: https://hub.worldpop.org/project/categories?id=3

@@ -4,10 +4,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import eo_api.startup  # noqa: F401  # pyright: ignore[reportUnusedImport]
-from eo_api.lifecycle import lifespan
-from eo_api.routers import cog, ogcapi, pipelines, prefect, root
+from eo_api import data_manager, system
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,9 +16,5 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(root.router)
-app.include_router(cog.router, prefix="/cog", tags=["Cloud Optimized GeoTIFF"])
-app.include_router(pipelines.router, prefix="/pipelines", tags=["Pipelines"])
-
-app.mount(path="/ogcapi", app=ogcapi.app)
-app.mount(path="/", app=prefect.app)
+app.include_router(system.routes.router, tags=['System'])
+app.include_router(data_manager.routes.router, prefix='/datasets', tags=['Data manager'])
