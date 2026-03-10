@@ -172,3 +172,4 @@ def test_generic_workflow_propagates_manager_job_id_to_output_collection(monkeyp
     assert output["summary"]["job_id"] == "job-123"
     assert output["summary"]["output_collection"]["job_id"] == "job-123"
     assert captured["job_id"] == "job-123"
+    assert any("generic-dhis2-datavalue-preview/items?filter=" in link["href"] for link in output["links"])

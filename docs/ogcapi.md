@@ -546,6 +546,12 @@ Once status is `successful`:
 curl http://localhost:8000/ogcapi/jobs/{jobId}/results
 ```
 
+Generic workflow results include links to preview rows filtered by `job_id`. You can also query directly:
+
+```bash
+curl "http://localhost:8000/ogcapi/collections/generic-dhis2-datavalue-preview/items?job_id={jobId}"
+```
+
 ### Listing all jobs
 
 ```bash

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Any
+from urllib.parse import quote
 
 from pydantic import ValidationError
 from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
@@ -206,6 +207,16 @@ class GenericDhis2WorkflowProcessor(BaseProcessor):
             validated.dataset_type,
             include_workflow_outputs=include_workflow_outputs,
         )
+        if self._job_id:
+            job_filter = quote(f"job_id='{self._job_id}'", safe="")
+            collection_links.append(
+                {
+                    "rel": "items",
+                    "type": "application/geo+json",
+                    "title": "Preview rows for this job",
+                    "href": f"/ogcapi/collections/generic-dhis2-datavalue-preview/items?filter={job_filter}",
+                }
+            )
 
         return "application/json", {
             "status": run_result.get("status"),
