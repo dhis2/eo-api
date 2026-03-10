@@ -5,3 +5,6 @@ __pycache__/
 eo_api.egg-info/
 pygeoapi-openapi.yml
 target/
+
+# Local/internal working docs
+docs-internal/
