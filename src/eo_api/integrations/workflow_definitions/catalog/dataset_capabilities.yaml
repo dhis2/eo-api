@@ -50,6 +50,21 @@ datasets:
         adapter: "components.adapters.spatial.chirps3"
       dhis2_payload_builder:
         adapter: "components.adapters.payload.chirps3"
+    collections:
+      source:
+        - id: "generic-chirps3-source"
+          title: "Generic CHIRPS3 source collection"
+          description: "Generic workflow namespaced source collection descriptor for CHIRPS3."
+          rel: "collection"
+          path: "/ogcapi/collections/generic-chirps3-source"
+          exposed: false
+      workflow_outputs:
+        - id: "generic-dhis2-datavalue-preview"
+          title: "Generic workflow DHIS2 dataValue preview"
+          description: "Derived output collection for previewing workflow tabular payload output."
+          rel: "derived-from"
+          path: "/ogcapi/collections/generic-dhis2-datavalue-preview"
+          exposed: false
 
   worldpop:
     title: "WorldPop Total Population"
@@ -100,3 +115,18 @@ datasets:
         adapter: "components.adapters.spatial.worldpop"
       dhis2_payload_builder:
         adapter: "components.adapters.payload.worldpop"
+    collections:
+      source:
+        - id: "generic-worldpop-source"
+          title: "Generic WorldPop source collection"
+          description: "Generic workflow namespaced source collection descriptor for WorldPop."
+          rel: "collection"
+          path: "/ogcapi/collections/generic-worldpop-source"
+          exposed: false
+      workflow_outputs:
+        - id: "generic-dhis2-datavalue-preview"
+          title: "Generic workflow DHIS2 dataValue preview"
+          description: "Derived output collection for previewing workflow tabular payload output."
+          rel: "derived-from"
+          path: "/ogcapi/collections/generic-dhis2-datavalue-preview"
+          exposed: false

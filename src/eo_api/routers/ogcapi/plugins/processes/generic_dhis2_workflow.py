@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import ValidationError
 from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
 
-from eo_api.integrations.orchestration.capabilities import list_supported_datasets
+from eo_api.integrations.orchestration.capabilities import build_collection_links_for_dataset, list_supported_datasets
 from eo_api.integrations.orchestration.executor import execute_workflow_spec
 from eo_api.integrations.orchestration.registry import build_default_component_registry
 from eo_api.integrations.orchestration.templates import chirps3_dhis2_template, worldpop_dhis2_template
@@ -186,6 +186,11 @@ class GenericDhis2WorkflowProcessor(BaseProcessor):
             summary["payload"] = payload_step["summary"]
         if run_result.get("status") == "exited":
             summary["exit"] = run_result.get("exit", {})
+        include_workflow_outputs = bool(payload_step.get("table")) or bool(payload_step.get("dataValueSet"))
+        collection_links = build_collection_links_for_dataset(
+            validated.dataset_type,
+            include_workflow_outputs=include_workflow_outputs,
+        )
 
         return "application/json", {
             "status": run_result.get("status"),
@@ -198,6 +203,7 @@ class GenericDhis2WorkflowProcessor(BaseProcessor):
             "summary": summary,
             "dataValueSet": payload_step.get("dataValueSet"),
             "dataValueTable": payload_step.get("table"),
+            "links": collection_links,
             "workflowTrace": run_result.get("workflowTrace", []),
             "workflowOutputs": outputs_map,
             "exit": run_result.get("exit"),

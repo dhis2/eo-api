@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from eo_api.integrations.components import (
-    component_dhis2_payload_builder,
-    component_download,
-    component_features,
-    component_spatial_aggregation,
-    component_temporal_aggregation,
+    run_dhis2_payload_builder_stage,
+    run_download_stage,
+    run_feature_stage,
+    run_spatial_aggregation_stage,
+    run_temporal_aggregation_stage,
 )
 
 ComponentCallable = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
@@ -53,35 +53,35 @@ def build_default_component_registry() -> ComponentRegistry:
     registry.register(
         ComponentDescriptor(
             component_id="workflow.features",
-            fn=component_features,
+            fn=run_feature_stage,
             description="Resolve feature scope from inline GeoJSON or DHIS2 selectors.",
         )
     )
     registry.register(
         ComponentDescriptor(
             component_id="workflow.download",
-            fn=component_download,
+            fn=run_download_stage,
             description="Acquire dataset files using dataset-specific adapters.",
         )
     )
     registry.register(
         ComponentDescriptor(
             component_id="workflow.temporal_aggregation",
-            fn=component_temporal_aggregation,
+            fn=run_temporal_aggregation_stage,
             description="Apply, skip, or exit temporal aggregation by dataset capabilities.",
         )
     )
     registry.register(
         ComponentDescriptor(
             component_id="workflow.spatial_aggregation",
-            fn=component_spatial_aggregation,
+            fn=run_spatial_aggregation_stage,
             description="Apply or skip spatial aggregation and emit canonical intermediates.",
         )
     )
     registry.register(
         ComponentDescriptor(
             component_id="workflow.dhis2_payload_builder",
-            fn=component_dhis2_payload_builder,
+            fn=run_dhis2_payload_builder_stage,
             description="Build DHIS2 payload from workflow intermediates.",
         )
     )

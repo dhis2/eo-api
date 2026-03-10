@@ -1,4 +1,4 @@
-"""DHIS2 payload builder component for generic workflow chain."""
+"""OGC Process stage wrapper for DHIS2 payload generation."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ _PAYLOAD_ADAPTERS = {
 }
 
 
-def component_dhis2_payload_builder(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+def run_dhis2_payload_builder_stage(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Build DHIS2 payload from workflow intermediates."""
     del context
     dataset = str(params.get("dataset", "")).strip().lower()
     adapter = _PAYLOAD_ADAPTERS.get(dataset)
     if adapter is None:
-        raise ProcessorExecuteError(f"Unsupported dataset '{dataset}' in dhis2_payload_builder component")
+        raise ProcessorExecuteError(f"Unsupported dataset '{dataset}' in dhis2_payload_builder stage")
     return adapter(params)

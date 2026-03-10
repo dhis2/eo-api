@@ -12,10 +12,11 @@ from pygeoapi.process.base import ProcessorExecuteError
 from eo_api.integrations.orchestration.spec import WorkflowSpec
 
 WORKFLOW_DEFINITION_DIR = Path(__file__).resolve().parents[1] / "workflow_definitions"
+WORKFLOW_TEMPLATE_DIR = WORKFLOW_DEFINITION_DIR / "workflows"
 
 
 def _definition_path(workflow_id: str) -> Path:
-    return WORKFLOW_DEFINITION_DIR / f"{workflow_id}.yaml"
+    return WORKFLOW_TEMPLATE_DIR / f"{workflow_id}.yaml"
 
 
 @lru_cache(maxsize=32)
@@ -40,7 +41,7 @@ def load_workflow_definition(workflow_id: str) -> WorkflowSpec:
 
 
 def available_workflow_definitions() -> list[str]:
-    """List available workflow definition IDs from YAML files."""
-    if not WORKFLOW_DEFINITION_DIR.exists():
+    """List available workflow template IDs from YAML files."""
+    if not WORKFLOW_TEMPLATE_DIR.exists():
         return []
-    return sorted(path.stem for path in WORKFLOW_DEFINITION_DIR.glob("*.yaml"))
+    return sorted(path.stem for path in WORKFLOW_TEMPLATE_DIR.glob("*-template.yaml"))

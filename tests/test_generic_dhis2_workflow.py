@@ -98,6 +98,7 @@ def test_generic_workflow_chirps3_branch(monkeypatch: Any) -> None:
     assert output["summary"]["dataset_type"] == "chirps3"
     assert len(output["workflowTrace"]) == 5
     assert output["dataValueSet"]["dataValues"][0]["orgUnit"] == "OU_1"
+    assert output["links"] == []
 
 
 def test_generic_workflow_worldpop_branch(monkeypatch: Any) -> None:
@@ -120,6 +121,7 @@ def test_generic_workflow_worldpop_branch(monkeypatch: Any) -> None:
     assert output["summary"]["dataset_type"] == "worldpop"
     assert len(output["workflowTrace"]) == 5
     assert output["workflowTrace"][2]["status"] == "passed_through"
+    assert output["links"] == []
 
 
 def test_generic_workflow_invalid_dataset_type() -> None:

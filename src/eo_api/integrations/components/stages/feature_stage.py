@@ -1,4 +1,4 @@
-"""Feature-scope component for generic workflow chain."""
+"""OGC Process stage wrapper for feature scope resolution."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def _to_feature_collection(valid_features: list[dict[str, Any]]) -> dict[str, An
     }
 
 
-def component_features(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+def run_feature_stage(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Resolve feature scope and emit both valid features and FeatureCollection."""
     del context
     result = resolve_features(FeatureFetchInput.model_validate(params))

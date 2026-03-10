@@ -1,4 +1,4 @@
-"""Temporal aggregation component for generic workflow chain."""
+"""OGC Process stage wrapper for temporal aggregation."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ _TEMPORAL_ADAPTERS_SIMPLE: dict[str, Callable[[dict[str, Any]], dict[str, Any]]]
 }
 
 
-def component_temporal_aggregation(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+def run_temporal_aggregation_stage(params: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Apply or skip temporal aggregation based on dataset + request."""
     dataset = str(params.get("dataset", "")).strip().lower()
     adapter_with_dir = _TEMPORAL_ADAPTERS_WITH_DIR.get(dataset)
@@ -25,4 +25,4 @@ def component_temporal_aggregation(params: dict[str, Any], context: dict[str, An
     adapter_simple = _TEMPORAL_ADAPTERS_SIMPLE.get(dataset)
     if adapter_simple is not None:
         return adapter_simple(params)
-    raise ProcessorExecuteError(f"Unsupported dataset '{dataset}' in temporal_aggregation component")
+    raise ProcessorExecuteError(f"Unsupported dataset '{dataset}' in temporal_aggregation stage")

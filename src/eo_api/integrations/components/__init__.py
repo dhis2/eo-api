@@ -1,15 +1,17 @@
-"""Canonical workflow chain component exports."""
+"""Canonical workflow stage exports for orchestration."""
 
-from eo_api.integrations.components.dhis2_payload_builder_component import component_dhis2_payload_builder
-from eo_api.integrations.components.download_component import component_download
-from eo_api.integrations.components.feature_component import component_features
-from eo_api.integrations.components.spatial_aggregation_component import component_spatial_aggregation
-from eo_api.integrations.components.temporal_aggregation_component import component_temporal_aggregation
+from eo_api.integrations.components.stages import (
+    run_dhis2_payload_builder_stage,
+    run_download_stage,
+    run_feature_stage,
+    run_spatial_aggregation_stage,
+    run_temporal_aggregation_stage,
+)
 
 __all__ = [
-    "component_features",
-    "component_download",
-    "component_temporal_aggregation",
-    "component_spatial_aggregation",
-    "component_dhis2_payload_builder",
+    "run_feature_stage",
+    "run_download_stage",
+    "run_temporal_aggregation_stage",
+    "run_spatial_aggregation_stage",
+    "run_dhis2_payload_builder_stage",
 ]
