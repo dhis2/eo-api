@@ -62,7 +62,6 @@ def get_data_coverage(dataset: dict[str, Any]) -> dict[str, Any]:
 
     start = numpy_datetime_to_period_string(ds[time_dim].min(), dataset['period_type'])  # type: ignore[arg-type]
     end = numpy_datetime_to_period_string(ds[time_dim].max(), dataset['period_type'])  # type: ignore[arg-type]
-    logger.info(f'{start} -> {end}')
 
     xmin, xmax = ds[lon_dim].min().item(), ds[lon_dim].max().item()
     ymin, ymax = ds[lat_dim].min().item(), ds[lat_dim].max().item()

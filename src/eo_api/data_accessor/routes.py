@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from .services.accessor import cleanup_file, get_data, xarray_to_temporary_netcdf
-from ..data_manager.routes import _get_dataset_or_404
+from ..data_registry.routes import _get_dataset_or_404
 
 router = APIRouter()
 
