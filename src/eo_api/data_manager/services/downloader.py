@@ -119,33 +119,6 @@ def _compute_time_space_chunks(
     return chunks
 
 
-# def get_cache_info(dataset: dict[str, Any]) -> dict[str, Any]:
-#     """Return temporal and spatial coverage metadata for the cached dataset."""
-#     files = get_cache_files(dataset)
-#     if not files:
-#         return {"temporal_coverage": None, "spatial_coverage": None}
-
-#     ds = xr.open_dataset(sorted(files)[0])
-
-#     time_dim = get_time_dim(ds)
-#     lon_dim, lat_dim = get_lon_lat_dims(ds)
-
-#     start = numpy_period_string(ds[time_dim].min().values, dataset["periodType"])  # type: ignore[arg-type]
-
-#     xmin, xmax = ds[lon_dim].min().item(), ds[lon_dim].max().item()
-#     ymin, ymax = ds[lat_dim].min().item(), ds[lat_dim].max().item()
-
-#     ds = xr.open_dataset(sorted(files)[-1])
-#     end = numpy_period_string(ds[time_dim].max().values, dataset["periodType"])  # type: ignore[arg-type]
-
-#     return {
-#         "coverage": {
-#             "temporal": {"start": start, "end": end},
-#             "spatial": {"xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax},
-#         }
-#     }
-
-
 def _get_cache_prefix(dataset: dict[str, Any]) -> str:
     return str(dataset["id"])
 
