@@ -57,7 +57,7 @@ datasets:
           description: "Generic workflow namespaced source collection descriptor for CHIRPS3."
           rel: "collection"
           path: "/ogcapi/collections/generic-chirps3-source"
-          exposed: false
+          exposed: true
       workflow_outputs:
         - id: "generic-dhis2-datavalue-preview"
           title: "Generic workflow DHIS2 dataValue preview"
@@ -122,7 +122,7 @@ datasets:
           description: "Generic workflow namespaced source collection descriptor for WorldPop."
           rel: "collection"
           path: "/ogcapi/collections/generic-worldpop-source"
-          exposed: false
+          exposed: true
       workflow_outputs:
         - id: "generic-dhis2-datavalue-preview"
           title: "Generic workflow DHIS2 dataValue preview"

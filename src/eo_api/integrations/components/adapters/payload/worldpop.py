@@ -24,8 +24,6 @@ def run(params: dict[str, Any]) -> dict[str, Any]:
     )
 
     summary = params.get("summary")
-    if summary is None:
-        summary = params.get("aggregation")
     return {
         "dataValueSet": result["dataValueSet"],
         "table": result["table"],

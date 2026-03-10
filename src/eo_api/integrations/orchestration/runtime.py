@@ -52,14 +52,14 @@ def should_exit_workflow(step_output: dict[str, Any]) -> tuple[bool, str | None]
 
 def run_step(name: str, fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     """Run a workflow step with consistent logging and error wrapping."""
-    LOGGER.info("[chirps3-dhis2-workflow] step=%s start", name)
+    LOGGER.info("[workflow-runtime] step=%s start", name)
     try:
         result = fn(*args, **kwargs)
     except ProcessorExecuteError:
         raise
     except Exception as exc:
         raise ProcessorExecuteError(f"Step '{name}' failed: {exc}") from exc
-    LOGGER.info("[chirps3-dhis2-workflow] step=%s done", name)
+    LOGGER.info("[workflow-runtime] step=%s done", name)
     return result
 
 

@@ -92,18 +92,18 @@ Each key under `resources` defines a collection or process. A collection needs a
 
 ```yaml
 resources:
-  lakes:
+  dhis2-org-units:
     type: collection
-    title: Large Lakes
-    description: lakes of the world, public domain
+    title: DHIS2 organization units
+    description: Get organization units from DHIS2
     extents:
       spatial:
         bbox: [-180, -90, 180, 90]
         crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84
     providers:
       - type: feature
-        name: GeoJSON
-        data: tests/data/ne_110m_lakes.geojson
+        name: eo_api.routers.ogcapi.plugins.providers.dhis2_org_units.DHIS2OrgUnitsProvider
+        data: tests/data/
         id_field: id
 ```
 
@@ -323,7 +323,7 @@ Calculates statistics over raster values for each input GeoJSON feature.
 This can be used with:
 
 - features from the `sierra-leone-districts` collection
-- raster from the `sierra-leone-population` collection (`tests/data/sle_pop_2026_CN_1km_R2025A_UA_v1.tif`)
+- raster from the `generic-worldpop-source` collection (`tests/data/sle_pop_2026_CN_1km_R2025A_UA_v1.tif`)
 
 Inputs:
 
