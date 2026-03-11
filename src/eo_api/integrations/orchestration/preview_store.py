@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, cast
 
 _PREVIEW_COLLECTION_ID = "generic-dhis2-datavalue-preview"
+_PREVIEW_PG_TABLE = "generic_dhis2_datavalue_preview"
 _PREVIEW_COLLECTION_PATH = Path(
     os.getenv("GENERIC_DHIS2_DATAVALUE_PREVIEW_PATH", "/tmp/generic_dhis2_datavalue_preview.geojson")
 )
@@ -44,10 +45,6 @@ def _pg_dsn() -> str:
     return os.getenv("GENERIC_DHIS2_PREVIEW_PG_DSN", "").strip()
 
 
-def _pg_table() -> str:
-    return os.getenv("GENERIC_DHIS2_PREVIEW_PG_TABLE", "generic_dhis2_datavalue_preview").strip()
-
-
 def _as_feature(feature_id: str, properties: dict[str, Any], geometry: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "type": "Feature",
@@ -71,7 +68,7 @@ def ensure_preview_store_seeded(*, file_path: Path | None = None) -> str:
     """Ensure configured preview backend is initialized."""
     if _use_postgres_backend():
         _run_async(_ensure_postgres_store_seeded())
-        return _validate_table_name(_pg_table())
+        return _validate_table_name(_PREVIEW_PG_TABLE)
     path = file_path or _PREVIEW_COLLECTION_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
@@ -198,7 +195,7 @@ def _get_preview_feature_file(identifier: str, *, file_path: Path | None = None)
 
 async def _ensure_postgres_store_seeded() -> None:
     asyncpg = _asyncpg_module()
-    table_name = _validate_table_name(_pg_table())
+    table_name = _validate_table_name(_PREVIEW_PG_TABLE)
     conn = await asyncpg.connect(_pg_dsn())
     try:
         await conn.execute(
@@ -230,7 +227,7 @@ async def _publish_preview_rows_postgres(
     job_id: str | None = None,
 ) -> dict[str, Any]:
     asyncpg = _asyncpg_module()
-    table_name = _validate_table_name(_pg_table())
+    table_name = _validate_table_name(_PREVIEW_PG_TABLE)
     await _ensure_postgres_store_seeded()
 
     effective_job_id = job_id or uuid.uuid4().hex
@@ -284,7 +281,7 @@ async def _publish_preview_rows_postgres(
 
 async def _load_preview_features_postgres(*, job_id: str | None = None) -> list[dict[str, Any]]:
     asyncpg = _asyncpg_module()
-    table_name = _validate_table_name(_pg_table())
+    table_name = _validate_table_name(_PREVIEW_PG_TABLE)
     await _ensure_postgres_store_seeded()
 
     conn = await asyncpg.connect(_pg_dsn())
@@ -322,7 +319,7 @@ async def _load_preview_features_postgres(*, job_id: str | None = None) -> list[
 
 async def _get_preview_feature_postgres(identifier: str) -> dict[str, Any] | None:
     asyncpg = _asyncpg_module()
-    table_name = _validate_table_name(_pg_table())
+    table_name = _validate_table_name(_PREVIEW_PG_TABLE)
     await _ensure_postgres_store_seeded()
 
     conn = await asyncpg.connect(_pg_dsn())

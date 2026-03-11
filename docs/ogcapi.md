@@ -561,7 +561,6 @@ By default, preview rows are appended to file-backed GeoJSON:
 To use PostgreSQL/PostGIS instead, set:
 
 - `GENERIC_DHIS2_PREVIEW_PG_DSN` (example: `postgresql://user:pass@localhost:5432/eoapi`)
-- optional `GENERIC_DHIS2_PREVIEW_PG_TABLE` (default: `generic_dhis2_datavalue_preview`)
 
 When `GENERIC_DHIS2_PREVIEW_PG_DSN` is set, generic workflow preview writes and collection reads use PostgreSQL.
 
