@@ -2,14 +2,12 @@
 
 from typing import Any
 
-import xarray as xr
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
-from fastapi.responses import FileResponse
-from starlette.background import BackgroundTask
+from fastapi import APIRouter, HTTPException
 
 from .services import datasets
 
 router = APIRouter()
+
 
 @router.get("/")
 def list_datasets() -> list[dict[str, Any]]:
@@ -30,6 +28,7 @@ def get_dataset(dataset_id: str) -> dict[str, Any]:
     """Get a single dataset by ID."""
     # Note: have to import inside function to avoid circular import
     from ..data_accessor.services.accessor import get_data_coverage
+
     dataset = _get_dataset_or_404(dataset_id)
     coverage = get_data_coverage(dataset)
     dataset.update(coverage)

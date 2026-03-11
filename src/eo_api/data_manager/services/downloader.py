@@ -17,7 +17,7 @@ from .utils import get_lon_lat_dims, get_time_dim
 logger = logging.getLogger(__name__)
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-_download_dir = SCRIPT_DIR.parent.parent.parent.parent / 'data' / 'downloads'
+_download_dir = SCRIPT_DIR.parent.parent.parent.parent / "data" / "downloads"
 if CACHE_OVERRIDE:
     _download_dir = Path(CACHE_OVERRIDE)
 DOWNLOAD_DIR = _download_dir
@@ -29,6 +29,8 @@ def download_dataset(
     end: str | None,
     overwrite: bool,
     background_tasks: BackgroundTasks | None,
+    country_code: str | None = None,
+    bbox: list[float] | None = None,
 ) -> None:
     """Download dataset from source and store as local NetCDF cache files."""
     cache_info = dataset["cache_info"]
@@ -48,15 +50,22 @@ def download_dataset(
 
     sig = inspect.signature(eo_download_func)
     if "bbox" in sig.parameters:
-        params["bbox"] = BBOX
+        params["bbox"] = bbox or BBOX
     elif "country_code" in sig.parameters:
-        if COUNTRY_CODE:
-            params["country_code"] = COUNTRY_CODE
+        resolved_country_code = country_code or COUNTRY_CODE
+        if resolved_country_code:
+            params["country_code"] = resolved_country_code
         else:
-            raise Exception('Downloading WorldPop data requires COUNTRY_CODE environment variable')
+            raise Exception(
+                "Downloading WorldPop data requires country_code input (or COUNTRY_CODE environment variable)"
+            )
+
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
     if background_tasks is not None:
         background_tasks.add_task(eo_download_func, **params)
+    else:
+        eo_download_func(**params)
 
 
 def build_dataset_zarr(dataset: dict[str, Any]) -> None:

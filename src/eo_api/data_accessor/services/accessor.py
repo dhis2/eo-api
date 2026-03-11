@@ -1,25 +1,30 @@
 """Loading raster data from downloaded files into xarray."""
 
-import os
-import json
 import logging
+import os
 import tempfile
 from typing import Any
 
 import xarray as xr
 
 from ...data_manager.services.downloader import get_cache_files, get_zarr_path
-from ...data_manager.services.utils import get_time_dim, get_lon_lat_dims
+from ...data_manager.services.utils import get_lon_lat_dims, get_time_dim
 from ...shared.time import numpy_datetime_to_period_string
 
 logger = logging.getLogger(__name__)
 
-def get_data(dataset: dict[str, Any], start: str = None, end: str = None, bbox: list = None) -> xr.Dataset:
+
+def get_data(
+    dataset: dict[str, Any],
+    start: str | None = None,
+    end: str | None = None,
+    bbox: list[float] | None = None,
+) -> xr.Dataset:
     """Load an xarray raster dataset for a given time range and bbox."""
     logger.info("Opening dataset")
     zarr_path = get_zarr_path(dataset)
     if zarr_path:
-        logger.info(f'Using optimized zarr file: {zarr_path}')
+        logger.info(f"Using optimized zarr file: {zarr_path}")
         ds = xr.open_zarr(zarr_path, consolidated=True)
     else:
         logger.warning(
@@ -40,8 +45,8 @@ def get_data(dataset: dict[str, Any], start: str = None, end: str = None, bbox: 
 
     if bbox is not None:
         logger.info(f"Subsetting xy to {bbox}")
-        xmin,ymin,xmax,ymax = list(map(float, bbox))
-        lon_dim,lat_dim = get_lon_lat_dims(ds)
+        xmin, ymin, xmax, ymax = list(map(float, bbox))
+        lon_dim, lat_dim = get_lon_lat_dims(ds)
         # TODO: this assumes y axis increases towards north and is not very stable
         # ...and also does not consider partial pixels at the edges
         # ...should probably switch to rioxarray.clip instead
@@ -49,9 +54,9 @@ def get_data(dataset: dict[str, Any], start: str = None, end: str = None, bbox: 
 
     return ds  # type: ignore[no-any-return]
 
+
 def get_data_coverage(dataset: dict[str, Any]) -> dict[str, Any]:
     """Return temporal and spatial coverage metadata for downloaded data."""
-    
     ds = get_data(dataset)
 
     if not ds:
@@ -60,8 +65,8 @@ def get_data_coverage(dataset: dict[str, Any]) -> dict[str, Any]:
     time_dim = get_time_dim(ds)
     lon_dim, lat_dim = get_lon_lat_dims(ds)
 
-    start = numpy_datetime_to_period_string(ds[time_dim].min(), dataset['period_type'])  # type: ignore[arg-type]
-    end = numpy_datetime_to_period_string(ds[time_dim].max(), dataset['period_type'])  # type: ignore[arg-type]
+    start = numpy_datetime_to_period_string(ds[time_dim].min(), dataset["period_type"])  # type: ignore[arg-type]
+    end = numpy_datetime_to_period_string(ds[time_dim].max(), dataset["period_type"])  # type: ignore[arg-type]
 
     xmin, xmax = ds[lon_dim].min().item(), ds[lon_dim].max().item()
     ymin, ymax = ds[lat_dim].min().item(), ds[lat_dim].max().item()
@@ -73,6 +78,7 @@ def get_data_coverage(dataset: dict[str, Any]) -> dict[str, Any]:
         }
     }
 
+
 def xarray_to_temporary_netcdf(ds: xr.Dataset) -> str:
     """Write a dataset to a temporary NetCDF file and return the path."""
     fd = tempfile.NamedTemporaryFile(suffix=".nc", delete=False)
@@ -80,6 +86,7 @@ def xarray_to_temporary_netcdf(ds: xr.Dataset) -> str:
     fd.close()
     ds.to_netcdf(path)
     return path
+
 
 def cleanup_file(path: str) -> None:
     """Remove a file from disk."""
