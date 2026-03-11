@@ -2,32 +2,27 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 from pygeoapi.provider.base import BaseProvider, ProviderItemNotFoundError, SchemaType
 from pygeofilter.backends.native.evaluate import NativeEvaluator
 
+from eo_api.integrations.orchestration import preview_store
+
 
 class PreviewDataValuesProvider(BaseProvider):
-    """Serve file-backed preview rows with job-level filtering."""
+    """Serve preview rows with job-level filtering."""
 
     _fields: dict[str, dict[str, str]]
 
     def __init__(self, provider_def: dict[str, Any]) -> None:
         """Initialize provider from pygeoapi definition."""
         super().__init__(provider_def)
-        self.data_path = Path(str(provider_def.get("data", "")))
         self._fields = {}
         self.get_fields()
 
     def _load_features(self) -> list[dict[str, Any]]:
-        if not self.data_path.exists():
-            return []
-        payload = json.loads(self.data_path.read_text(encoding="utf-8"))
-        features = payload.get("features", [])
-        return features if isinstance(features, list) else []
+        return preview_store.load_preview_features()
 
     def _normalize_properties_filter(self, properties: list[Any] | None) -> dict[str, str]:
         normalized: dict[str, str] = {}
@@ -48,31 +43,15 @@ class PreviewDataValuesProvider(BaseProvider):
         if self._fields:
             return self._fields
 
-        self._fields = {"job_id": {"type": "string"}, "dataset_type": {"type": "string"}}
-        features = self._load_features()
-        if not features:
-            return self._fields
-        props = features[0].get("properties", {})
-        if not isinstance(props, dict):
-            return self._fields
-        for key, value in props.items():
-            if isinstance(value, bool):
-                ftype = "boolean"
-            elif isinstance(value, int):
-                ftype = "integer"
-            elif isinstance(value, float):
-                ftype = "number"
-            else:
-                ftype = "string"
-            self._fields[str(key)] = {"type": ftype}
+        self._fields = preview_store.infer_preview_fields()
         return self._fields
 
     def get(self, identifier: str, **kwargs: Any) -> dict[str, Any]:
         """Return one feature by id."""
-        for feature in self._load_features():
-            if str(feature.get("id")) == identifier:
-                return feature
-        raise ProviderItemNotFoundError(f"Feature {identifier} not found")
+        feature = preview_store.get_preview_feature(identifier)
+        if feature is None:
+            raise ProviderItemNotFoundError(f"Feature {identifier} not found")
+        return feature
 
     def query(
         self,
@@ -90,9 +69,9 @@ class PreviewDataValuesProvider(BaseProvider):
     ) -> dict[str, Any]:
         """Return preview feature collection matching query parameters."""
         del resulttype, bbox, datetime_, sortby, select_properties, skip_geometry
-        features = self._load_features()
-
         job_id = kwargs.get("job_id")
+        features = preview_store.load_preview_features(job_id=job_id if isinstance(job_id, str) and job_id else None)
+
         if isinstance(job_id, str) and job_id:
             features = [f for f in features if str((f.get("properties") or {}).get("job_id")) == job_id]
 

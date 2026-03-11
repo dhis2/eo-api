@@ -66,6 +66,10 @@ ignore_missing_imports = true
 module = ["yaml"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["asyncpg", "asyncpg.*"]
+ignore_missing_imports = true
+
 [tool.pyright]
 include = ["src", "tests"]
 exclude = ["**/.venv"]
