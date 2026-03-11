@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import ValidationError
 from pygeoapi.process.base import BaseProcessor, ProcessorExecuteError
 
-from eo_api.integrations.components.services.temporal_aggregate_service import aggregate_chirps_rows
+from eo_api.integrations.components.services.temporal_aggregate_service import aggregate_gridded_time_rows_by_features
 from eo_api.routers.ogcapi.plugins.processes.schemas import DataAggregateInput
 
 DOWNLOAD_DIR = os.getenv("DOWNLOAD_DIR", "/tmp/data")
@@ -55,7 +55,7 @@ class DataAggregateProcessor(BaseProcessor):
         except ValidationError as err:
             raise ProcessorExecuteError(str(err)) from err
 
-        result = aggregate_chirps_rows(
+        result = aggregate_gridded_time_rows_by_features(
             files=inputs.files,
             valid_features=inputs.valid_features,
             start_date=str(inputs.start_date),
@@ -65,6 +65,7 @@ class DataAggregateProcessor(BaseProcessor):
             temporal_reducer=inputs.temporal_reducer,
             value_rounding=inputs.value_rounding,
             cache_root=DOWNLOAD_DIR,
+            preferred_var="precip",
             stage=inputs.stage,
             flavor=inputs.flavor,
         )
