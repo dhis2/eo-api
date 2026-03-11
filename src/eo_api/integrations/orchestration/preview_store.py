@@ -42,7 +42,7 @@ def _validate_table_name(table_name: str) -> str:
 
 
 def _pg_dsn() -> str:
-    return os.getenv("GENERIC_DHIS2_PREVIEW_PG_DSN", "").strip()
+    return os.getenv("EO_API_PG_DSN", "").strip()
 
 
 def _as_feature(feature_id: str, properties: dict[str, Any], geometry: dict[str, Any] | None = None) -> dict[str, Any]:

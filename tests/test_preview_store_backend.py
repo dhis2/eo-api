@@ -5,7 +5,7 @@ from eo_api.integrations.orchestration import preview_store
 
 
 def test_publish_preview_rows_uses_file_backend_when_pg_dsn_unset(monkeypatch: Any, tmp_path: Path) -> None:
-    monkeypatch.delenv("GENERIC_DHIS2_PREVIEW_PG_DSN", raising=False)
+    monkeypatch.delenv("EO_API_PG_DSN", raising=False)
     result = preview_store.publish_preview_rows(
         dataset_type="chirps3",
         rows=[{"orgUnit": "OU_1", "period": "202501", "value": "1.23"}],
@@ -17,7 +17,7 @@ def test_publish_preview_rows_uses_file_backend_when_pg_dsn_unset(monkeypatch: A
 
 
 def test_publish_preview_rows_uses_postgres_backend_when_pg_dsn_set(monkeypatch: Any) -> None:
-    monkeypatch.setenv("GENERIC_DHIS2_PREVIEW_PG_DSN", "postgresql://user:pass@localhost:5432/db")
+    monkeypatch.setenv("EO_API_PG_DSN", "postgresql://user:pass@localhost:5432/db")
 
     def _fake_run_async(coro: Any) -> dict[str, Any]:
         close = getattr(coro, "close", None)
