@@ -18,6 +18,9 @@ def persist_run_log(
     status: str,
     output_file: str | None = None,
     error: str | None = None,
+    error_code: str | None = None,
+    failed_component: str | None = None,
+    failed_component_version: str | None = None,
 ) -> str:
     """Write workflow run metadata to disk and return file path."""
     logs_dir = DOWNLOAD_DIR / "workflow_runs"
@@ -32,6 +35,9 @@ def persist_run_log(
         "component_runs": [run.model_dump(mode="json") for run in component_runs],
         "output_file": output_file,
         "error": error,
+        "error_code": error_code,
+        "failed_component": failed_component,
+        "failed_component_version": failed_component_version,
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return str(path)
