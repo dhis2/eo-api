@@ -79,24 +79,6 @@ Docs:
 
 http://127.0.0.1:8000/docs
 
-Workflow (single payload contract):
-
-`POST /workflows/dhis2-datavalue-set`
-
-```json
-{
-  "dataset_id": "chirps3_precipitation_daily",
-  "start_date": "2024-01-01",
-  "end_date": "2024-05-31",
-  "org_unit_level": 3,
-  "data_element": "DE_UID",
-  "temporal_resolution": "monthly",
-  "temporal_reducer": "sum",
-  "spatial_reducer": "mean",
-  "dry_run": true
-}
-```
-
 OGC API
 
 http://127.0.0.1:8000/ogcapi
