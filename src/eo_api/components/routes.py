@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ..data_manager.services.constants import BBOX
 from . import services
 from .schemas import ComponentCatalogResponse
 

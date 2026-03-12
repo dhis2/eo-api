@@ -1,4 +1,8 @@
-from pydantic import BaseModel
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict
+
+from ...schemas import PeriodType
 
 
 class AggregationMethod(StrEnum):
@@ -8,15 +12,6 @@ class AggregationMethod(StrEnum):
     SUM = "sum"
     MIN = "min"
     MAX = "max"
-
-
-class PeriodType(StrEnum):
-    """Supported temporal period types."""
-
-    HOURLY = "hourly"
-    DAILY = "daily"
-    MONTHLY = "monthly"
-    YEARLY = "yearly"
 
 
 class TemporalAggregationConfig(BaseModel):

@@ -9,8 +9,8 @@ import xarray as xr
 from shapely import contains_xy
 from shapely.geometry import shape
 
-from ...data_manager.services.utils import get_lon_lat_dims, get_time_dim
-from .features import feature_id
+from ...download.services.utils import get_lon_lat_dims, get_time_dim
+from ...features.services.features import feature_id
 
 
 def aggregate_to_features(
@@ -78,25 +78,25 @@ def spatial_aggregation_component(
 
 
 # from workflows engine
-def _run_spatial_aggregation(
-    *,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    context: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    method = AggregationMethod(str(step_config.get("method", request.spatial_aggregation.method)))
-    feature_id_property = str(step_config.get("feature_id_property", request.dhis2.org_unit_property))
-    records = runtime.run(
-        "spatial_aggregation",
-        component_services.spatial_aggregation_component,
-        dataset=dataset,
-        start=request.start,
-        end=request.end,
-        bbox=_require_context(context, "bbox"),
-        features=_require_context(context, "features"),
-        method=method,
-        feature_id_property=feature_id_property,
-    )
-    return {"records": records}
+# def _run_spatial_aggregation(
+#     *,
+#     runtime: WorkflowRuntime,
+#     request: WorkflowExecuteRequest,
+#     dataset: dict[str, Any],
+#     context: dict[str, Any],
+#     step_config: dict[str, Any],
+# ) -> dict[str, Any]:
+#     method = AggregationMethod(str(step_config.get("method", request.spatial_aggregation.method)))
+#     feature_id_property = str(step_config.get("feature_id_property", request.dhis2.org_unit_property))
+#     records = runtime.run(
+#         "spatial_aggregation",
+#         component_services.spatial_aggregation_component,
+#         dataset=dataset,
+#         start=request.start,
+#         end=request.end,
+#         bbox=_require_context(context, "bbox"),
+#         features=_require_context(context, "features"),
+#         method=method,
+#         feature_id_property=feature_id_property,
+#     )
+#     return {"records": records}

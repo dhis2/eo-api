@@ -1,6 +1,6 @@
 from ..data_registry.routes import require_dataset
 from .schemas.fastapi import TemporalAggregationRunRequest, TemporalAggregationRunResponse
-from .services import temporal_aggregation_component
+from .services.temporal import temporal_aggregation_component
 
 from fastapi import APIRouter
 

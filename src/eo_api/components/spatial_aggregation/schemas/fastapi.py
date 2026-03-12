@@ -1,4 +1,9 @@
+from typing import Any
+
 from pydantic import BaseModel
+
+from .spatial import AggregationMethod
+from ...features.schemas.features import FeatureSourceConfig
 
 
 class SpatialAggregationRunRequest(BaseModel):

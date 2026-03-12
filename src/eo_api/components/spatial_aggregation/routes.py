@@ -1,6 +1,6 @@
 from ..data_registry.routes import require_dataset
-from ..features.services import feature_source_component
-from .services import spatial_aggregation_component
+from ..features.services.features import feature_source_component
+from .services.spatial import spatial_aggregation_component
 from .schemas.fastapi import SpatialAggregationRunRequest, SpatialAggregationRunResponse
 
 from fastapi import APIRouter

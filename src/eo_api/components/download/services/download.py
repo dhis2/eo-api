@@ -17,7 +17,7 @@ from .utils import get_lon_lat_dims, get_time_dim
 logger = logging.getLogger(__name__)
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-_download_dir = SCRIPT_DIR.parent.parent.parent.parent / "data" / "downloads"
+_download_dir = SCRIPT_DIR.parent.parent.parent.parent.parent / "data" / "downloads"
 if CACHE_OVERRIDE:
     _download_dir = Path(CACHE_OVERRIDE)
 DOWNLOAD_DIR = _download_dir
@@ -179,24 +179,24 @@ def download_dataset_component(
 
 
 # from workflows engine
-def _run_download_dataset(
-    *,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    context: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    overwrite = bool(step_config.get("overwrite", request.overwrite))
-    country_code = step_config.get("country_code", request.country_code)
-    runtime.run(
-        "download_dataset",
-        component_services.download_dataset_component,
-        dataset=dataset,
-        start=request.start,
-        end=request.end,
-        overwrite=overwrite,
-        country_code=country_code,
-        bbox=_require_context(context, "bbox"),
-    )
-    return {}
+# def _run_download_dataset(
+#     *,
+#     runtime: WorkflowRuntime,
+#     request: WorkflowExecuteRequest,
+#     dataset: dict[str, Any],
+#     context: dict[str, Any],
+#     step_config: dict[str, Any],
+# ) -> dict[str, Any]:
+#     overwrite = bool(step_config.get("overwrite", request.overwrite))
+#     country_code = step_config.get("country_code", request.country_code)
+#     runtime.run(
+#         "download_dataset",
+#         component_services.download_dataset_component,
+#         dataset=dataset,
+#         start=request.start,
+#         end=request.end,
+#         overwrite=overwrite,
+#         country_code=country_code,
+#         bbox=_require_context(context, "bbox"),
+#     )
+#     return {}

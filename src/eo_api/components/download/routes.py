@@ -3,7 +3,7 @@
 from fastapi import APIRouter, BackgroundTasks
 
 from ..data_registry.routes import require_dataset
-from .services import download_dataset_component
+from .services.download import download_dataset_component
 from .schemas.fastapi import DownloadDatasetRunRequest, DownloadDatasetRunResponse
 
 router = APIRouter()

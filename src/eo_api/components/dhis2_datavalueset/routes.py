@@ -1,5 +1,5 @@
 from .schemas.fastapi import BuildDataValueSetRunRequest, BuildDataValueSetRunResponse
-from .services import build_datavalueset_component
+from .services.datavalueset import build_datavalueset_component
 
 from fastapi import APIRouter
 

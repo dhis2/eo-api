@@ -1,4 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
+from ...schemas import PeriodType
+
 
 class Dhis2DataValueSetConfig(BaseModel):
     """Mapping from aggregate outputs to DHIS2 DataValueSet fields."""

@@ -1,6 +1,5 @@
 """Schemas for generic DHIS2 workflow execution."""
 
-from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator

@@ -5,7 +5,7 @@ import os
 
 import geopandas as gpd
 
-from ...shared.dhis2_adapter import create_client, get_org_units_geojson
+from ....shared.dhis2_adapter import create_client, get_org_units_geojson
 
 # load geojson from dhis2 at startup and keep in-memory
 # TODO: should probably save to file instead

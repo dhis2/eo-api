@@ -8,8 +8,8 @@ from typing import Any
 
 import geopandas as gpd
 
-from ...shared.dhis2_adapter import create_client, get_org_unit_geojson, get_org_units_geojson
-from ..schemas import FeatureSourceConfig, FeatureSourceType
+from ....shared.dhis2_adapter import create_client, get_org_unit_geojson, get_org_units_geojson
+from ..schemas.features import FeatureSourceConfig, FeatureSourceType
 
 
 def resolve_features(config: FeatureSourceConfig) -> tuple[dict[str, Any], list[float]]:
@@ -75,18 +75,18 @@ def feature_source_component(config: FeatureSourceConfig) -> tuple[dict[str, Any
 
 
 # from workflows engine
-def _run_feature_source(
-    *,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    context: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    del dataset, context, step_config
-    features, bbox = runtime.run(
-        "feature_source",
-        component_services.feature_source_component,
-        config=request.feature_source,
-    )
-    return {"features": features, "bbox": bbox}
+# def _run_feature_source(
+#     *,
+#     runtime: WorkflowRuntime,
+#     request: WorkflowExecuteRequest,
+#     dataset: dict[str, Any],
+#     context: dict[str, Any],
+#     step_config: dict[str, Any],
+# ) -> dict[str, Any]:
+#     del dataset, context, step_config
+#     features, bbox = runtime.run(
+#         "feature_source",
+#         component_services.feature_source_component,
+#         config=request.feature_source,
+#     )
+#     return {"features": features, "bbox": bbox}

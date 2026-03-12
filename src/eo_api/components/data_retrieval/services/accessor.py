@@ -7,9 +7,9 @@ from typing import Any
 
 import xarray as xr
 
-from ...data_manager.services.downloader import get_cache_files, get_zarr_path
-from ...data_manager.services.utils import get_lon_lat_dims, get_time_dim
-from ...shared.time import numpy_datetime_to_period_string
+from ...download.services.download import get_cache_files, get_zarr_path
+from ...download.services.utils import get_lon_lat_dims, get_time_dim
+from ....shared.time import numpy_datetime_to_period_string
 
 logger = logging.getLogger(__name__)
 

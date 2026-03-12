@@ -1,4 +1,6 @@
-from pydantic import BaseModel
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict
 
 
 class AggregationMethod(StrEnum):

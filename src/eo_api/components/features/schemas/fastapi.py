@@ -1,4 +1,8 @@
+from typing import Any
+
 from pydantic import BaseModel
+
+from .features import FeatureSourceConfig
 
 
 class FeatureSourceRunRequest(BaseModel):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
@@ -25,3 +26,14 @@ class ComponentCatalogResponse(BaseModel):
     """List of discoverable components."""
 
     components: list[ComponentDefinition]
+
+
+# below is shared across components, maybe move elsewhere...
+
+class PeriodType(StrEnum):
+    """Supported temporal period types."""
+
+    HOURLY = "hourly"
+    DAILY = "daily"
+    MONTHLY = "monthly"
+    YEARLY = "yearly"

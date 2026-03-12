@@ -1,5 +1,5 @@
 from .schemas.fastapi import FeatureSourceRunRequest, FeatureSourceRunResponse
-from .services import feature_source_component
+from .services.features import feature_source_component
 
 from fastapi import APIRouter
 

@@ -1,5 +1,8 @@
 from pydantic import BaseModel
 
+from .temporal import AggregationMethod
+from ...schemas import PeriodType
+
 
 class TemporalAggregationRunRequest(BaseModel):
     """Execute temporal aggregation component from cached dataset."""
