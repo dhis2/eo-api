@@ -4,6 +4,7 @@ import sys
 from importlib.metadata import version
 
 from fastapi import APIRouter, Request
+from fastapi.responses import RedirectResponse
 
 from .schemas import AppInfo, HealthStatus, Link, RootResponse, Status
 

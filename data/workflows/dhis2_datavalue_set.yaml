@@ -1,8 +1,0 @@
-workflow_id: dhis2_datavalue_set_v1
-version: 1
-steps:
-  - component: feature_source
-  - component: download_dataset
-  - component: temporal_aggregation
-  - component: spatial_aggregation
-  - component: build_datavalueset

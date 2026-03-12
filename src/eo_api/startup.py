@@ -1,11 +1,10 @@
-"""Early-boot side effects.
+"""Early-boot side effects
 
 This module is imported before any other eo_api modules so that
 environment variables and logging are configured before other imports.
 """
 
 import logging
-
 from dotenv import load_dotenv  # noqa: E402
 
 # -- Load .env (must happen before pygeoapi reads PYGEOAPI_CONFIG) ------------

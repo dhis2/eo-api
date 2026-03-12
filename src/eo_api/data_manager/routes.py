@@ -1,9 +1,14 @@
 """FastAPI router exposing dataset endpoints."""
 
-from fastapi import APIRouter, BackgroundTasks
+from typing import Any
 
+import xarray as xr
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Response
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
+
+from .services import constants, downloader
 from ..data_registry.routes import _get_dataset_or_404
-from .services import downloader
 
 router = APIRouter()
 
@@ -12,9 +17,9 @@ router = APIRouter()
 def download_dataset(
     dataset_id: str,
     start: str,
-    background_tasks: BackgroundTasks,
     end: str | None = None,
     overwrite: bool = False,
+    background_tasks: BackgroundTasks = None,
 ) -> dict[str, str]:
     """Download dataset as local netcdf files direct from the source."""
     dataset = _get_dataset_or_404(dataset_id)
@@ -25,9 +30,10 @@ def download_dataset(
 @router.get("/{dataset_id}/build_zarr", response_model=dict)
 def build_dataset_zarr(
     dataset_id: str,
-    background_tasks: BackgroundTasks,
+    background_tasks: BackgroundTasks = None,
 ) -> dict[str, str]:
     """Optimize dataset downloads by collecting all files to a single zarr archive."""
     dataset = _get_dataset_or_404(dataset_id)
-    background_tasks.add_task(downloader.build_dataset_zarr, dataset)
+    if background_tasks is not None:
+        background_tasks.add_task(downloader.build_dataset_zarr, dataset)
     return {"status": "Building zarr file from dataset downloads"}
