@@ -9,7 +9,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
-CONFIGS_DIR = SCRIPT_DIR.parent.parent.parent.parent / 'data' / 'datasets'
+CONFIGS_DIR = SCRIPT_DIR.parent.parent.parent.parent / "data" / "datasets"
 
 
 def list_datasets() -> list[dict[str, Any]]:

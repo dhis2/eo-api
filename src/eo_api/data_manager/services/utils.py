@@ -2,9 +2,6 @@
 
 from typing import Any
 
-import numpy as np
-import pandas as pd
-
 
 def get_time_dim(ds: Any) -> str:
     """Return the name of the time dimension in a dataset or dataframe."""

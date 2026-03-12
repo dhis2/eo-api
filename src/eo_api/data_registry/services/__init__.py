@@ -1,1 +1,3 @@
-from . import datasets
+from . import datasets as datasets
+
+__all__ = ["datasets"]
