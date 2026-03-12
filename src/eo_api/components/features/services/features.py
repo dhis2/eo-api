@@ -72,3 +72,21 @@ def _bbox_from_feature_collection(collection: dict[str, Any]) -> list[float]:
 def feature_source_component(config: FeatureSourceConfig) -> tuple[dict[str, Any], list[float]]:
     """Run feature source component."""
     return resolve_features(config)
+
+
+# from workflows engine
+def _run_feature_source(
+    *,
+    runtime: WorkflowRuntime,
+    request: WorkflowExecuteRequest,
+    dataset: dict[str, Any],
+    context: dict[str, Any],
+    step_config: dict[str, Any],
+) -> dict[str, Any]:
+    del dataset, context, step_config
+    features, bbox = runtime.run(
+        "feature_source",
+        component_services.feature_source_component,
+        config=request.feature_source,
+    )
+    return {"features": features, "bbox": bbox}

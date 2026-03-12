@@ -177,3 +177,27 @@ def download_dataset_component(
         country_code=country_code,
         bbox=bbox,
     )
+
+
+# from workflows engine
+def _run_download_dataset(
+    *,
+    runtime: WorkflowRuntime,
+    request: WorkflowExecuteRequest,
+    dataset: dict[str, Any],
+    context: dict[str, Any],
+    step_config: dict[str, Any],
+) -> dict[str, Any]:
+    overwrite = bool(step_config.get("overwrite", request.overwrite))
+    country_code = step_config.get("country_code", request.country_code)
+    runtime.run(
+        "download_dataset",
+        component_services.download_dataset_component,
+        dataset=dataset,
+        start=request.start,
+        end=request.end,
+        overwrite=overwrite,
+        country_code=country_code,
+        bbox=_require_context(context, "bbox"),
+    )
+    return {}

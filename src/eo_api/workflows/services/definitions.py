@@ -8,32 +8,6 @@ from typing import Any, Final, Literal
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
-ComponentName = Literal[
-    "feature_source",
-    "download_dataset",
-    "temporal_aggregation",
-    "spatial_aggregation",
-    "build_datavalueset",
-]
-
-SUPPORTED_COMPONENTS: Final[set[str]] = set(ComponentName.__args__)  # type: ignore[attr-defined]
-SUPPORTED_COMPONENT_VERSIONS: Final[dict[str, set[str]]] = {component: {"v1"} for component in SUPPORTED_COMPONENTS}
-
-COMPONENT_INPUTS: Final[dict[str, set[str]]] = {
-    "feature_source": set(),
-    "download_dataset": {"bbox"},
-    "temporal_aggregation": {"bbox"},
-    "spatial_aggregation": {"bbox", "features"},
-    "build_datavalueset": {"records"},
-}
-
-COMPONENT_OUTPUTS: Final[dict[str, set[str]]] = {
-    "feature_source": {"features", "bbox"},
-    "download_dataset": set(),
-    "temporal_aggregation": {"temporal_dataset"},
-    "spatial_aggregation": {"records"},
-    "build_datavalueset": {"data_value_set", "output_file"},
-}
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 WORKFLOWS_DIR = SCRIPT_DIR.parent.parent.parent.parent / "data" / "workflows"

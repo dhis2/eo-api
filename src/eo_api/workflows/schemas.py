@@ -103,6 +103,36 @@ class WorkflowRequest(BaseModel):
         return self
 
 
+# TODO: Below should not be hardcoded like this, but rather defined by each component 
+
+# ComponentName = Literal[
+#     "feature_source",
+#     "download_dataset",
+#     "temporal_aggregation",
+#     "spatial_aggregation",
+#     "build_datavalueset",
+# ]
+
+# SUPPORTED_COMPONENTS: Final[set[str]] = set(ComponentName.__args__)  # type: ignore[attr-defined]
+# SUPPORTED_COMPONENT_VERSIONS: Final[dict[str, set[str]]] = {component: {"v1"} for component in SUPPORTED_COMPONENTS}
+
+# COMPONENT_INPUTS: Final[dict[str, set[str]]] = {
+#     "feature_source": set(),
+#     "download_dataset": {"bbox"},
+#     "temporal_aggregation": {"bbox"},
+#     "spatial_aggregation": {"bbox", "features"},
+#     "build_datavalueset": {"records"},
+# }
+
+# COMPONENT_OUTPUTS: Final[dict[str, set[str]]] = {
+#     "feature_source": {"features", "bbox"},
+#     "download_dataset": set(),
+#     "temporal_aggregation": {"temporal_dataset"},
+#     "spatial_aggregation": {"records"},
+#     "build_datavalueset": {"data_value_set", "output_file"},
+# }
+
+
 class WorkflowStep(BaseModel):
     """One component step in a declarative workflow definition."""
 

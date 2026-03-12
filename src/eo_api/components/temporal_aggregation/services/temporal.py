@@ -37,3 +37,29 @@ def temporal_aggregation_component(
     """Load dataset and aggregate over time."""
     ds = get_data(dataset=dataset, start=start, end=end, bbox=bbox)
     return aggregate_temporal(ds=ds, period_type=target_period_type, method=method)
+
+
+# from workflows engine
+def _run_temporal_aggregation(
+    *,
+    runtime: WorkflowRuntime,
+    request: WorkflowExecuteRequest,
+    dataset: dict[str, Any],
+    context: dict[str, Any],
+    step_config: dict[str, Any],
+) -> dict[str, Any]:
+    target_period_type = PeriodType(
+        str(step_config.get("target_period_type", request.temporal_aggregation.target_period_type))
+    )
+    method = AggregationMethod(str(step_config.get("method", request.temporal_aggregation.method)))
+    temporal_ds = runtime.run(
+        "temporal_aggregation",
+        component_services.temporal_aggregation_component,
+        dataset=dataset,
+        start=request.start,
+        end=request.end,
+        bbox=_require_context(context, "bbox"),
+        target_period_type=target_period_type,
+        method=method,
+    )
+    return {"temporal_dataset": temporal_ds}

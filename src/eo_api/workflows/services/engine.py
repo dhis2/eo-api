@@ -171,13 +171,16 @@ def _execute_workflow_steps(
     context: dict[str, Any],
 ) -> None:
     """Execute workflow components using declarative YAML step order."""
-    executors: dict[str, StepExecutor] = {
-        "feature_source": _run_feature_source,
-        "download_dataset": _run_download_dataset,
-        "temporal_aggregation": _run_temporal_aggregation,
-        "spatial_aggregation": _run_spatial_aggregation,
-        "build_datavalueset": _run_build_datavalueset,
-    }
+    # TODO:
+    # Below should not be hardcoded but rather retrieved from component registry
+    #  
+    # executors: dict[str, StepExecutor] = {
+    #     "feature_source": _run_feature_source,
+    #     "download_dataset": _run_download_dataset,
+    #     "temporal_aggregation": _run_temporal_aggregation,
+    #     "spatial_aggregation": _run_spatial_aggregation,
+    #     "build_datavalueset": _run_build_datavalueset,
+    # }
 
     for step in workflow.steps:
         executor = executors.get(step.component)
@@ -227,119 +230,6 @@ def _execute_workflow_steps(
             ) from exc
 
         context.update(updates)
-
-
-type StepExecutor = Callable[..., dict[str, Any]]
-
-
-def _run_feature_source(
-    *,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    context: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    del dataset, context, step_config
-    features, bbox = runtime.run(
-        "feature_source",
-        component_services.feature_source_component,
-        config=request.feature_source,
-    )
-    return {"features": features, "bbox": bbox}
-
-
-def _run_download_dataset(
-    *,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    context: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    overwrite = bool(step_config.get("overwrite", request.overwrite))
-    country_code = step_config.get("country_code", request.country_code)
-    runtime.run(
-        "download_dataset",
-        component_services.download_dataset_component,
-        dataset=dataset,
-        start=request.start,
-        end=request.end,
-        overwrite=overwrite,
-        country_code=country_code,
-        bbox=_require_context(context, "bbox"),
-    )
-    return {}
-
-
-def _run_temporal_aggregation(
-    *,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    context: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    target_period_type = PeriodType(
-        str(step_config.get("target_period_type", request.temporal_aggregation.target_period_type))
-    )
-    method = AggregationMethod(str(step_config.get("method", request.temporal_aggregation.method)))
-    temporal_ds = runtime.run(
-        "temporal_aggregation",
-        component_services.temporal_aggregation_component,
-        dataset=dataset,
-        start=request.start,
-        end=request.end,
-        bbox=_require_context(context, "bbox"),
-        target_period_type=target_period_type,
-        method=method,
-    )
-    return {"temporal_dataset": temporal_ds}
-
-
-def _run_spatial_aggregation(
-    *,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    context: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    method = AggregationMethod(str(step_config.get("method", request.spatial_aggregation.method)))
-    feature_id_property = str(step_config.get("feature_id_property", request.dhis2.org_unit_property))
-    records = runtime.run(
-        "spatial_aggregation",
-        component_services.spatial_aggregation_component,
-        dataset=dataset,
-        start=request.start,
-        end=request.end,
-        bbox=_require_context(context, "bbox"),
-        features=_require_context(context, "features"),
-        method=method,
-        feature_id_property=feature_id_property,
-    )
-    return {"records": records}
-
-
-def _run_build_datavalueset(
-    *,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    context: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    del dataset
-    period_type = PeriodType(str(step_config.get("period_type", request.temporal_aggregation.target_period_type)))
-    data_value_set, output_file = runtime.run(
-        "build_datavalueset",
-        component_services.build_datavalueset_component,
-        records=_require_context(context, "records"),
-        dataset_id=request.dataset_id,
-        period_type=period_type,
-        dhis2=request.dhis2,
-    )
-    return {"data_value_set": data_value_set, "output_file": output_file}
 
 
 def _require_context(context: dict[str, Any], key: str) -> Any:

@@ -74,3 +74,25 @@ def build_datavalueset_component(
 ) -> tuple[dict[str, Any], str]:
     """Build and serialize DHIS2 DataValueSet from records."""
     return build_data_value_set(records=records, dataset_id=dataset_id, period_type=period_type, config=dhis2)
+
+
+# from workflows engine
+def _run_build_datavalueset(
+    *,
+    runtime: WorkflowRuntime,
+    request: WorkflowExecuteRequest,
+    dataset: dict[str, Any],
+    context: dict[str, Any],
+    step_config: dict[str, Any],
+) -> dict[str, Any]:
+    del dataset
+    period_type = PeriodType(str(step_config.get("period_type", request.temporal_aggregation.target_period_type)))
+    data_value_set, output_file = runtime.run(
+        "build_datavalueset",
+        component_services.build_datavalueset_component,
+        records=_require_context(context, "records"),
+        dataset_id=request.dataset_id,
+        period_type=period_type,
+        dhis2=request.dhis2,
+    )
+    return {"data_value_set": data_value_set, "output_file": output_file}
