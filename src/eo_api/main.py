@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import eo_api.startup  # noqa: F401  # pyright: ignore[reportUnusedImport]
-from eo_api import components, data_accessor, data_manager, data_registry, system, workflows
+from . import system, workflows, components
 
 app = FastAPI()
 
@@ -16,9 +16,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# main routes
 app.include_router(system.routes.router, tags=["System"])
-app.include_router(data_registry.routes.router, prefix="/registry", tags=["Data registry"])
-app.include_router(data_manager.routes.router, prefix="/manage", tags=["Data manager"])
-app.include_router(data_accessor.routes.router, prefix="/retrieve", tags=["Data retrieval"])
 app.include_router(workflows.routes.router, prefix="/workflows", tags=["Workflows"])
-app.include_router(components.routes.router, tags=["Components"])
+app.include_router(components.routes.router, prefix="/components", tags=["Components"])
+
+# component routes
+app.include_router(components.data_registry.routes.router, prefix="/components/registry", tags=["Data registry"])
+app.include_router(components.download.routes.router, prefix="/components/download", tags=["Data download"])
+app.include_router(components.data_retrieval.routes.router, prefix="/components/retrieve", tags=["Data retrieval"])
+app.include_router(components.features.routes.router, prefix="/components/features", tags=["Features"])
+app.include_router(components.temporal_aggregation.routes.router, prefix="/components/temporal_aggregation", tags=["Temporal aggregation"])
+app.include_router(components.spatial_aggregation.routes.router, prefix="/components/spatial_aggregation", tags=["Spatial aggregation"])
+app.include_router(components.dhis2_datavalueset.routes.router, prefix="/components/datavalueset", tags=["DHIS2 DataValueSet"])
