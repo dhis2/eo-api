@@ -6,7 +6,7 @@ from fastapi import APIRouter
 router = APIRouter()
 
 
-@router.post("/components/build-datavalue-set", response_model=BuildDataValueSetRunResponse)
+@router.post("/run", response_model=BuildDataValueSetRunResponse)
 def run_build_datavalueset(payload: BuildDataValueSetRunRequest) -> BuildDataValueSetRunResponse:
     """Build and serialize a DHIS2 DataValueSet from records."""
     data_value_set, output_file = build_datavalueset_component(

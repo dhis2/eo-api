@@ -8,7 +8,7 @@ from fastapi import APIRouter
 router = APIRouter()
 
 
-@router.post("/components/spatial-aggregation", response_model=SpatialAggregationRunResponse)
+@router.post("/run", response_model=SpatialAggregationRunResponse)
 def run_spatial_aggregation(payload: SpatialAggregationRunRequest) -> SpatialAggregationRunResponse:
     """Aggregate a dataset spatially to features."""
     dataset = require_dataset(payload.dataset_id)

@@ -7,7 +7,7 @@ from fastapi import APIRouter
 router = APIRouter()
 
 
-@router.post("/components/temporal-aggregation", response_model=TemporalAggregationRunResponse)
+@router.post("/run", response_model=TemporalAggregationRunResponse)
 def run_temporal_aggregation(payload: TemporalAggregationRunRequest) -> TemporalAggregationRunResponse:
     """Aggregate a dataset temporally."""
     dataset = require_dataset(payload.dataset_id)

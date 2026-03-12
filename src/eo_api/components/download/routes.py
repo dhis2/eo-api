@@ -34,7 +34,7 @@ router = APIRouter()
 #     return {"status": "Building zarr file from dataset downloads"}
 
 
-@router.post("/components/download-dataset", response_model=DownloadDatasetRunResponse)
+@router.post("/run", response_model=DownloadDatasetRunResponse)
 def run_download_dataset(payload: DownloadDatasetRunRequest) -> DownloadDatasetRunResponse:
     """Download dataset files for the selected period/scope."""
     dataset = require_dataset(payload.dataset_id)
