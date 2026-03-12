@@ -34,6 +34,9 @@ The current implementation provides:
 8. Optional inclusion of detailed component run traces in API responses.
 9. Discoverable standalone component endpoints under `/components` for direct execution and future orchestrator integration.
 10. Declarative workflow assembly via YAML (`data/workflows/dhis2_datavalue_set.yaml`) executed by the workflow engine.
+11. Registry-driven component dispatch in engine (no component-specific `if/elif` chain).
+12. Step-level YAML config support with strict validation and `$request.<field>` interpolation.
+13. Stable workflow error contract with `error_code` and `failed_component_version`.
 
 ---
 
@@ -96,7 +99,6 @@ Notes:
 
 1. `feature_id_property` defaults to `"id"` and controls which feature property maps to DHIS2 org unit ID in spatial aggregation/DataValueSet construction.
 2. `country_code` is accepted in request and passed to dataset downloaders (instead of forcing `.env` only).
-3. `reducer` is accepted as an alias and mapped to both temporal and spatial reducer when provided.
 
 ---
 
@@ -111,9 +113,9 @@ Public flat payload is normalized to internal `WorkflowExecuteRequest` with comp
    - `org_unit_ids` -> `source_type=dhis2_ids`
 2. `temporal_aggregation` config:
    - `target_period_type` from `temporal_resolution`
-   - `method` from `temporal_reducer` (or `reducer` alias)
+   - `method` from `temporal_reducer`
 3. `spatial_aggregation` config:
-   - `method` from `spatial_reducer` (or `reducer` alias)
+   - `method` from `spatial_reducer`
 4. `dhis2` config:
    - `data_element_uid` from `data_element`
 
@@ -169,9 +171,10 @@ Responsibilities:
 
 1. Discover, load, and validate declarative workflow definitions from `data/workflows/*.yaml`.
 2. Enforce supported component names.
-3. Enforce terminal `build_datavalueset` step for this end-to-end workflow.
-4. Enforce output-to-input compatibility across the full accumulated context (not just adjacent steps).
-5. Drive runtime execution order from YAML instead of hardcoded sequence.
+3. Enforce supported component versions (currently `v1`) and validate per-step `config`.
+4. Enforce terminal `build_datavalueset` step for this end-to-end workflow.
+5. Enforce output-to-input compatibility across the full accumulated context (not just adjacent steps).
+6. Drive runtime execution order from YAML through a registry-dispatch model.
 
 ### Reusable Component Service Layer
 
@@ -238,13 +241,17 @@ Details:
    - Builds valid DHIS2 DataValueSet JSON from records.
    - Serializes output to file and returns both payload and output path.
 
-`load_data` and `write_datavalueset` are intentionally not separate top-level components anymore; loading and writing are internalized within aggregation/build steps.
-
-Execution order is currently defined in:
+Execution order and step metadata are currently defined in:
 
 - `data/workflows/dhis2_datavalue_set.yaml`
 
-The default YAML remains the same 5-step sequence, but the engine now reads it declaratively.
+Workflow step schema now supports:
+
+1. `component`
+2. `version` (default `v1`)
+3. `config` (default `{}`)
+
+The default YAML remains the same 5-step sequence, but the engine reads it declaratively and dispatches components through a registry map.
 
 ---
 
@@ -298,38 +305,29 @@ Persisted fields include:
 4. `component_runs`
 5. output file path (when completed)
 6. error details (when failed)
+7. `error_code` (when failed)
+8. `failed_component` (when failed)
+9. `failed_component_version` (when failed)
 
 ---
 
 ## Error Handling Strategy
 
-1. `422` for request validation failures (Pydantic model constraints).
+1. `422` for request/definition/config validation failures.
 2. `404` when `dataset_id` does not exist in registry.
-3. `503` for upstream connectivity issues detected during download/preflight:
+3. `503` for upstream connectivity failures:
    - `error: "upstream_unreachable"`
+   - `error_code: "UPSTREAM_UNREACHABLE"`
 4. `500` for other execution failures:
    - `error: "workflow_execution_failed"`
+   - `error_code: "EXECUTION_FAILED"` (or other stable mapped codes)
 
-Failure responses include `failed_component` and `run_id` for traceability.
+Failure responses include:
 
----
-
-## Achieved Behavior from Manual Verification
-
-Manual runs validated the following:
-
-1. WorldPop workflows now accept `country_code` from payload and execute without mandatory `.env` coupling.
-2. Yearly dataset date normalization issues were resolved by period-aware mapping logic.
-3. CHIRPS multi-month workflows execute correctly, with behavior improving as cache warms.
-4. Workflow responses and run logs align with the 5-component chain.
-5. Default response trimming works and detail flags remove ambiguity.
-
-Reference sample outputs:
-
-1. `docs/response/worldpop.json`
-2. `docs/response/chirps3.json`
-3. `docs/response/without_component_runs.json`
-4. `docs/response/with_component_runs.json`
+1. `error_code`
+2. `failed_component`
+3. `failed_component_version`
+4. `run_id`
 
 ---
 

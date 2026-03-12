@@ -37,5 +37,6 @@ def run_dhis2_datavalue_set_workflow(payload: WorkflowRequest) -> WorkflowExecut
     return execute_workflow(
         request,
         workflow_id=payload.workflow_id,
+        request_params=payload.model_dump(),
         include_component_run_details=payload.include_component_run_details,
     )

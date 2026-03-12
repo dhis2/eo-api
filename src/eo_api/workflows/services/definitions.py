@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 import yaml
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 ComponentName = Literal[
     "feature_source",
@@ -17,6 +17,7 @@ ComponentName = Literal[
 ]
 
 SUPPORTED_COMPONENTS: Final[set[str]] = set(ComponentName.__args__)  # type: ignore[attr-defined]
+SUPPORTED_COMPONENT_VERSIONS: Final[dict[str, set[str]]] = {component: {"v1"} for component in SUPPORTED_COMPONENTS}
 
 COMPONENT_INPUTS: Final[dict[str, set[str]]] = {
     "feature_source": set(),
@@ -43,6 +44,19 @@ class WorkflowStep(BaseModel):
     """One component step in a declarative workflow definition."""
 
     component: ComponentName
+    version: str = "v1"
+    config: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_component_version(self) -> "WorkflowStep":
+        """Ensure component@version exists in the registered component catalog."""
+        supported_versions = SUPPORTED_COMPONENT_VERSIONS.get(self.component, set())
+        if self.version not in supported_versions:
+            known = ", ".join(sorted(supported_versions)) or "<none>"
+            raise ValueError(
+                f"Unsupported component version '{self.component}@{self.version}'. Supported versions: {known}"
+            )
+        return self
 
 
 class WorkflowDefinition(BaseModel):
