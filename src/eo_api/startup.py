@@ -5,6 +5,10 @@ environment variables and logging are configured before other imports.
 """
 
 import logging
+import os
+import sys
+from pathlib import Path
+
 from dotenv import load_dotenv  # noqa: E402
 
 # -- Load .env (must happen before pygeoapi reads PYGEOAPI_CONFIG) ------------
@@ -19,3 +23,40 @@ if not eo_logger.handlers:
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s - %(message)s"))
     eo_logger.addHandler(handler)
 eo_logger.propagate = False
+
+
+def _configure_proj_data() -> None:
+    """Configure PROJ path to match the active Python environment.
+
+    This avoids loading an incompatible system/miniforge proj.db when rasterio
+    initializes CRS objects during titiler import.
+    """
+
+    candidates: list[Path] = []
+
+    for sys_path in sys.path:
+        if not sys_path:
+            continue
+        candidates.append(Path(sys_path) / "rasterio" / "proj_data")
+
+    try:
+        from pyproj import datadir
+
+        pyproj_data_dir = datadir.get_data_dir()
+        if pyproj_data_dir:
+            candidates.append(Path(pyproj_data_dir))
+    except Exception:
+        pass
+
+    for candidate in candidates:
+        if candidate.exists():
+            proj_path = str(candidate)
+            os.environ["PROJ_LIB"] = proj_path
+            os.environ["PROJ_DATA"] = proj_path
+            eo_logger.info("Configured PROJ data directory: %s", proj_path)
+            return
+
+    eo_logger.warning("Could not locate a compatible PROJ data directory in the active environment")
+
+
+_configure_proj_data()

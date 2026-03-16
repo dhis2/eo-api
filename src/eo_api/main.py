@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import eo_api.startup  # noqa: F401  # pyright: ignore[reportUnusedImport]
 from eo_api import data_accessor, data_manager, data_registry, system
+from eo_api.tiles import tiles_router
 
 app = FastAPI()
 
@@ -20,3 +21,4 @@ app.include_router(system.routes.router, tags=['System'])
 app.include_router(data_registry.routes.router, prefix='/registry', tags=['Data registry'])
 app.include_router(data_manager.routes.router, prefix='/manage', tags=['Data manager'])
 app.include_router(data_accessor.routes.router, prefix='/retrieve', tags=['Data retrieval'])
+app.include_router(tiles_router, prefix='/zarr', tags=['Zarr'])
