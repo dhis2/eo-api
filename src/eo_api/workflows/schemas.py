@@ -188,6 +188,40 @@ class WorkflowJobListResponse(BaseModel):
     jobs: list[WorkflowJobRecord]
 
 
+class WorkflowJobCleanupCandidate(BaseModel):
+    """One terminal job selected by retention policy."""
+
+    job_id: str
+    status: WorkflowJobStatus
+    created_at: str
+    workflow_id: str
+    dataset_id: str
+
+
+class WorkflowJobCleanupResponse(BaseModel):
+    """Result of applying or previewing a workflow job retention policy."""
+
+    dry_run: bool
+    keep_latest: int | None = None
+    older_than_hours: int | None = None
+    candidate_count: int
+    deleted_count: int
+    candidates: list[WorkflowJobCleanupCandidate]
+    deleted_job_ids: list[str]
+
+
+class ApiErrorResponse(BaseModel):
+    """Stable API error envelope."""
+
+    error: str
+    error_code: str
+    message: str
+    resource_id: str | None = None
+    process_id: str | None = None
+    job_id: str | None = None
+    status: str | None = None
+
+
 class WorkflowCatalogItem(BaseModel):
     """Discoverable workflow definition summary."""
 

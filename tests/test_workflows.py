@@ -11,10 +11,17 @@ from fastapi import HTTPException
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from eo_api.components import services as component_services
 from eo_api.main import app
 from eo_api.publications import pygeoapi as publication_pygeoapi
 from eo_api.publications import services as publication_services
-from eo_api.workflows.schemas import WorkflowExecuteRequest, WorkflowExecuteResponse, WorkflowRequest
+from eo_api.workflows.schemas import (
+    AggregationMethod,
+    PeriodType,
+    WorkflowExecuteRequest,
+    WorkflowExecuteResponse,
+    WorkflowRequest,
+)
 from eo_api.workflows.services import engine, job_store, run_logs
 from eo_api.workflows.services.definitions import WorkflowDefinition, load_workflow_definition
 from eo_api.workflows.services.simple_mapper import normalize_simple_request
@@ -76,13 +83,21 @@ def test_workflow_endpoint_exists_once() -> None:
         for route in app.routes
         if isinstance(route, APIRoute) and route.path.startswith("/workflows") and "POST" in route.methods
     }
-    assert workflow_routes == {"/workflows/dhis2-datavalue-set", "/workflows/execute", "/workflows/validate"}
+    assert workflow_routes == {
+        "/workflows/dhis2-datavalue-set",
+        "/workflows/execute",
+        "/workflows/jobs/cleanup",
+        "/workflows/validate",
+    }
 
 
 def test_ogc_process_routes_exist() -> None:
     ogc_routes = {
         route.path for route in app.routes if isinstance(route, APIRoute) and route.path.startswith("/ogcapi")
     }
+    assert "/ogcapi/collections" in ogc_routes
+    assert "/ogcapi/collections/{collection_id}" in ogc_routes
+    assert "/ogcapi/collections/{collection_id}/items" in ogc_routes
     assert "/ogcapi/processes" in ogc_routes
     assert "/ogcapi/processes/{process_id}" in ogc_routes
     assert "/ogcapi/processes/{process_id}/execution" in ogc_routes
@@ -100,6 +115,14 @@ def test_publication_generated_pygeoapi_routes_exist() -> None:
     assert "/publications/pygeoapi/config" in publication_routes
     assert "/publications/pygeoapi/openapi" in publication_routes
     assert "/publications/pygeoapi/materialize" in publication_routes
+
+
+def test_analytics_viewer_routes_exist() -> None:
+    analytics_routes = {
+        route.path for route in app.routes if isinstance(route, APIRoute) and route.path.startswith("/analytics")
+    }
+    assert "/analytics/publications/{resource_id}" in analytics_routes
+    assert "/analytics/publications/{resource_id}/viewer" in analytics_routes
 
 
 def test_pygeoapi_runtime_env_points_to_generated_documents() -> None:
@@ -248,6 +271,45 @@ def test_workflow_endpoint_validates_required_fields(client: TestClient) -> None
 
     response = client.post("/workflows/dhis2-datavalue-set", json=payload)
     assert response.status_code == 422
+
+
+def test_workflow_job_result_missing_uses_typed_error_envelope(client: TestClient) -> None:
+    response = client.get("/workflows/jobs/does-not-exist/result")
+    assert response.status_code == 404
+    body = response.json()["detail"]
+    assert body["error"] == "job_not_found"
+    assert body["error_code"] == "JOB_NOT_FOUND"
+    assert body["job_id"] == "does-not-exist"
+
+
+def test_ogc_collection_missing_uses_typed_error_envelope(client: TestClient) -> None:
+    response = client.get("/ogcapi/collections/does-not-exist", params={"f": "json"})
+    assert response.status_code == 404
+    body = response.json()["detail"]
+    assert body["error"] == "collection_not_found"
+    assert body["error_code"] == "COLLECTION_NOT_FOUND"
+    assert body["resource_id"] == "does-not-exist"
+
+
+def test_ogc_job_results_unavailable_uses_typed_error_envelope(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("eo_api.ogc.routes.execute_workflow", lambda *args, **kwargs: None)
+
+    response = client.post(
+        "/ogcapi/processes/generic-dhis2-workflow/execution",
+        headers={"Prefer": "respond-async"},
+        json=_valid_public_payload(),
+    )
+    assert response.status_code == 202
+    job_id = response.json()["jobID"]
+
+    result_response = client.get(f"/ogcapi/jobs/{job_id}/results")
+    assert result_response.status_code == 409
+    body = result_response.json()["detail"]
+    assert body["error"] == "job_result_unavailable"
+    assert body["error_code"] == "JOB_RESULT_UNAVAILABLE"
+    assert body["job_id"] == job_id
 
 
 def test_workflow_endpoint_accepts_simplified_payload(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -501,6 +563,7 @@ def test_workflow_job_endpoints_return_persisted_result(
     assert links["result"].endswith(f"/workflows/jobs/{run_id}/result")
     assert links["trace"].endswith(f"/workflows/jobs/{run_id}/trace")
     assert links["collection"].endswith(f"/ogcapi/collections/workflow-output-{run_id}")
+    assert links["analytics"].endswith(f"/analytics/publications/workflow-output-{run_id}/viewer")
     assert "result" not in job_body
 
     results_response = client.get(f"/workflows/jobs/{run_id}/result")
@@ -574,6 +637,57 @@ def test_delete_workflow_job_cascades_derived_artifacts(
 
     publication_response = client.get(f"/publications/workflow-output-{run_id}")
     assert publication_response.status_code == 404
+
+
+def test_cleanup_workflow_jobs_dry_run_lists_terminal_candidates_without_deleting(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_successful_execution(monkeypatch)
+
+    first = client.post("/workflows/dhis2-datavalue-set", json=_valid_public_payload())
+    second = client.post("/workflows/dhis2-datavalue-set", json=_valid_public_payload())
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_job_id = first.json()["run_id"]
+    second_job_id = second.json()["run_id"]
+
+    cleanup_response = client.post("/workflows/jobs/cleanup", params={"dry_run": "true", "keep_latest": 1})
+    assert cleanup_response.status_code == 200
+    body = cleanup_response.json()
+    assert body["dry_run"] is True
+    assert body["candidate_count"] == 1
+    assert body["deleted_count"] == 0
+    assert body["candidates"][0]["job_id"] == first_job_id
+    assert body["deleted_job_ids"] == []
+
+    assert client.get(f"/workflows/jobs/{first_job_id}").status_code == 200
+    assert client.get(f"/workflows/jobs/{second_job_id}").status_code == 200
+
+
+def test_cleanup_workflow_jobs_applies_retention_and_cascades_deletion(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_successful_execution(monkeypatch)
+
+    first = client.post("/workflows/dhis2-datavalue-set", json=_valid_public_payload())
+    second = client.post("/workflows/dhis2-datavalue-set", json=_valid_public_payload())
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_job_id = first.json()["run_id"]
+    second_job_id = second.json()["run_id"]
+
+    apply_response = client.post("/workflows/jobs/cleanup", params={"dry_run": "false", "keep_latest": 1})
+    assert apply_response.status_code == 200
+    body = apply_response.json()
+    assert body["dry_run"] is False
+    assert body["deleted_count"] == 1
+    assert body["deleted_job_ids"] == [first_job_id]
+
+    assert client.get(f"/workflows/jobs/{first_job_id}").status_code == 404
+    assert client.get(f"/publications/workflow-output-{first_job_id}").status_code == 404
+    assert client.get(f"/workflows/jobs/{second_job_id}").status_code == 200
 
 
 def test_ogc_async_execution_creates_job_and_results(
@@ -681,11 +795,91 @@ def test_workflow_success_registers_derived_publication(
     assert derived["asset_format"] == "geojson"
     assert derived["path"].endswith(".geojson")
     assert derived["metadata"]["native_output_file"].endswith(".json")
+    analytics_link = next(link for link in derived["links"] if link["rel"] == "analytics")
+    assert analytics_link["href"] == f"/analytics/publications/workflow-output-{run_id}/viewer"
     geojson = Path(derived["path"]).read_text(encoding="utf-8")
     assert '"org_unit_name"' in geojson
     assert '"period": "2024-01"' in geojson
     assert '"period_type"' not in geojson
     assert '"dataset_id"' not in geojson
+
+
+def test_dynamic_ogc_collection_routes_reflect_new_publication_without_restart(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_successful_execution(monkeypatch)
+
+    response = client.post("/workflows/dhis2-datavalue-set", json=_valid_public_payload())
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+    collection_id = f"workflow-output-{run_id}"
+
+    collections_response = client.get("/ogcapi/collections", params={"f": "json"})
+    assert collections_response.status_code == 200
+    collections = collections_response.json()["collections"]
+    derived = next(item for item in collections if item["id"] == collection_id)
+    assert derived["itemType"] == "feature"
+
+    detail_response = client.get(f"/ogcapi/collections/{collection_id}", params={"f": "json"})
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    detail_links = {link["rel"]: link["href"] for link in detail["links"]}
+    assert detail["id"] == collection_id
+    assert detail_links["analytics"].endswith(f"/analytics/publications/{collection_id}/viewer")
+
+    items_response = client.get(f"/ogcapi/collections/{collection_id}/items", params={"f": "json", "limit": 5})
+    assert items_response.status_code == 200
+    items = items_response.json()
+    assert items["type"] == "FeatureCollection"
+    assert items["numberReturned"] == 1
+    feature_props = items["features"][0]["properties"]
+    assert set(feature_props) == {"org_unit", "org_unit_name", "period", "value"}
+
+
+def test_dynamic_ogc_collection_routes_drop_deleted_publication_without_restart(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_successful_execution(monkeypatch)
+
+    response = client.post("/workflows/dhis2-datavalue-set", json=_valid_public_payload())
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+    collection_id = f"workflow-output-{run_id}"
+
+    before_delete = client.get(f"/ogcapi/collections/{collection_id}", params={"f": "json"})
+    assert before_delete.status_code == 200
+
+    delete_response = client.delete(f"/workflows/jobs/{run_id}")
+    assert delete_response.status_code == 200
+
+    after_delete = client.get(f"/ogcapi/collections/{collection_id}", params={"f": "json"})
+    assert after_delete.status_code == 404
+
+
+def test_analytics_viewer_config_and_html_for_publication(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_successful_execution(monkeypatch)
+
+    response = client.post("/workflows/dhis2-datavalue-set", json=_valid_public_payload())
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+    resource_id = f"workflow-output-{run_id}"
+
+    config_response = client.get(f"/analytics/publications/{resource_id}")
+    assert config_response.status_code == 200
+    config = config_response.json()
+    assert config["resource_id"] == resource_id
+    assert config["data_url"].startswith("/data/")
+    assert config["links"]["collection"] == f"/ogcapi/collections/{resource_id}"
+
+    viewer_response = client.get(f"/analytics/publications/{resource_id}/viewer")
+    assert viewer_response.status_code == 200
+    assert "Time-aware choropleth view" in viewer_response.text
+    assert resource_id in viewer_response.text
 
 
 def test_workflow_with_publication_disabled_does_not_register_derived_publication(
@@ -890,6 +1084,10 @@ def test_generated_pygeoapi_config_includes_geojson_derived_resource(
     assert derived["providers"][0]["name"] == "GeoJSON"
     assert derived["providers"][0]["type"] == "feature"
     assert derived["providers"][0]["data"].endswith(".geojson")
+    analytics_link = next(link for link in derived["links"] if link["rel"] == "analytics")
+    assert analytics_link["type"] == "text/html"
+    assert analytics_link["title"] == "Analytics Viewer"
+    assert analytics_link["href"].endswith(f"/analytics/publications/workflow-output-{run_id}/viewer")
 
 
 def test_materialize_generated_pygeoapi_documents_writes_files(
@@ -944,6 +1142,36 @@ def test_component_spatial_aggregation_serializes_numpy_datetime64(
     body = response.json()
     assert body["record_count"] == 1
     assert body["records"][0]["time"] == "2024-01-01T00:00:00"
+
+
+def test_temporal_aggregation_component_passes_through_matching_period_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ds = xr.Dataset(
+        {"precip": (("time", "lat", "lon"), [[[1.0]]])},
+        coords={"time": ["2024-01-01"], "lat": [0], "lon": [0]},
+    )
+    aggregate_called = {"value": False}
+
+    monkeypatch.setattr(component_services, "get_data", lambda **kwargs: ds)
+
+    def _aggregate_temporal(**kwargs: Any) -> xr.Dataset:
+        aggregate_called["value"] = True
+        return ds
+
+    monkeypatch.setattr(component_services, "aggregate_temporal", _aggregate_temporal)
+
+    result = component_services.temporal_aggregation_component(
+        dataset={"id": "chirps3_precipitation_daily", "variable": "precip", "period_type": "daily"},
+        start="2024-01-01",
+        end="2024-01-31",
+        bbox=None,
+        target_period_type=PeriodType.DAILY,
+        method=AggregationMethod.SUM,
+    )
+
+    assert result is ds
+    assert aggregate_called["value"] is False
 
 
 def test_engine_orchestrates_components(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -42,6 +43,43 @@ class WorkflowComponentError(RuntimeError):
         self.status_code = status_code
 
 
+@dataclass
+class WorkflowArtifacts:
+    """Typed workflow artifact handoff between components."""
+
+    features: dict[str, Any] | None = None
+    bbox: list[float] | None = None
+    temporal_dataset: Any | None = None
+    records: list[dict[str, Any]] | None = None
+    data_value_set: dict[str, Any] | None = None
+    output_file: str | None = None
+
+    def require_features(self) -> dict[str, Any]:
+        if self.features is None:
+            raise RuntimeError("Workflow definition missing prerequisite for 'features'")
+        return self.features
+
+    def require_bbox(self) -> list[float]:
+        if self.bbox is None:
+            raise RuntimeError("Workflow definition missing prerequisite for 'bbox'")
+        return self.bbox
+
+    def require_records(self) -> list[dict[str, Any]]:
+        if self.records is None:
+            raise RuntimeError("Workflow definition missing prerequisite for 'records'")
+        return self.records
+
+    def require_data_value_set(self) -> dict[str, Any]:
+        if self.data_value_set is None:
+            raise RuntimeError("Workflow definition missing prerequisite for 'data_value_set'")
+        return self.data_value_set
+
+    def require_output_file(self) -> str:
+        if self.output_file is None:
+            raise RuntimeError("Workflow definition missing prerequisite for 'output_file'")
+        return self.output_file
+
+
 def execute_workflow(
     request: WorkflowExecuteRequest,
     *,
@@ -60,7 +98,7 @@ def execute_workflow(
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{request.dataset_id}' not found")
 
-    context: dict[str, Any] = {}
+    artifacts = WorkflowArtifacts()
 
     try:
         if workflow_definition is not None:
@@ -88,12 +126,12 @@ def execute_workflow(
             request=request,
             request_params=request_params,
             dataset=dataset,
-            context=context,
+            artifacts=artifacts,
         )
-        features = _require_context(context, "features")
-        bbox = _require_context(context, "bbox")
-        data_value_set = _require_context(context, "data_value_set")
-        output_file = _require_context(context, "output_file")
+        features = artifacts.require_features()
+        bbox = artifacts.require_bbox()
+        data_value_set = artifacts.require_data_value_set()
+        output_file = artifacts.require_output_file()
         run_log_file = persist_run_log(
             run_id=runtime.run_id,
             request=request,
@@ -128,7 +166,7 @@ def execute_workflow(
                 response=response,
                 request=request,
                 publication=workflow.publication,
-                context=context,
+                artifacts=artifacts,
             )
             register_workflow_output_publication(
                 response=response,
@@ -241,12 +279,12 @@ def _build_publication_artifact(
     response: WorkflowExecuteResponse,
     request: WorkflowExecuteRequest,
     publication: WorkflowPublicationPolicy,
-    context: dict[str, Any],
+    artifacts: WorkflowArtifacts,
 ) -> tuple[str, str]:
     """Build the publication-facing artifact for a publishable workflow output."""
     if publication.intent.value == "feature_collection":
-        features = _require_context(context, "features")
-        records = _require_context(context, "records")
+        features = artifacts.require_features()
+        records = artifacts.require_records()
         path = build_feature_collection_asset(
             dataset_id=response.dataset_id,
             features=features,
@@ -279,7 +317,7 @@ def _execute_workflow_steps(
     request: WorkflowExecuteRequest,
     request_params: dict[str, Any] | None,
     dataset: dict[str, Any],
-    context: dict[str, Any],
+    artifacts: WorkflowArtifacts,
 ) -> None:
     """Execute workflow components using declarative YAML step order."""
     executors: dict[str, StepExecutor] = {
@@ -317,7 +355,7 @@ def _execute_workflow_steps(
                 runtime=runtime,
                 request=request,
                 dataset=dataset,
-                context=context,
+                artifacts=artifacts,
                 step_config=step_config,
             )
         except Exception as exc:
@@ -337,7 +375,7 @@ def _execute_workflow_steps(
                 status_code=500,
             ) from exc
 
-        context.update(updates)
+        _apply_artifact_updates(artifacts, updates)
 
 
 def validate_workflow_steps(
@@ -373,10 +411,10 @@ def _run_feature_source(
     runtime: WorkflowRuntime,
     request: WorkflowExecuteRequest,
     dataset: dict[str, Any],
-    context: dict[str, Any],
+    artifacts: WorkflowArtifacts,
     step_config: dict[str, Any],
 ) -> dict[str, Any]:
-    del dataset, context
+    del dataset, artifacts
     execution_mode = str(step_config.get("execution_mode", "local")).lower()
     if execution_mode == "remote":
         features, bbox = runtime.run(
@@ -402,7 +440,7 @@ def _run_download_dataset(
     runtime: WorkflowRuntime,
     request: WorkflowExecuteRequest,
     dataset: dict[str, Any],
-    context: dict[str, Any],
+    artifacts: WorkflowArtifacts,
     step_config: dict[str, Any],
 ) -> dict[str, Any]:
     execution_mode = str(step_config.get("execution_mode", "local")).lower()
@@ -411,7 +449,7 @@ def _run_download_dataset(
 
     overwrite = request.overwrite
     country_code = request.country_code
-    bbox = _require_context(context, "bbox")
+    bbox = artifacts.require_bbox()
     if execution_mode == "remote":
         remote_url = step_config.get("remote_url")
         if not isinstance(remote_url, str) or not remote_url:
@@ -452,7 +490,7 @@ def _run_temporal_aggregation(
     runtime: WorkflowRuntime,
     request: WorkflowExecuteRequest,
     dataset: dict[str, Any],
-    context: dict[str, Any],
+    artifacts: WorkflowArtifacts,
     step_config: dict[str, Any],
 ) -> dict[str, Any]:
     target_period_type = request.temporal_aggregation.target_period_type
@@ -466,7 +504,7 @@ def _run_temporal_aggregation(
             dataset_id=request.dataset_id,
             start=request.start,
             end=request.end,
-            bbox=_require_context(context, "bbox"),
+            bbox=artifacts.require_bbox(),
             target_period_type=target_period_type.value,
             method=method.value,
             timeout_sec=float(step_config.get("remote_timeout_sec", 30.0)),
@@ -480,7 +518,7 @@ def _run_temporal_aggregation(
             dataset=dataset,
             start=request.start,
             end=request.end,
-            bbox=_require_context(context, "bbox"),
+            bbox=artifacts.require_bbox(),
             target_period_type=target_period_type,
             method=method,
         )
@@ -492,13 +530,13 @@ def _run_spatial_aggregation(
     runtime: WorkflowRuntime,
     request: WorkflowExecuteRequest,
     dataset: dict[str, Any],
-    context: dict[str, Any],
+    artifacts: WorkflowArtifacts,
     step_config: dict[str, Any],
 ) -> dict[str, Any]:
     method = request.spatial_aggregation.method
     feature_id_property = request.dhis2.org_unit_property
     execution_mode = str(step_config.get("execution_mode", "local")).lower()
-    temporal_dataset = context.get("temporal_dataset")
+    temporal_dataset = artifacts.temporal_dataset
     if execution_mode == "remote":
         if temporal_dataset is not None:
             raise ValueError(
@@ -512,7 +550,7 @@ def _run_spatial_aggregation(
             dataset_id=request.dataset_id,
             start=request.start,
             end=request.end,
-            bbox=_require_context(context, "bbox"),
+            bbox=artifacts.require_bbox(),
             feature_source=request.feature_source.model_dump(mode="json"),
             method=method.value,
             feature_id_property=feature_id_property,
@@ -527,8 +565,8 @@ def _run_spatial_aggregation(
             dataset=dataset,
             start=request.start,
             end=request.end,
-            bbox=_require_context(context, "bbox"),
-            features=_require_context(context, "features"),
+            bbox=artifacts.require_bbox(),
+            features=artifacts.require_features(),
             method=method,
             feature_id_property=feature_id_property,
             aggregated_dataset=temporal_dataset,
@@ -541,7 +579,7 @@ def _run_build_datavalueset(
     runtime: WorkflowRuntime,
     request: WorkflowExecuteRequest,
     dataset: dict[str, Any],
-    context: dict[str, Any],
+    artifacts: WorkflowArtifacts,
     step_config: dict[str, Any],
 ) -> dict[str, Any]:
     del dataset
@@ -554,7 +592,7 @@ def _run_build_datavalueset(
             remote_url=str(step_config["remote_url"]),
             dataset_id=request.dataset_id,
             period_type=period_type.value,
-            records=_require_context(context, "records"),
+            records=artifacts.require_records(),
             dhis2=request.dhis2.model_dump(mode="json"),
             timeout_sec=float(step_config.get("remote_timeout_sec", 30.0)),
             retries=int(step_config.get("remote_retries", 1)),
@@ -564,7 +602,7 @@ def _run_build_datavalueset(
         data_value_set, output_file = runtime.run(
             "build_datavalueset",
             component_services.build_datavalueset_component,
-            records=_require_context(context, "records"),
+            records=artifacts.require_records(),
             dataset_id=request.dataset_id,
             period_type=period_type,
             dhis2=request.dhis2,
@@ -572,11 +610,12 @@ def _run_build_datavalueset(
     return {"data_value_set": data_value_set, "output_file": output_file}
 
 
-def _require_context(context: dict[str, Any], key: str) -> Any:
-    """Return required context value or raise a clear orchestration error."""
-    if key not in context:
-        raise RuntimeError(f"Workflow definition missing prerequisite for '{key}'")
-    return context[key]
+def _apply_artifact_updates(artifacts: WorkflowArtifacts, updates: dict[str, Any]) -> None:
+    """Apply validated component outputs to the typed artifact handoff."""
+    for key, value in updates.items():
+        if not hasattr(artifacts, key):
+            raise RuntimeError(f"Unsupported workflow artifact '{key}'")
+        setattr(artifacts, key, value)
 
 
 def _resolve_step_config(config: dict[str, Any], request_params: dict[str, Any]) -> dict[str, Any]:

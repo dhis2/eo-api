@@ -212,6 +212,61 @@ def delete_job(job_id: str) -> dict[str, Any] | None:
     }
 
 
+def cleanup_jobs(
+    *,
+    dry_run: bool,
+    keep_latest: int | None = None,
+    older_than_hours: int | None = None,
+) -> dict[str, Any]:
+    """Apply retention policy to terminal jobs and their run-owned artifacts."""
+    if keep_latest is not None and keep_latest < 0:
+        raise ValueError("keep_latest must be >= 0")
+    if older_than_hours is not None and older_than_hours < 0:
+        raise ValueError("older_than_hours must be >= 0")
+
+    terminal_statuses = {
+        WorkflowJobStatus.SUCCESSFUL,
+        WorkflowJobStatus.FAILED,
+        WorkflowJobStatus.DISMISSED,
+    }
+    terminal_jobs = [job for job in list_jobs() if job.status in terminal_statuses]
+    candidates = terminal_jobs
+
+    if older_than_hours is not None:
+        cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=older_than_hours)
+        candidates = [job for job in candidates if _parse_iso8601(job.created_at) <= cutoff]
+
+    if keep_latest is not None:
+        protected_ids = {job.job_id for job in terminal_jobs[:keep_latest]}
+        candidates = [job for job in candidates if job.job_id not in protected_ids]
+
+    deleted_job_ids: list[str] = []
+    if not dry_run:
+        for job in candidates:
+            deleted = delete_job(job.job_id)
+            if deleted is not None:
+                deleted_job_ids.append(job.job_id)
+
+    return {
+        "dry_run": dry_run,
+        "keep_latest": keep_latest,
+        "older_than_hours": older_than_hours,
+        "candidate_count": len(candidates),
+        "deleted_count": len(deleted_job_ids),
+        "candidates": [
+            {
+                "job_id": job.job_id,
+                "status": job.status,
+                "created_at": job.created_at,
+                "workflow_id": job.workflow_id,
+                "dataset_id": job.dataset_id,
+            }
+            for job in candidates
+        ],
+        "deleted_job_ids": deleted_job_ids,
+    }
+
+
 def _require_job(job_id: str) -> WorkflowJobStoredRecord:
     record = get_stored_job(job_id)
     if record is None:
@@ -234,6 +289,10 @@ def _jobs_dir() -> Path:
 
 def _utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def _parse_iso8601(value: str) -> dt.datetime:
+    return dt.datetime.fromisoformat(value)
 
 
 def _to_public_job_record(record: WorkflowJobStoredRecord) -> WorkflowJobRecord:

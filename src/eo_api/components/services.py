@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Final
 
 import xarray as xr
@@ -255,6 +256,9 @@ def temporal_aggregation_component(
 ) -> xr.Dataset:
     """Load dataset and aggregate over time."""
     ds = get_data(dataset=dataset, start=start, end=end, bbox=bbox)
+    source_period_type = _dataset_period_type(dataset)
+    if source_period_type == target_period_type:
+        return ds
     return aggregate_temporal(ds=ds, period_type=target_period_type, method=method)
 
 
@@ -301,3 +305,14 @@ def require_dataset(dataset_id: str) -> dict[str, Any]:
     if dataset is None:
         raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
     return dataset
+
+
+def _dataset_period_type(dataset: Mapping[str, Any]) -> PeriodType | None:
+    raw_value = dataset.get("period_type")
+    if not isinstance(raw_value, str):
+        return None
+    normalized = raw_value.strip().lower()
+    try:
+        return PeriodType(normalized)
+    except ValueError:
+        return None

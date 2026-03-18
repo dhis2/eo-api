@@ -95,6 +95,7 @@ def register_workflow_output_publication(
             {"rel": "job", "href": f"/workflows/jobs/{response.run_id}"},
             {"rel": "job-result", "href": f"/workflows/jobs/{response.run_id}/result"},
             {"rel": "collection", "href": f"/ogcapi/collections/{resource_id}"},
+            {"rel": "analytics", "href": f"/analytics/publications/{resource_id}/viewer"},
         ],
     )
     _write_resource(record)

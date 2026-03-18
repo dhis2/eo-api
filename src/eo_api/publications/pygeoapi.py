@@ -209,11 +209,13 @@ def _pygeoapi_links(resource: PublishedResource) -> list[dict[str, str]]:
         rel = str(link.get("rel", "related"))
         if href == "":
             continue
+        link_type = "text/html" if rel == "analytics" else "application/json"
+        title = "Analytics Viewer" if rel == "analytics" else rel.replace("-", " ").title()
         links.append(
             {
-                "type": "application/json",
+                "type": link_type,
                 "rel": rel,
-                "title": rel.replace("-", " ").title(),
+                "title": title,
                 "href": _absolute_ogc_href(href),
             }
         )
