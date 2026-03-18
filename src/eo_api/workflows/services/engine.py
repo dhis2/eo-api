@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
 
 import httpx
 from fastapi import HTTPException
@@ -12,8 +14,11 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ...components import services as component_services
 from ...data_registry.services.datasets import get_dataset
-from ..schemas import WorkflowExecuteRequest, WorkflowExecuteResponse
-from .definitions import WorkflowDefinition, load_workflow_definition
+from ...publications.services import register_workflow_output_publication
+from ..schemas import WorkflowExecuteRequest, WorkflowExecuteResponse, WorkflowJobStatus
+from .definitions import WorkflowDefinition, WorkflowPublicationPolicy, load_workflow_definition
+from .job_store import initialize_job, mark_job_failed, mark_job_running, mark_job_success
+from .publication_assets import build_feature_collection_asset
 from .run_logs import persist_run_log
 from .runtime import WorkflowRuntime
 
@@ -44,9 +49,12 @@ def execute_workflow(
     workflow_definition: WorkflowDefinition | None = None,
     request_params: dict[str, Any] | None = None,
     include_component_run_details: bool = False,
+    run_id: str | None = None,
+    workflow_definition_source: Literal["catalog", "inline"] = "catalog",
 ) -> WorkflowExecuteResponse:
     """Execute the feature->download->aggregate->DataValueSet workflow."""
-    runtime = WorkflowRuntime()
+    runtime = WorkflowRuntime(run_id=run_id)
+    workflow: WorkflowDefinition | None = None
 
     dataset = get_dataset(request.dataset_id)
     if dataset is None:
@@ -62,6 +70,18 @@ def execute_workflow(
                 workflow = load_workflow_definition(workflow_id)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        initialize_job(
+            job_id=runtime.run_id,
+            request=request,
+            request_payload=request_params,
+            workflow=workflow,
+            workflow_definition_source=workflow_definition_source,
+            workflow_id=workflow.workflow_id,
+            workflow_version=workflow.version,
+            status=WorkflowJobStatus.RUNNING,
+        )
+        mark_job_running(runtime.run_id)
         _execute_workflow_steps(
             workflow=workflow,
             runtime=runtime,
@@ -82,7 +102,7 @@ def execute_workflow(
             output_file=output_file,
         )
 
-        return WorkflowExecuteResponse(
+        response = WorkflowExecuteResponse(
             status="completed",
             run_id=runtime.run_id,
             workflow_id=workflow.workflow_id,
@@ -98,8 +118,27 @@ def execute_workflow(
             component_run_details_included=include_component_run_details,
             component_run_details_available=True,
         )
+        mark_job_success(job_id=runtime.run_id, response=response)
+        if _should_publish_workflow_output(
+            response=response,
+            publication=workflow.publication,
+            workflow_definition_source=workflow_definition_source,
+        ):
+            publication_path, publication_asset_format = _build_publication_artifact(
+                response=response,
+                request=request,
+                publication=workflow.publication,
+                context=context,
+            )
+            register_workflow_output_publication(
+                response=response,
+                exposure=workflow.publication.exposure,
+                published_path=publication_path,
+                asset_format=publication_asset_format,
+            )
+        return response
     except WorkflowComponentError as exc:
-        persist_run_log(
+        run_log_file = persist_run_log(
             run_id=runtime.run_id,
             request=request,
             component_runs=runtime.component_runs,
@@ -109,6 +148,15 @@ def execute_workflow(
             failed_component=exc.component,
             failed_component_version=exc.component_version,
         )
+        if workflow is not None:
+            mark_job_failed(
+                job_id=runtime.run_id,
+                error=str(exc),
+                error_code=exc.error_code,
+                failed_component=exc.component,
+                failed_component_version=exc.component_version,
+                run_log_file=run_log_file,
+            )
         error = "upstream_unreachable" if exc.error_code == "UPSTREAM_UNREACHABLE" else "workflow_execution_failed"
         raise HTTPException(
             status_code=exc.status_code,
@@ -122,16 +170,18 @@ def execute_workflow(
             },
         ) from exc
     except HTTPException:
-        persist_run_log(
+        run_log_file = persist_run_log(
             run_id=runtime.run_id,
             request=request,
             component_runs=runtime.component_runs,
             status="failed",
             error="http_exception",
         )
+        if workflow is not None:
+            mark_job_failed(job_id=runtime.run_id, error="http_exception", run_log_file=run_log_file)
         raise
     except Exception as exc:
-        persist_run_log(
+        run_log_file = persist_run_log(
             run_id=runtime.run_id,
             request=request,
             component_runs=runtime.component_runs,
@@ -139,6 +189,13 @@ def execute_workflow(
             error=str(exc),
             error_code="EXECUTION_FAILED",
         )
+        if workflow is not None:
+            mark_job_failed(
+                job_id=runtime.run_id,
+                error=str(exc),
+                error_code="EXECUTION_FAILED",
+                run_log_file=run_log_file,
+            )
         last_component = runtime.component_runs[-1].component if runtime.component_runs else "unknown"
         raise HTTPException(
             status_code=500,
@@ -151,6 +208,54 @@ def execute_workflow(
                 "run_id": runtime.run_id,
             },
         ) from exc
+
+
+def _should_publish_workflow_output(
+    *,
+    response: WorkflowExecuteResponse,
+    publication: WorkflowPublicationPolicy,
+    workflow_definition_source: Literal["catalog", "inline"],
+) -> bool:
+    """Apply workflow-level publication policy to a concrete workflow output."""
+    if not publication.publishable:
+        return False
+    if publication.strategy != "on_success":
+        return False
+    if not _server_allows_workflow_publication(workflow_definition_source=workflow_definition_source):
+        return False
+    if publication.required_output_file_suffixes:
+        suffix = Path(response.output_file).suffix.lower()
+        return suffix in publication.required_output_file_suffixes
+    return True
+
+
+def _server_allows_workflow_publication(*, workflow_definition_source: Literal["catalog", "inline"]) -> bool:
+    """Apply server-side guardrails to workflow-driven publication."""
+    if workflow_definition_source == "catalog":
+        return True
+    return os.environ.get("EO_API_ALLOW_INLINE_WORKFLOW_PUBLICATION", "").lower() in {"1", "true", "yes"}
+
+
+def _build_publication_artifact(
+    *,
+    response: WorkflowExecuteResponse,
+    request: WorkflowExecuteRequest,
+    publication: WorkflowPublicationPolicy,
+    context: dict[str, Any],
+) -> tuple[str, str]:
+    """Build the publication-facing artifact for a publishable workflow output."""
+    if publication.intent.value == "feature_collection":
+        features = _require_context(context, "features")
+        records = _require_context(context, "records")
+        path = build_feature_collection_asset(
+            dataset_id=response.dataset_id,
+            features=features,
+            records=records,
+            period_type=request.temporal_aggregation.target_period_type,
+            feature_id_property=request.feature_source.feature_id_property,
+        )
+        return path, "geojson"
+    return response.output_file, "datavalueset-json"
 
 
 def _is_upstream_connectivity_error(exc: Exception) -> bool:
@@ -393,7 +498,13 @@ def _run_spatial_aggregation(
     method = request.spatial_aggregation.method
     feature_id_property = request.dhis2.org_unit_property
     execution_mode = str(step_config.get("execution_mode", "local")).lower()
+    temporal_dataset = context.get("temporal_dataset")
     if execution_mode == "remote":
+        if temporal_dataset is not None:
+            raise ValueError(
+                "remote spatial_aggregation does not yet support workflow temporal_aggregation output; "
+                "use local spatial_aggregation for temporally aggregated workflows"
+            )
         records = runtime.run(
             "spatial_aggregation",
             _invoke_remote_spatial_aggregation_component,
@@ -420,6 +531,7 @@ def _run_spatial_aggregation(
             features=_require_context(context, "features"),
             method=method,
             feature_id_property=feature_id_property,
+            aggregated_dataset=temporal_dataset,
         )
     return {"records": records}
 

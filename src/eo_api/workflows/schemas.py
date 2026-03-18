@@ -126,11 +126,76 @@ class WorkflowExecuteResponse(BaseModel):
     component_run_details_available: bool = True
 
 
+class WorkflowJobStatus(StrEnum):
+    """Native workflow job lifecycle states."""
+
+    ACCEPTED = "accepted"
+    RUNNING = "running"
+    SUCCESSFUL = "successful"
+    FAILED = "failed"
+    DISMISSED = "dismissed"
+
+
+class WorkflowJobOrchestrationStep(BaseModel):
+    """Compact summary of one workflow step."""
+
+    component: str
+    version: str
+    execution_mode: str | None = None
+
+
+class WorkflowJobOrchestration(BaseModel):
+    """Compact summary of workflow orchestration."""
+
+    definition_source: str
+    step_count: int
+    components: list[str]
+    steps: list[WorkflowJobOrchestrationStep]
+
+
+class WorkflowJobRecord(BaseModel):
+    """Persisted workflow job metadata."""
+
+    job_id: str
+    process_id: str
+    workflow_id: str
+    workflow_version: int
+    dataset_id: str
+    status: WorkflowJobStatus
+    created_at: str
+    updated_at: str
+    request: dict[str, Any]
+    orchestration: WorkflowJobOrchestration
+    run_log_file: str | None = None
+    output_file: str | None = None
+    error: str | None = None
+    error_code: str | None = None
+    failed_component: str | None = None
+    failed_component_version: str | None = None
+    links: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class WorkflowJobStoredRecord(WorkflowJobRecord):
+    """Persisted workflow job metadata including internal result payload."""
+
+    run_id: str
+    result: dict[str, Any] | None = None
+
+
+class WorkflowJobListResponse(BaseModel):
+    """List of persisted workflow jobs."""
+
+    jobs: list[WorkflowJobRecord]
+
+
 class WorkflowCatalogItem(BaseModel):
     """Discoverable workflow definition summary."""
 
     workflow_id: str
     version: int
+    publication_publishable: bool
+    publication_intent: str | None = None
+    publication_exposure: str | None = None
     step_count: int
     components: list[str]
 

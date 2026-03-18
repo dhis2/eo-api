@@ -267,9 +267,14 @@ def spatial_aggregation_component(
     features: dict[str, Any],
     method: AggregationMethod,
     feature_id_property: str,
+    aggregated_dataset: xr.Dataset | None = None,
 ) -> list[dict[str, Any]]:
     """Load dataset and aggregate spatially to provided features."""
-    ds = get_data(dataset=dataset, start=start, end=end, bbox=bbox)
+    ds = (
+        aggregated_dataset
+        if aggregated_dataset is not None
+        else get_data(dataset=dataset, start=start, end=end, bbox=bbox)
+    )
     return aggregate_to_features(
         ds=ds,
         variable=dataset["variable"],

@@ -1,5 +1,10 @@
 workflow_id: dhis2_datavalue_set_v1
 version: 1
+publication:
+  publishable: true
+  strategy: on_success
+  intent: feature_collection
+  exposure: ogc
 steps:
   - component: feature_source
     version: v1

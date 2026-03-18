@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Any, Final, Literal
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
+
+from ...publications.schemas import PublishedResourceExposure, PublishedResourceKind
 
 ComponentName = Literal[
     "feature_source",
@@ -59,11 +61,39 @@ class WorkflowStep(BaseModel):
         return self
 
 
+class WorkflowPublicationPolicy(BaseModel):
+    """Publication policy for workflow outputs."""
+
+    publishable: bool = Field(default=False, validation_alias=AliasChoices("publishable", "enabled"))
+    strategy: Literal["on_success", "manual"] = Field(
+        default="on_success",
+        validation_alias=AliasChoices("strategy", "publish_strategy"),
+    )
+    intent: PublishedResourceKind = Field(
+        default=PublishedResourceKind.FEATURE_COLLECTION,
+        validation_alias=AliasChoices("intent", "resource_kind"),
+    )
+    exposure: PublishedResourceExposure = PublishedResourceExposure.REGISTRY_ONLY
+    required_output_file_suffixes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_publication_policy(self) -> "WorkflowPublicationPolicy":
+        """Restrict workflow-driven publication to currently supported resource types."""
+        if self.publishable and self.intent != PublishedResourceKind.FEATURE_COLLECTION:
+            raise ValueError("Workflow publication currently supports only intent='feature_collection'")
+        normalized_suffixes = []
+        for suffix in self.required_output_file_suffixes:
+            normalized_suffixes.append(suffix if suffix.startswith(".") else f".{suffix}")
+        self.required_output_file_suffixes = normalized_suffixes
+        return self
+
+
 class WorkflowDefinition(BaseModel):
     """Declarative workflow definition."""
 
     workflow_id: str
     version: int = 1
+    publication: WorkflowPublicationPolicy = Field(default_factory=WorkflowPublicationPolicy)
     steps: list[WorkflowStep]
 
     @model_validator(mode="after")

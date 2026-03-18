@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
@@ -10,8 +12,10 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from eo_api.main import app
+from eo_api.publications import pygeoapi as publication_pygeoapi
+from eo_api.publications import services as publication_services
 from eo_api.workflows.schemas import WorkflowExecuteRequest, WorkflowExecuteResponse, WorkflowRequest
-from eo_api.workflows.services import engine
+from eo_api.workflows.services import engine, job_store, run_logs
 from eo_api.workflows.services.definitions import WorkflowDefinition, load_workflow_definition
 from eo_api.workflows.services.simple_mapper import normalize_simple_request
 
@@ -34,6 +38,38 @@ def _valid_public_payload() -> dict[str, Any]:
     }
 
 
+def _patch_successful_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset(
+        {"precip": (("time", "lat", "lon"), [[[1.0]]])},
+        coords={"time": ["2024-01-01"], "lat": [0], "lon": [0]},
+    )
+    monkeypatch.setattr(
+        engine,
+        "get_dataset",
+        lambda dataset_id: {"id": dataset_id, "variable": "precip"},
+    )
+    monkeypatch.setattr(
+        engine.component_services,
+        "feature_source_component",
+        lambda config: (
+            {"type": "FeatureCollection", "features": [{"id": "OU_1", "properties": {"id": "OU_1"}}]},
+            [0.0, 0.0, 1.0, 1.0],
+        ),
+    )
+    monkeypatch.setattr(engine.component_services, "download_dataset_component", lambda **kwargs: None)
+    monkeypatch.setattr(engine.component_services, "temporal_aggregation_component", lambda **kwargs: ds)
+    monkeypatch.setattr(
+        engine.component_services,
+        "spatial_aggregation_component",
+        lambda **kwargs: [{"org_unit": "OU_1", "time": "2024-01-01", "value": 10.0}],
+    )
+    monkeypatch.setattr(
+        engine.component_services,
+        "build_datavalueset_component",
+        lambda **kwargs: ({"dataValues": [{"value": "10.0"}]}, "/tmp/data/out.json"),
+    )
+
+
 def test_workflow_endpoint_exists_once() -> None:
     workflow_routes = {
         route.path
@@ -41,6 +77,47 @@ def test_workflow_endpoint_exists_once() -> None:
         if isinstance(route, APIRoute) and route.path.startswith("/workflows") and "POST" in route.methods
     }
     assert workflow_routes == {"/workflows/dhis2-datavalue-set", "/workflows/execute", "/workflows/validate"}
+
+
+def test_ogc_process_routes_exist() -> None:
+    ogc_routes = {
+        route.path for route in app.routes if isinstance(route, APIRoute) and route.path.startswith("/ogcapi")
+    }
+    assert "/ogcapi/processes" in ogc_routes
+    assert "/ogcapi/processes/{process_id}" in ogc_routes
+    assert "/ogcapi/processes/{process_id}/execution" in ogc_routes
+    assert "/ogcapi/jobs" in ogc_routes
+    assert "/ogcapi/jobs/{job_id}" in ogc_routes
+    assert "/ogcapi/jobs/{job_id}/results" in ogc_routes
+
+
+def test_publication_generated_pygeoapi_routes_exist() -> None:
+    publication_routes = {
+        route.path
+        for route in app.routes
+        if isinstance(route, APIRoute) and route.path.startswith("/publications/pygeoapi")
+    }
+    assert "/publications/pygeoapi/config" in publication_routes
+    assert "/publications/pygeoapi/openapi" in publication_routes
+    assert "/publications/pygeoapi/materialize" in publication_routes
+
+
+def test_pygeoapi_runtime_env_points_to_generated_documents() -> None:
+    config_path = os.environ.get("PYGEOAPI_CONFIG")
+    openapi_path = os.environ.get("PYGEOAPI_OPENAPI")
+    assert config_path is not None
+    assert openapi_path is not None
+    assert config_path.endswith("pygeoapi-config.generated.yml")
+    assert openapi_path.endswith("pygeoapi-openapi.generated.yml")
+    assert Path(config_path).exists()
+    assert Path(openapi_path).exists()
+
+
+def test_pygeoapi_mount_serves_landing_page(client: TestClient) -> None:
+    response = client.get("/ogcapi?f=json")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["title"] == "DHIS2 EO API"
 
 
 def test_workflow_catalog_endpoint_returns_allowlisted_workflow(client: TestClient) -> None:
@@ -53,6 +130,9 @@ def test_workflow_catalog_endpoint_returns_allowlisted_workflow(client: TestClie
 
     default = by_id["dhis2_datavalue_set_v1"]
     assert default["version"] == 1
+    assert default["publication_publishable"] is True
+    assert default["publication_intent"] == "feature_collection"
+    assert default["publication_exposure"] == "ogc"
     assert default["step_count"] == 5
     assert default["components"] == [
         "feature_source",
@@ -64,6 +144,9 @@ def test_workflow_catalog_endpoint_returns_allowlisted_workflow(client: TestClie
 
     fast = by_id["dhis2_datavalue_set_without_temporal_aggregation_v1"]
     assert fast["version"] == 1
+    assert fast["publication_publishable"] is False
+    assert fast["publication_intent"] is None
+    assert fast["publication_exposure"] is None
     assert fast["step_count"] == 4
     assert fast["components"] == [
         "feature_source",
@@ -136,8 +219,9 @@ def test_workflow_endpoint_returns_response_shape(client: TestClient, monkeypatc
         workflow_id: str = "dhis2_datavalue_set_v1",
         request_params: dict[str, Any] | None = None,
         include_component_run_details: bool = False,
+        workflow_definition_source: str = "catalog",
     ) -> WorkflowExecuteResponse:
-        del payload, workflow_id, request_params, include_component_run_details
+        del payload, workflow_id, request_params, include_component_run_details, workflow_definition_source
         return stub
 
     monkeypatch.setattr(
@@ -198,8 +282,9 @@ def test_workflow_endpoint_accepts_simplified_payload(client: TestClient, monkey
         workflow_id: str = "dhis2_datavalue_set_v1",
         request_params: dict[str, Any] | None = None,
         include_component_run_details: bool = False,
+        workflow_definition_source: str = "catalog",
     ) -> WorkflowExecuteResponse:
-        del payload, workflow_id, request_params, include_component_run_details
+        del payload, workflow_id, request_params, include_component_run_details, workflow_definition_source
         return stub
 
     monkeypatch.setattr("eo_api.workflows.routes.normalize_simple_request", lambda payload: (normalized, []))
@@ -235,10 +320,12 @@ def test_inline_workflow_execute_endpoint_accepts_assembly(client: TestClient, m
         workflow_definition: WorkflowDefinition | None = None,
         request_params: dict[str, Any] | None = None,
         include_component_run_details: bool = False,
+        workflow_definition_source: str = "inline",
     ) -> WorkflowExecuteResponse:
         del payload, request_params, include_component_run_details
         assert workflow_id == "adhoc_dhis2_v1"
         assert workflow_definition is not None
+        assert workflow_definition_source == "inline"
         assert workflow_definition.workflow_id == "adhoc_dhis2_v1"
         assert len(workflow_definition.steps) == 4
         return stub
@@ -376,6 +463,453 @@ def test_workflow_validate_endpoint_unknown_workflow_id(client: TestClient) -> N
     assert "Unknown workflow_id" in body["errors"][0]
 
 
+def test_workflow_job_endpoints_return_persisted_result(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(run_logs, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(job_store, "DOWNLOAD_DIR", tmp_path)
+    _patch_successful_execution(monkeypatch)
+
+    response = client.post("/workflows/dhis2-datavalue-set", json=_valid_public_payload())
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+
+    job_response = client.get(f"/workflows/jobs/{run_id}")
+    assert job_response.status_code == 200
+    job_body = job_response.json()
+    assert job_body["job_id"] == run_id
+    assert job_body["status"] == "successful"
+    assert job_body["process_id"] == "generic-dhis2-workflow"
+    assert job_body["request"]["dataset_id"] == "chirps3_precipitation_daily"
+    assert job_body["request"]["start_date"] == "2024-01-01"
+    assert job_body["request"]["end_date"] == "2024-01-31"
+    assert job_body["orchestration"]["definition_source"] == "catalog"
+    assert job_body["orchestration"]["step_count"] == 5
+    assert job_body["orchestration"]["components"] == [
+        "feature_source",
+        "download_dataset",
+        "temporal_aggregation",
+        "spatial_aggregation",
+        "build_datavalueset",
+    ]
+    assert job_body["orchestration"]["steps"][0]["component"] == "feature_source"
+    assert job_body["orchestration"]["steps"][0]["version"] == "v1"
+    links = {item["rel"]: item["href"] for item in job_body["links"]}
+    assert links["self"].endswith(f"/workflows/jobs/{run_id}")
+    assert links["result"].endswith(f"/workflows/jobs/{run_id}/result")
+    assert links["trace"].endswith(f"/workflows/jobs/{run_id}/trace")
+    assert links["collection"].endswith(f"/ogcapi/collections/workflow-output-{run_id}")
+    assert "result" not in job_body
+
+    results_response = client.get(f"/workflows/jobs/{run_id}/result")
+    assert results_response.status_code == 200
+    assert results_response.json()["run_id"] == run_id
+
+    trace_response = client.get(f"/workflows/jobs/{run_id}/trace")
+    assert trace_response.status_code == 200
+    trace_body = trace_response.json()
+    assert trace_body["run_id"] == run_id
+    assert trace_body["status"] == "completed"
+    assert [item["component"] for item in trace_body["component_runs"]] == [
+        "feature_source",
+        "download_dataset",
+        "temporal_aggregation",
+        "spatial_aggregation",
+        "build_datavalueset",
+    ]
+
+
+def test_delete_workflow_job_cascades_derived_artifacts(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_successful_execution(monkeypatch)
+    output_path = job_store.DOWNLOAD_DIR / "cascade-test-datavalue-set.json"
+    output_path.write_text('{"dataValues": [{"value": "10.0"}]}', encoding="utf-8")
+    monkeypatch.setattr(
+        engine.component_services,
+        "build_datavalueset_component",
+        lambda **kwargs: ({"dataValues": [{"value": "10.0"}]}, str(output_path)),
+    )
+
+    response = client.post("/workflows/dhis2-datavalue-set", json=_valid_public_payload())
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+    output_file = Path(response.json()["output_file"])
+    run_log_file = Path(response.json()["run_log_file"])
+
+    publications_response = client.get("/publications", params={"workflow_id": "dhis2_datavalue_set_v1"})
+    assert publications_response.status_code == 200
+    derived = next(
+        item for item in publications_response.json()["resources"] if item["resource_id"] == f"workflow-output-{run_id}"
+    )
+    publication_file = publication_services.DOWNLOAD_DIR / "published_resources" / f"workflow-output-{run_id}.json"
+    publication_asset = Path(derived["path"])
+    job_file = job_store.DOWNLOAD_DIR / "workflow_jobs" / f"{run_id}.json"
+
+    assert job_file.exists()
+    assert run_log_file.exists()
+    assert output_file.exists()
+    assert publication_file.exists()
+    assert publication_asset.exists()
+
+    delete_response = client.delete(f"/workflows/jobs/{run_id}")
+    assert delete_response.status_code == 200
+    delete_body = delete_response.json()
+    assert delete_body["job_id"] == run_id
+    assert delete_body["deleted"] is True
+    assert delete_body["deleted_publication"] == f"workflow-output-{run_id}"
+    assert delete_body["pygeoapi_runtime_reload_required"] is True
+
+    assert not job_file.exists()
+    assert not run_log_file.exists()
+    assert not output_file.exists()
+    assert not publication_file.exists()
+    assert not publication_asset.exists()
+
+    job_response = client.get(f"/workflows/jobs/{run_id}")
+    assert job_response.status_code == 404
+
+    publication_response = client.get(f"/publications/workflow-output-{run_id}")
+    assert publication_response.status_code == 404
+
+
+def test_ogc_async_execution_creates_job_and_results(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(run_logs, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(job_store, "DOWNLOAD_DIR", tmp_path)
+    _patch_successful_execution(monkeypatch)
+
+    response = client.post(
+        "/ogcapi/processes/generic-dhis2-workflow/execution",
+        headers={"Prefer": "respond-async"},
+        json=_valid_public_payload(),
+    )
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "accepted"
+    job_id = body["jobID"]
+
+    job_response = client.get(f"/ogcapi/jobs/{job_id}")
+    assert job_response.status_code == 200
+    assert job_response.json()["status"] == "successful"
+
+    results_response = client.get(f"/ogcapi/jobs/{job_id}/results")
+    assert results_response.status_code == 200
+    assert results_response.json()["run_id"] == job_id
+
+
+def test_publications_endpoint_seeds_source_datasets(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+
+    response = client.get("/publications")
+    assert response.status_code == 200
+    body = response.json()
+    resource_ids = {item["resource_id"] for item in body["resources"]}
+    assert "dataset-chirps3_precipitation_daily" in resource_ids
+    assert "dataset-worldpop_population_yearly" in resource_ids
+
+
+def test_generated_pygeoapi_config_reflects_collection_registry(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
+    zarr_path.mkdir(parents=True)
+    monkeypatch.setattr(publication_pygeoapi, "get_zarr_path", lambda dataset: zarr_path)
+
+    response = client.get("/publications/pygeoapi/config")
+    assert response.status_code == 200
+    body = response.json()
+    resources = body["resources"]
+    assert len(resources) > 0
+    assert "chirps3_precipitation_daily" in resources
+    first = resources["chirps3_precipitation_daily"]
+    assert first["type"] == "collection"
+    assert "title" in first
+
+
+def test_generated_pygeoapi_config_contains_collection_detail(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
+    zarr_path.mkdir(parents=True)
+    monkeypatch.setattr(publication_pygeoapi, "get_zarr_path", lambda dataset: zarr_path)
+
+    response = client.get("/publications/pygeoapi/config")
+    assert response.status_code == 200
+    collection = response.json()["resources"]["chirps3_precipitation_daily"]
+    assert collection["type"] == "collection"
+    assert collection["title"]["en"]
+    assert collection["providers"][0]["type"] == "coverage"
+
+
+def test_workflow_success_registers_derived_publication(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(run_logs, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(job_store, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    _patch_successful_execution(monkeypatch)
+
+    response = client.post("/workflows/dhis2-datavalue-set", json=_valid_public_payload())
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+
+    publications_response = client.get("/publications", params={"workflow_id": "dhis2_datavalue_set_v1"})
+    assert publications_response.status_code == 200
+    resources = publications_response.json()["resources"]
+    derived = next(item for item in resources if item["resource_id"] == f"workflow-output-{run_id}")
+    assert derived["resource_class"] == "derived"
+    assert derived["job_id"] == run_id
+    assert derived["ogc_path"] == f"/ogcapi/collections/workflow-output-{run_id}"
+    assert derived["exposure"] == "ogc"
+    assert derived["asset_format"] == "geojson"
+    assert derived["path"].endswith(".geojson")
+    assert derived["metadata"]["native_output_file"].endswith(".json")
+    geojson = Path(derived["path"]).read_text(encoding="utf-8")
+    assert '"org_unit_name"' in geojson
+    assert '"period": "2024-01"' in geojson
+    assert '"period_type"' not in geojson
+    assert '"dataset_id"' not in geojson
+
+
+def test_workflow_with_publication_disabled_does_not_register_derived_publication(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(run_logs, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(job_store, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    _patch_successful_execution(monkeypatch)
+
+    payload = _valid_public_payload()
+    payload["request"]["workflow_id"] = "dhis2_datavalue_set_without_temporal_aggregation_v1"
+
+    response = client.post("/workflows/dhis2-datavalue-set", json=payload)
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+
+    publications_response = client.get(
+        "/publications",
+        params={"workflow_id": "dhis2_datavalue_set_without_temporal_aggregation_v1"},
+    )
+    assert publications_response.status_code == 200
+    resources = publications_response.json()["resources"]
+    assert all(item["resource_id"] != f"workflow-output-{run_id}" for item in resources)
+
+
+def test_inline_workflow_publication_intent_is_blocked_by_server_guardrail(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(run_logs, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(job_store, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.delenv("EO_API_ALLOW_INLINE_WORKFLOW_PUBLICATION", raising=False)
+    _patch_successful_execution(monkeypatch)
+
+    payload = {
+        "workflow": {
+            "workflow_id": "adhoc_chirps_mixed_exec_v1",
+            "version": 1,
+            "publication": {
+                "publishable": True,
+                "strategy": "on_success",
+                "intent": "feature_collection",
+            },
+            "steps": [
+                {"component": "feature_source", "version": "v1"},
+                {"component": "download_dataset", "version": "v1"},
+                {"component": "temporal_aggregation", "version": "v1"},
+                {"component": "spatial_aggregation", "version": "v1"},
+                {"component": "build_datavalueset", "version": "v1"},
+            ],
+        },
+        "request": _valid_public_payload()["request"] | {"workflow_id": "adhoc_chirps_mixed_exec_v1"},
+    }
+
+    response = client.post("/workflows/execute", json=payload)
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+
+    publications_response = client.get("/publications", params={"workflow_id": "adhoc_chirps_mixed_exec_v1"})
+    assert publications_response.status_code == 200
+    resources = publications_response.json()["resources"]
+    assert all(item["resource_id"] != f"workflow-output-{run_id}" for item in resources)
+
+
+def test_inline_workflow_publication_intent_can_be_enabled_by_server_policy(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(run_logs, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(job_store, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setenv("EO_API_ALLOW_INLINE_WORKFLOW_PUBLICATION", "true")
+    _patch_successful_execution(monkeypatch)
+
+    payload = {
+        "workflow": {
+            "workflow_id": "adhoc_chirps_mixed_exec_v1",
+            "version": 1,
+            "publication": {
+                "publishable": True,
+                "strategy": "on_success",
+                "intent": "feature_collection",
+            },
+            "steps": [
+                {"component": "feature_source", "version": "v1"},
+                {"component": "download_dataset", "version": "v1"},
+                {"component": "temporal_aggregation", "version": "v1"},
+                {"component": "spatial_aggregation", "version": "v1"},
+                {"component": "build_datavalueset", "version": "v1"},
+            ],
+        },
+        "request": _valid_public_payload()["request"] | {"workflow_id": "adhoc_chirps_mixed_exec_v1"},
+    }
+
+    response = client.post("/workflows/execute", json=payload)
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+
+    publications_response = client.get("/publications", params={"workflow_id": "adhoc_chirps_mixed_exec_v1"})
+    assert publications_response.status_code == 200
+    resources = publications_response.json()["resources"]
+    derived = next(item for item in resources if item["resource_id"] == f"workflow-output-{run_id}")
+    assert derived["workflow_id"] == "adhoc_chirps_mixed_exec_v1"
+    assert derived["exposure"] == "registry_only"
+
+
+def test_ogc_process_sync_execution_links_to_collection(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(run_logs, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(job_store, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    _patch_successful_execution(monkeypatch)
+
+    response = client.post("/ogcapi/processes/generic-dhis2-workflow/execution", json=_valid_public_payload())
+    assert response.status_code == 200
+    body = response.json()
+    collection_links = [item for item in body["links"] if item["rel"] == "collection"]
+    assert len(collection_links) == 1
+    assert "/ogcapi/collections/workflow-output-" in collection_links[0]["href"]
+
+
+def test_generated_pygeoapi_config_reflects_publication_registry(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_pygeoapi, "DOWNLOAD_DIR", tmp_path)
+    zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
+    zarr_path.mkdir(parents=True)
+    monkeypatch.setattr(publication_pygeoapi, "get_zarr_path", lambda dataset: zarr_path)
+
+    response = client.get("/publications/pygeoapi/config")
+    assert response.status_code == 200
+    body = response.json()
+    resources = body["resources"]
+    assert "chirps3_precipitation_daily" in resources
+    chirps = resources["chirps3_precipitation_daily"]
+    assert chirps["type"] == "collection"
+    assert chirps["providers"][0]["type"] == "coverage"
+    assert chirps["metadata"]["dataset_id"] == "chirps3_precipitation_daily"
+
+
+def test_generated_pygeoapi_openapi_includes_derived_collection(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(run_logs, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(job_store, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_pygeoapi, "DOWNLOAD_DIR", tmp_path)
+    zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
+    zarr_path.mkdir(parents=True)
+    monkeypatch.setattr(publication_pygeoapi, "get_zarr_path", lambda dataset: zarr_path)
+    _patch_successful_execution(monkeypatch)
+
+    workflow_response = client.post("/workflows/dhis2-datavalue-set", json=_valid_public_payload())
+    assert workflow_response.status_code == 200
+    run_id = workflow_response.json()["run_id"]
+
+    response = client.get("/publications/pygeoapi/openapi")
+    assert response.status_code == 200
+    body = response.json()
+    assert "/collections/chirps3_precipitation_daily" in body["paths"]
+    assert "chirps3_precipitation_daily" in body["x-generated-resources"]
+    assert f"/collections/workflow-output-{run_id}" in body["paths"]
+    assert f"workflow-output-{run_id}" in body["x-generated-resources"]
+
+
+def test_generated_pygeoapi_config_includes_geojson_derived_resource(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(run_logs, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(job_store, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_pygeoapi, "DOWNLOAD_DIR", tmp_path)
+    zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
+    zarr_path.mkdir(parents=True)
+    monkeypatch.setattr(publication_pygeoapi, "get_zarr_path", lambda dataset: zarr_path)
+    _patch_successful_execution(monkeypatch)
+
+    workflow_response = client.post("/workflows/dhis2-datavalue-set", json=_valid_public_payload())
+    assert workflow_response.status_code == 200
+    run_id = workflow_response.json()["run_id"]
+
+    response = client.get("/publications/pygeoapi/config")
+    assert response.status_code == 200
+    resources = response.json()["resources"]
+    derived = resources[f"workflow-output-{run_id}"]
+    assert derived["providers"][0]["name"] == "GeoJSON"
+    assert derived["providers"][0]["type"] == "feature"
+    assert derived["providers"][0]["data"].endswith(".geojson")
+
+
+def test_materialize_generated_pygeoapi_documents_writes_files(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_pygeoapi, "DOWNLOAD_DIR", tmp_path)
+
+    response = client.post("/publications/pygeoapi/materialize")
+    assert response.status_code == 200
+    body = response.json()
+    config_path = Path(body["config_path"])
+    openapi_path = Path(body["openapi_path"])
+    assert config_path.exists()
+    assert openapi_path.exists()
+    assert "resources:" in config_path.read_text(encoding="utf-8")
+
+
 def test_component_spatial_aggregation_serializes_numpy_datetime64(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -486,6 +1020,56 @@ def test_engine_orchestrates_components(monkeypatch: pytest.MonkeyPatch) -> None
     assert called["downloaded"] is True
 
 
+def test_engine_spatial_aggregation_uses_temporally_aggregated_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
+    request = WorkflowExecuteRequest.model_validate(
+        {
+            "dataset_id": "chirps3_precipitation_daily",
+            "start": "2024-01-01",
+            "end": "2024-01-31",
+            "feature_source": {"source_type": "dhis2_level", "dhis2_level": 3},
+            "temporal_aggregation": {"target_period_type": "monthly", "method": "sum"},
+            "spatial_aggregation": {"method": "mean"},
+            "dhis2": {"data_element_uid": "abc123def45"},
+        }
+    )
+    temporal_ds = xr.Dataset(
+        {"precip": (("time", "lat", "lon"), [[[31.0]]])},
+        coords={"time": ["2024-01"], "lat": [0], "lon": [0]},
+    )
+
+    monkeypatch.setattr(
+        engine,
+        "get_dataset",
+        lambda dataset_id: {"id": "chirps3_precipitation_daily", "variable": "precip"},
+    )
+    monkeypatch.setattr(
+        engine.component_services,
+        "feature_source_component",
+        lambda config: (
+            {"type": "FeatureCollection", "features": [{"id": "OU_1", "properties": {"id": "OU_1"}}]},
+            [0, 0, 1, 1],
+        ),
+    )
+    monkeypatch.setattr(engine.component_services, "download_dataset_component", lambda **kwargs: None)
+    monkeypatch.setattr(engine.component_services, "temporal_aggregation_component", lambda **kwargs: temporal_ds)
+
+    def _spatial_aggregation_component(**kwargs: Any) -> list[dict[str, Any]]:
+        assert kwargs["aggregated_dataset"] is temporal_ds
+        return [{"org_unit": "OU_1", "time": "2024-01", "value": 31.0}]
+
+    monkeypatch.setattr(engine.component_services, "spatial_aggregation_component", _spatial_aggregation_component)
+    monkeypatch.setattr(
+        engine.component_services,
+        "build_datavalueset_component",
+        lambda **kwargs: ({"dataValues": [{"value": "31.0", "period": "202401"}]}, "/tmp/data/out.json"),
+    )
+    monkeypatch.setattr(engine, "persist_run_log", lambda **kwargs: "/tmp/data/workflow_runs/run.json")
+
+    response = engine.execute_workflow(request, include_component_run_details=True)
+    assert response.status == "completed"
+    assert response.data_value_set["dataValues"][0]["period"] == "202401"
+
+
 def test_engine_hides_component_details_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     request = WorkflowExecuteRequest.model_validate(
         {
@@ -533,6 +1117,68 @@ def test_engine_hides_component_details_by_default(monkeypatch: pytest.MonkeyPat
     assert response.component_runs == []
     assert response.component_run_details_included is False
     assert response.component_run_details_available is True
+
+
+def test_engine_rejects_remote_spatial_after_temporal_aggregation(monkeypatch: pytest.MonkeyPatch) -> None:
+    request = WorkflowExecuteRequest.model_validate(
+        {
+            "dataset_id": "chirps3_precipitation_daily",
+            "start": "2024-01-01",
+            "end": "2024-01-31",
+            "feature_source": {"source_type": "dhis2_level", "dhis2_level": 3},
+            "temporal_aggregation": {"target_period_type": "monthly", "method": "sum"},
+            "spatial_aggregation": {"method": "mean"},
+            "dhis2": {"data_element_uid": "abc123def45"},
+        }
+    )
+    temporal_ds = xr.Dataset(
+        {"precip": (("time", "lat", "lon"), [[[31.0]]])},
+        coords={"time": ["2024-01"], "lat": [0], "lon": [0]},
+    )
+    workflow = WorkflowDefinition.model_validate(
+        {
+            "workflow_id": "dhis2_datavalue_set_v1",
+            "version": 1,
+            "steps": [
+                {"component": "feature_source"},
+                {"component": "download_dataset"},
+                {"component": "temporal_aggregation"},
+                {
+                    "component": "spatial_aggregation",
+                    "config": {
+                        "execution_mode": "remote",
+                        "remote_url": "http://localhost:8000/components/spatial-aggregation",
+                    },
+                },
+                {"component": "build_datavalueset"},
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        engine,
+        "get_dataset",
+        lambda dataset_id: {"id": "chirps3_precipitation_daily", "variable": "precip"},
+    )
+    monkeypatch.setattr(
+        engine.component_services,
+        "feature_source_component",
+        lambda config: (
+            {"type": "FeatureCollection", "features": [{"id": "OU_1", "properties": {"id": "OU_1"}}]},
+            [0, 0, 1, 1],
+        ),
+    )
+    monkeypatch.setattr(engine.component_services, "download_dataset_component", lambda **kwargs: None)
+    monkeypatch.setattr(engine.component_services, "temporal_aggregation_component", lambda **kwargs: temporal_ds)
+    monkeypatch.setattr(engine, "persist_run_log", lambda **kwargs: "/tmp/data/workflow_runs/run.json")
+
+    with pytest.raises(HTTPException) as exc_info:
+        engine.execute_workflow(request, workflow_definition=workflow)
+
+    assert exc_info.value.status_code == 500
+    detail = cast(dict[str, Any], exc_info.value.detail)
+    assert detail["failed_component"] == "spatial_aggregation"
+    assert "local spatial_aggregation" in detail["message"]
 
 
 def test_engine_returns_503_when_upstream_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1043,7 +1689,9 @@ def test_engine_rejects_remote_fields_in_local_mode(monkeypatch: pytest.MonkeyPa
     assert detail["failed_component"] == "download_dataset"
 
 
-def test_engine_supports_remote_mode_for_all_components(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_engine_supports_remote_mode_for_remote_compatible_component_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     request = WorkflowExecuteRequest.model_validate(
         {
             "dataset_id": "chirps3_precipitation_daily",
@@ -1075,13 +1723,6 @@ def test_engine_supports_remote_mode_for_all_components(monkeypatch: pytest.Monk
                         },
                     },
                     {
-                        "component": "temporal_aggregation",
-                        "config": {
-                            "execution_mode": "remote",
-                            "remote_url": "http://x/components/temporal-aggregation",
-                        },
-                    },
-                    {
                         "component": "spatial_aggregation",
                         "config": {
                             "execution_mode": "remote",
@@ -1108,7 +1749,6 @@ def test_engine_supports_remote_mode_for_all_components(monkeypatch: pytest.Monk
     called: dict[str, bool] = {
         "feature": False,
         "download": False,
-        "temporal": False,
         "spatial": False,
         "build": False,
     }
@@ -1126,11 +1766,6 @@ def test_engine_supports_remote_mode_for_all_components(monkeypatch: pytest.Monk
         engine,
         "_invoke_remote_download_component",
         lambda **kwargs: called.__setitem__("download", True),
-    )
-    monkeypatch.setattr(
-        engine,
-        "_invoke_remote_temporal_aggregation_component",
-        lambda **kwargs: (called.__setitem__("temporal", True), {"sizes": {"time": 1}, "dims": ["time"]})[1],
     )
     monkeypatch.setattr(
         engine,

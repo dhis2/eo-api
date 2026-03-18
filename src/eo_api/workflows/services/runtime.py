@@ -14,8 +14,8 @@ from ..schemas import ComponentRun
 class WorkflowRuntime:
     """Capture execution metadata for component orchestration."""
 
-    def __init__(self) -> None:
-        self.run_id = str(uuid.uuid4())
+    def __init__(self, *, run_id: str | None = None) -> None:
+        self.run_id = run_id or str(uuid.uuid4())
         self.component_runs: list[ComponentRun] = []
 
     def run(self, component: str, fn: Callable[..., Any], **kwargs: Any) -> Any:
