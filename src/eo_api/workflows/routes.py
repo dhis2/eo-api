@@ -17,6 +17,10 @@ from .schemas import (
     WorkflowJobListResponse,
     WorkflowJobRecord,
     WorkflowJobStatus,
+    WorkflowSchedule,
+    WorkflowScheduleCreateRequest,
+    WorkflowScheduleTriggerRequest,
+    WorkflowScheduleTriggerResponse,
     WorkflowValidateRequest,
     WorkflowValidateResponse,
     WorkflowValidateStep,
@@ -24,6 +28,7 @@ from .schemas import (
 from .services.definitions import list_workflow_definitions, load_workflow_definition
 from .services.engine import execute_workflow, validate_workflow_steps
 from .services.job_store import cleanup_jobs, delete_job, get_job, get_job_result, get_job_trace, list_jobs
+from .services.schedules import create_schedule, delete_schedule, get_schedule, list_schedules, trigger_schedule
 from .services.simple_mapper import normalize_simple_request
 
 router = APIRouter()
@@ -207,6 +212,88 @@ def cleanup_workflow_jobs(
             ),
         ) from exc
     return WorkflowJobCleanupResponse.model_validate(result)
+
+
+@router.post("/schedules", response_model=WorkflowSchedule)
+def create_workflow_schedule(payload: WorkflowScheduleCreateRequest) -> WorkflowSchedule:
+    """Create a recurring workflow schedule contract."""
+    try:
+        return create_schedule(payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=api_error(
+                error="schedule_invalid",
+                error_code="SCHEDULE_INVALID",
+                message=str(exc),
+            ),
+        ) from exc
+
+
+@router.get("/schedules", response_model=list[WorkflowSchedule])
+def list_workflow_schedules(workflow_id: str | None = None) -> list[WorkflowSchedule]:
+    """List persisted workflow schedules."""
+    return list_schedules(workflow_id=workflow_id)
+
+
+@router.get("/schedules/{schedule_id}", response_model=WorkflowSchedule)
+def get_workflow_schedule(schedule_id: str) -> WorkflowSchedule:
+    """Fetch one persisted workflow schedule."""
+    schedule = get_schedule(schedule_id)
+    if schedule is None:
+        raise HTTPException(
+            status_code=404,
+            detail=api_error(
+                error="schedule_not_found",
+                error_code="SCHEDULE_NOT_FOUND",
+                message=f"Unknown schedule_id '{schedule_id}'",
+                schedule_id=schedule_id,
+            ),
+        )
+    return schedule
+
+
+@router.delete("/schedules/{schedule_id}", status_code=204)
+def delete_workflow_schedule(schedule_id: str) -> None:
+    """Delete one persisted workflow schedule."""
+    deleted = delete_schedule(schedule_id)
+    if deleted is None:
+        raise HTTPException(
+            status_code=404,
+            detail=api_error(
+                error="schedule_not_found",
+                error_code="SCHEDULE_NOT_FOUND",
+                message=f"Unknown schedule_id '{schedule_id}'",
+                schedule_id=schedule_id,
+            ),
+        )
+
+
+@router.post("/schedules/{schedule_id}/trigger", response_model=WorkflowScheduleTriggerResponse)
+def trigger_workflow_schedule(
+    schedule_id: str,
+    payload: WorkflowScheduleTriggerRequest | None = None,
+) -> WorkflowScheduleTriggerResponse:
+    """Trigger one persisted schedule immediately."""
+    try:
+        trigger_response, _result = trigger_schedule(
+            schedule_id=schedule_id,
+            execution_time=(payload.execution_time if payload is not None else None),
+        )
+    except ValueError as exc:
+        message = str(exc)
+        error_code = "SCHEDULE_NOT_FOUND" if "Unknown schedule_id" in message else "SCHEDULE_TRIGGER_INVALID"
+        status_code = 404 if error_code == "SCHEDULE_NOT_FOUND" else 422
+        raise HTTPException(
+            status_code=status_code,
+            detail=api_error(
+                error="schedule_trigger_failed" if status_code == 422 else "schedule_not_found",
+                error_code=error_code,
+                message=message,
+                schedule_id=schedule_id,
+            ),
+        ) from exc
+    return trigger_response
 
 
 @router.post("/dhis2-datavalue-set", response_model=WorkflowExecuteResponse)

@@ -35,6 +35,9 @@ def initialize_job(
     workflow_version: int,
     status: WorkflowJobStatus = WorkflowJobStatus.RUNNING,
     process_id: str = _DEFAULT_PROCESS_ID,
+    trigger_type: str = "on_demand",
+    schedule_id: str | None = None,
+    idempotency_key: str | None = None,
 ) -> WorkflowJobRecord:
     """Create or replace a persisted job record."""
     existing = get_stored_job(job_id)
@@ -61,6 +64,9 @@ def initialize_job(
         error_code=existing.error_code if existing is not None else None,
         failed_component=existing.failed_component if existing is not None else None,
         failed_component_version=existing.failed_component_version if existing is not None else None,
+        trigger_type=trigger_type if existing is None else existing.trigger_type,
+        schedule_id=schedule_id if existing is None else existing.schedule_id,
+        idempotency_key=idempotency_key if existing is None else existing.idempotency_key,
     )
     _write_job(record)
     return record
@@ -173,6 +179,14 @@ def get_job_trace(job_id: str) -> dict[str, Any] | None:
     if not path.exists():
         return None
     return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+
+
+def find_job_by_schedule_key(*, schedule_id: str, idempotency_key: str) -> WorkflowJobRecord | None:
+    """Return the newest job matching one schedule/idempotency pair."""
+    for job in list_jobs():
+        if job.schedule_id == schedule_id and job.idempotency_key == idempotency_key:
+            return job
+    return None
 
 
 def delete_job(job_id: str) -> dict[str, Any] | None:
@@ -313,9 +327,14 @@ def _build_orchestration_summary(
         components=[step.component for step in workflow.steps],
         steps=[
             WorkflowJobOrchestrationStep(
+                id=step.id or step.component,
                 component=step.component,
                 version=step.version,
                 execution_mode=cast(str | None, step.config.get("execution_mode")),
+                inputs={
+                    input_name: {"from_step": ref.from_step, "output": ref.output}
+                    for input_name, ref in step.inputs.items()
+                },
             )
             for step in workflow.steps
         ],

@@ -29,9 +29,17 @@ COMPONENT_INPUTS: Final[dict[str, set[str]]] = {
     "build_datavalueset": {"records"},
 }
 
+COMPONENT_OPTIONAL_INPUTS: Final[dict[str, set[str]]] = {
+    "feature_source": set(),
+    "download_dataset": set(),
+    "temporal_aggregation": set(),
+    "spatial_aggregation": {"temporal_dataset"},
+    "build_datavalueset": set(),
+}
+
 COMPONENT_OUTPUTS: Final[dict[str, set[str]]] = {
     "feature_source": {"features", "bbox"},
-    "download_dataset": set(),
+    "download_dataset": {"status"},
     "temporal_aggregation": {"temporal_dataset"},
     "spatial_aggregation": {"records"},
     "build_datavalueset": {"data_value_set", "output_file"},
@@ -45,9 +53,11 @@ DEFAULT_WORKFLOW_ID = "dhis2_datavalue_set_v1"
 class WorkflowStep(BaseModel):
     """One component step in a declarative workflow definition."""
 
+    id: str | None = None
     component: ComponentName
     version: str = "v1"
     config: dict[str, Any] = Field(default_factory=dict)
+    inputs: dict[str, "WorkflowStepInput"] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_component_version(self) -> "WorkflowStep":
@@ -59,6 +69,13 @@ class WorkflowStep(BaseModel):
                 f"Unsupported component version '{self.component}@{self.version}'. Supported versions: {known}"
             )
         return self
+
+
+class WorkflowStepInput(BaseModel):
+    """Reference one named output from a prior workflow step."""
+
+    from_step: str
+    output: str = Field(validation_alias=AliasChoices("output", "output_key"))
 
 
 class WorkflowPublicationPolicy(BaseModel):
@@ -101,16 +118,26 @@ class WorkflowDefinition(BaseModel):
         """Require terminal DataValueSet step and validate component compatibility."""
         if not self.steps:
             raise ValueError("Workflow steps cannot be empty")
+        _assign_step_ids(self.steps)
         if self.steps[-1].component != "build_datavalueset":
             raise ValueError("The last workflow step must be 'build_datavalueset'")
-        available_context: set[str] = set()
+        available_outputs: dict[str, set[str]] = {}
+        latest_producer_for_output: dict[str, str] = {}
         for step in self.steps:
-            required_inputs = COMPONENT_INPUTS[step.component]
-            missing_inputs = required_inputs - available_context
-            if missing_inputs:
-                missing = ", ".join(sorted(missing_inputs))
-                raise ValueError(f"Component '{step.component}' is missing required upstream outputs: {missing}")
-            available_context.update(COMPONENT_OUTPUTS[step.component])
+            if step.id is None:
+                raise ValueError(f"Workflow step '{step.component}' is missing an id")
+
+            resolved_inputs = _normalize_step_inputs(
+                step=step,
+                available_outputs=available_outputs,
+                latest_producer_for_output=latest_producer_for_output,
+            )
+            step.inputs = resolved_inputs
+
+            outputs = COMPONENT_OUTPUTS[step.component]
+            available_outputs[step.id] = outputs
+            for output_name in outputs:
+                latest_producer_for_output[output_name] = step.id
         return self
 
 
@@ -174,3 +201,60 @@ def _discover_workflow_files() -> dict[str, Path]:
         discovered[workflow_id] = workflow_file
 
     return discovered
+
+
+def _assign_step_ids(steps: list[WorkflowStep]) -> None:
+    seen_ids: set[str] = set()
+    component_counts: dict[str, int] = {}
+    for step in steps:
+        if step.id is None:
+            count = component_counts.get(step.component, 0) + 1
+            component_counts[step.component] = count
+            step.id = step.component if count == 1 else f"{step.component}_{count}"
+        if step.id in seen_ids:
+            raise ValueError(f"Duplicate workflow step id '{step.id}'")
+        seen_ids.add(step.id)
+
+
+def _normalize_step_inputs(
+    *,
+    step: WorkflowStep,
+    available_outputs: dict[str, set[str]],
+    latest_producer_for_output: dict[str, str],
+) -> dict[str, WorkflowStepInput]:
+    declared_inputs = dict(step.inputs)
+    required_inputs = COMPONENT_INPUTS[step.component]
+    optional_inputs = COMPONENT_OPTIONAL_INPUTS.get(step.component, set())
+
+    if not declared_inputs:
+        for input_name in sorted(required_inputs | optional_inputs):
+            producer = latest_producer_for_output.get(input_name)
+            if producer is None:
+                continue
+            declared_inputs[input_name] = WorkflowStepInput(from_step=producer, output=input_name)
+
+    missing_required = required_inputs - set(declared_inputs)
+    if missing_required:
+        missing = ", ".join(sorted(missing_required))
+        raise ValueError(f"Component '{step.component}' is missing required upstream outputs: {missing}")
+
+    allowed_inputs = required_inputs | optional_inputs
+    unexpected_inputs = set(declared_inputs) - allowed_inputs
+    if unexpected_inputs:
+        unexpected = ", ".join(sorted(unexpected_inputs))
+        raise ValueError(f"Component '{step.component}' declares unsupported inputs: {unexpected}")
+
+    for input_name, ref in declared_inputs.items():
+        available_for_step = available_outputs.get(ref.from_step)
+        if available_for_step is None:
+            raise ValueError(
+                f"Component '{step.component}' references unknown upstream "
+                f"step '{ref.from_step}' for input '{input_name}'"
+            )
+        if ref.output not in available_for_step:
+            raise ValueError(
+                f"Component '{step.component}' input '{input_name}' references "
+                f"missing output '{ref.output}' from step '{ref.from_step}'"
+            )
+
+    return declared_inputs

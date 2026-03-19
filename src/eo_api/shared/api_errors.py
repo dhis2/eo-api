@@ -18,6 +18,7 @@ class ApiErrorResponse(BaseModel):
     process_id: str | None = None
     job_id: str | None = None
     run_id: str | None = None
+    schedule_id: str | None = None
     status: str | None = None
     failed_component: str | None = None
     failed_component_version: str | None = None
@@ -32,6 +33,7 @@ def api_error(
     process_id: str | None = None,
     job_id: str | None = None,
     run_id: str | None = None,
+    schedule_id: str | None = None,
     status: str | None = None,
     failed_component: str | None = None,
     failed_component_version: str | None = None,
@@ -45,6 +47,7 @@ def api_error(
         process_id=process_id,
         job_id=job_id,
         run_id=run_id,
+        schedule_id=schedule_id,
         status=status,
         failed_component=failed_component,
         failed_component_version=failed_component_version,

@@ -139,9 +139,11 @@ class WorkflowJobStatus(StrEnum):
 class WorkflowJobOrchestrationStep(BaseModel):
     """Compact summary of one workflow step."""
 
+    id: str
     component: str
     version: str
     execution_mode: str | None = None
+    inputs: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 class WorkflowJobOrchestration(BaseModel):
@@ -172,6 +174,9 @@ class WorkflowJobRecord(BaseModel):
     error_code: str | None = None
     failed_component: str | None = None
     failed_component_version: str | None = None
+    trigger_type: str = "on_demand"
+    schedule_id: str | None = None
+    idempotency_key: str | None = None
     links: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -298,9 +303,62 @@ class WorkflowValidateStep(BaseModel):
     """Resolved workflow step metadata from validation."""
 
     index: int
+    id: str | None = None
     component: str
     version: str
     resolved_config: dict[str, Any]
+    resolved_inputs: dict[str, dict[str, str]] = Field(default_factory=dict)
+
+
+class JobRetentionPolicy(BaseModel):
+    """Retention policy metadata for scheduled runs."""
+
+    keep_latest: int | None = Field(default=None, ge=0)
+    older_than_hours: int | None = Field(default=None, ge=0)
+    automatic_cleanup: bool = True
+
+
+class WorkflowSchedule(BaseModel):
+    """Recurring workflow execution contract."""
+
+    schedule_id: str
+    workflow_id: str
+    cron_expression: str
+    request: WorkflowRequest
+    enabled: bool = True
+    idempotency_key_template: str = "{workflow_id}:{schedule_id}:{date}"
+    retention_policy: JobRetentionPolicy = Field(default_factory=JobRetentionPolicy)
+    created_at: str
+    updated_at: str
+    last_triggered_at: str | None = None
+
+
+class WorkflowScheduleCreateRequest(BaseModel):
+    """Create a recurring workflow execution schedule."""
+
+    workflow_id: str | None = None
+    cron_expression: str
+    request: WorkflowRequest
+    enabled: bool = True
+    idempotency_key_template: str = "{workflow_id}:{schedule_id}:{date}"
+    retention_policy: JobRetentionPolicy = Field(default_factory=JobRetentionPolicy)
+
+
+class WorkflowScheduleTriggerRequest(BaseModel):
+    """Trigger one schedule execution."""
+
+    execution_time: str | None = None
+
+
+class WorkflowScheduleTriggerResponse(BaseModel):
+    """Result of triggering a schedule execution."""
+
+    schedule_id: str
+    workflow_id: str
+    job_id: str
+    status: WorkflowJobStatus
+    idempotency_key: str
+    reused_existing_job: bool = False
 
 
 class WorkflowValidateResponse(BaseModel):

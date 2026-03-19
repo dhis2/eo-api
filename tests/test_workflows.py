@@ -122,6 +122,8 @@ def test_workflow_endpoint_exists_once() -> None:
         "/workflows/dhis2-datavalue-set",
         "/workflows/execute",
         "/workflows/jobs/cleanup",
+        "/workflows/schedules",
+        "/workflows/schedules/{schedule_id}/trigger",
         "/workflows/validate",
     }
 
@@ -630,7 +632,12 @@ def test_workflow_job_endpoints_return_persisted_result(
         "build_datavalueset",
     ]
     assert job_body["orchestration"]["steps"][0]["component"] == "feature_source"
+    assert job_body["orchestration"]["steps"][0]["id"] == "get_features"
     assert job_body["orchestration"]["steps"][0]["version"] == "v1"
+    assert job_body["orchestration"]["steps"][1]["inputs"]["bbox"] == {
+        "from_step": "get_features",
+        "output": "bbox",
+    }
     links = {item["rel"]: item["href"] for item in job_body["links"]}
     assert links["self"].endswith(f"/workflows/jobs/{run_id}")
     assert links["result"].endswith(f"/workflows/jobs/{run_id}/result")
@@ -1595,6 +1602,13 @@ def test_default_workflow_definition_has_expected_steps() -> None:
     workflow = load_workflow_definition()
     assert workflow.workflow_id == "dhis2_datavalue_set_v1"
     assert workflow.version == 1
+    assert [step.id for step in workflow.steps] == [
+        "get_features",
+        "download",
+        "temporal_agg",
+        "spatial_agg",
+        "build_dhis2_payload",
+    ]
     assert [step.component for step in workflow.steps] == [
         "feature_source",
         "download_dataset",
@@ -1628,10 +1642,25 @@ def test_engine_follows_declarative_workflow_order(monkeypatch: pytest.MonkeyPat
                 "workflow_id": workflow_id,
                 "version": 1,
                 "steps": [
-                    {"component": "feature_source"},
-                    {"component": "download_dataset"},
-                    {"component": "spatial_aggregation"},
-                    {"component": "build_datavalueset"},
+                    {"id": "features", "component": "feature_source"},
+                    {
+                        "id": "download",
+                        "component": "download_dataset",
+                        "inputs": {"bbox": {"from_step": "features", "output": "bbox"}},
+                    },
+                    {
+                        "id": "aggregate",
+                        "component": "spatial_aggregation",
+                        "inputs": {
+                            "bbox": {"from_step": "features", "output": "bbox"},
+                            "features": {"from_step": "features", "output": "features"},
+                        },
+                    },
+                    {
+                        "id": "build",
+                        "component": "build_datavalueset",
+                        "inputs": {"records": {"from_step": "aggregate", "output": "records"}},
+                    },
                 ],
             }
         ),
@@ -1672,6 +1701,56 @@ def test_engine_follows_declarative_workflow_order(monkeypatch: pytest.MonkeyPat
         "spatial_aggregation",
         "build_datavalueset",
     ]
+
+
+def test_validate_workflow_reports_explicit_input_wiring(client: TestClient) -> None:
+    response = client.post("/workflows/validate", json={"workflow_id": "dhis2_datavalue_set_v1"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is True
+    assert body["resolved_steps"][0]["id"] == "get_features"
+    assert body["resolved_steps"][1]["resolved_inputs"]["bbox"] == {
+        "from_step": "get_features",
+        "output": "bbox",
+    }
+    assert body["resolved_steps"][3]["resolved_inputs"]["temporal_dataset"] == {
+        "from_step": "temporal_agg",
+        "output": "temporal_dataset",
+    }
+
+
+def test_schedule_trigger_reuses_existing_job(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_successful_execution(monkeypatch)
+
+    create_response = client.post(
+        "/workflows/schedules",
+        json={
+            "cron_expression": "0 2 * * *",
+            "request": _valid_public_payload()["request"],
+        },
+    )
+    assert create_response.status_code == 200
+    schedule_id = create_response.json()["schedule_id"]
+
+    trigger_payload = {"execution_time": "2026-03-19T02:00:00Z"}
+    first_trigger = client.post(f"/workflows/schedules/{schedule_id}/trigger", json=trigger_payload)
+    assert first_trigger.status_code == 200
+    first_body = first_trigger.json()
+    assert first_body["reused_existing_job"] is False
+    assert first_body["status"] == "successful"
+
+    second_trigger = client.post(f"/workflows/schedules/{schedule_id}/trigger", json=trigger_payload)
+    assert second_trigger.status_code == 200
+    second_body = second_trigger.json()
+    assert second_body["reused_existing_job"] is True
+    assert second_body["job_id"] == first_body["job_id"]
+
+    job_response = client.get(f"/workflows/jobs/{first_body['job_id']}")
+    assert job_response.status_code == 200
+    job_body = job_response.json()
+    assert job_body["trigger_type"] == "scheduled"
+    assert job_body["schedule_id"] == schedule_id
+    assert job_body["idempotency_key"] == first_body["idempotency_key"]
 
 
 def test_engine_rejects_unknown_workflow_id(monkeypatch: pytest.MonkeyPatch) -> None:

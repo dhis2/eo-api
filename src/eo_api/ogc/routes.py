@@ -329,14 +329,35 @@ def _wants_html(request: Request, f: str | None) -> bool:
 
 
 def _render_ogc_root_html(body: dict[str, Any]) -> str:
-    # Map icon SVGs to navigation items by title
-    icons_map = {
-        "Browse Collections": '<svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="12" r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>',
-        "List Processes": '<svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle><path d="M12 2v20M2 12h20"></path></svg>',
-        "List Jobs": '<svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path><path d="M12 12v6M12 12h3M12 12H9"></path></svg>',
-        "Conformance": '<svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12l2 2 4-4"></path><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>',
+    # Map icon SVGs to navigation items by title  # noqa: E501
+    icons_map = {  # noqa: E501
+        "Browse Collections": (  # noqa: E501
+            '<svg class="card-icon" viewBox="0 0 24 24" fill="none" '
+            'stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="12" '
+            'r="8"></circle><path d="M21 21l-4.35-4.35"></path></svg>'
+        ),
+        "List Processes": (  # noqa: E501
+            '<svg class="card-icon" viewBox="0 0 24 24" fill="none" '
+            'stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" '
+            'r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle '
+            'cx="5" cy="12" r="1"></circle><path d="M12 2v20M2 12h20">'
+            "</path></svg>"
+        ),
+        "List Jobs": (  # noqa: E501
+            '<svg class="card-icon" viewBox="0 0 24 24" fill="none" '
+            'stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 '
+            "00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 "
+            '2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>'
+            '<path d="M12 12v6M12 12h3M12 12H9"></path></svg>'
+        ),
+        "Conformance": (  # noqa: E501
+            '<svg class="card-icon" viewBox="0 0 24 24" fill="none" '
+            'stroke="currentColor" stroke-width="1.5"><path d="M9 12l2 2 '
+            '4-4"></path><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 '
+            '0z"></path></svg>'
+        ),
     }
-    
+
     nav_cards = "".join(
         (
             '<a class="nav-card" href="{href}">'
@@ -349,7 +370,15 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
             href=escape(item["href"]),
             title=escape(item["title"]),
             description=escape(item["description"]),
-            icon=icons_map.get(item["title"], '<svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>'),
+            icon=icons_map.get(
+                item["title"],
+                (  # noqa: E501
+                    '<svg class="card-icon" viewBox="0 0 24 24" '
+                    'fill="none" stroke="currentColor" stroke-width="1.5">'
+                    '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12">'
+                    "</polyline></svg>"
+                ),
+            ),
         )
         for item in body.get("navigation", [])
     )
@@ -377,26 +406,28 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
         --shadow-md: 0 10px 15px rgba(0, 0, 0, 0.1);
         --shadow-lg: 0 20px 25px rgba(0, 0, 0, 0.1);
       }}
-      
+
       * {{ box-sizing: border-box; }}
-      
+
       body {{
         margin: 0;
         padding: 0;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
+          "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans",
+          "Helvetica Neue", sans-serif;
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
         color: var(--text);
         background: linear-gradient(135deg, var(--bg-light) 0%, var(--bg) 100%);
         min-height: 100vh;
       }}
-      
+
       main {{
         max-width: 1200px;
         margin: 0 auto;
         padding: 60px 24px;
       }}
-      
+
       .eyebrow {{
         display: inline-block;
         padding: 8px 14px;
@@ -409,7 +440,7 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
         text-transform: uppercase;
         margin-bottom: 16px;
       }}
-      
+
       h1 {{
         margin: 0 0 12px;
         font-size: clamp(2.4rem, 6vw, 3.6rem);
@@ -421,7 +452,7 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
         -webkit-text-fill-color: transparent;
         background-clip: text;
       }}
-      
+
       .subtitle {{
         max-width: 720px;
         margin: 0 0 48px;
@@ -430,7 +461,7 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
         line-height: 1.6;
         font-weight: 400;
       }}
-      
+
       /* Navigation Grid */
       .nav-grid {{
         display: grid;
@@ -438,7 +469,7 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
         gap: 20px;
         margin-bottom: 56px;
       }}
-      
+
       .nav-card {{
         position: relative;
         display: flex;
@@ -453,7 +484,7 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
         color: inherit;
         overflow: hidden;
       }}
-      
+
       .nav-card::before {{
         content: '';
         position: absolute;
@@ -466,26 +497,26 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
         transform-origin: left;
         transition: transform 280ms ease;
       }}
-      
+
       .nav-card:hover {{
         border-color: var(--primary);
         box-shadow: var(--shadow-md);
         transform: translateY(-6px);
       }}
-      
+
       .nav-card:hover::before {{
         transform: scaleX(1);
       }}
-      
+
       .nav-card:hover .card-icon {{
         color: var(--primary);
         transform: scale(1.1) rotate(5deg);
       }}
-      
+
       .nav-card:hover .card-arrow {{
         transform: translateX(4px);
       }}
-      
+
       .card-icon-wrapper {{
         margin-bottom: 16px;
         display: flex;
@@ -496,7 +527,7 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
         border-radius: 12px;
         background: linear-gradient(135deg, rgba(25, 118, 210, 0.1) 0%, rgba(79, 195, 247, 0.05) 100%);
       }}
-      
+
       .card-icon {{
         width: 28px;
         height: 28px;
@@ -504,14 +535,14 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
         flex-shrink: 0;
         transition: all 280ms ease;
       }}
-      
+
       .card-title {{
         margin: 0 0 8px;
         font-size: 1.125rem;
         font-weight: 700;
         line-height: 1.3;
       }}
-      
+
       .card-desc {{
         flex-grow: 1;
         margin: 0 0 16px;
@@ -519,7 +550,7 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
         font-size: 0.875rem;
         line-height: 1.5;
       }}
-      
+
       .card-arrow {{
         color: var(--primary);
         font-weight: 700;
@@ -527,28 +558,28 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
         transition: transform 280ms ease;
         margin-top: auto;
       }}
-      
+
       /* Responsive */
       @media (max-width: 768px) {{
         main {{
           padding: 40px 16px;
         }}
-        
+
         h1 {{
           font-size: clamp(2rem, 5vw, 2.8rem);
         }}
-        
+
         .nav-grid {{
           grid-template-columns: 1fr;
         }}
       }}
-      
+
       /* Print styles */
       @media print {{
         body {{
           background: white;
         }}
-        
+
         .nav-card, .link-row {{
           box-shadow: none;
         }}
@@ -560,11 +591,11 @@ def _render_ogc_root_html(body: dict[str, Any]) -> str:
       <div class="eyebrow">OGC API</div>
       <h1>{escape(body["title"])}</h1>
       <p class="subtitle">{escape(body["description"])}</p>
-      
+
       <section class="nav-grid">
         {nav_cards}
       </section>
-      
+
       <footer>
         <p>🌍 DHIS2 Earth Observation API • <a href="https://github.com/dhis2/eo-api">GitHub</a></p>
       </footer>

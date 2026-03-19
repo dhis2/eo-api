@@ -6,13 +6,40 @@ publication:
   intent: feature_collection
   exposure: ogc
 steps:
-  - component: feature_source
+  - id: get_features
+    component: feature_source
     version: v1
-  - component: download_dataset
+  - id: download
+    component: download_dataset
     version: v1
-  - component: temporal_aggregation
+    inputs:
+      bbox:
+        from_step: get_features
+        output: bbox
+  - id: temporal_agg
+    component: temporal_aggregation
     version: v1
-  - component: spatial_aggregation
+    inputs:
+      bbox:
+        from_step: get_features
+        output: bbox
+  - id: spatial_agg
+    component: spatial_aggregation
     version: v1
-  - component: build_datavalueset
+    inputs:
+      bbox:
+        from_step: get_features
+        output: bbox
+      features:
+        from_step: get_features
+        output: features
+      temporal_dataset:
+        from_step: temporal_agg
+        output: temporal_dataset
+  - id: build_dhis2_payload
+    component: build_datavalueset
     version: v1
+    inputs:
+      records:
+        from_step: spatial_agg
+        output: records

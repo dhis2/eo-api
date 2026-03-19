@@ -104,7 +104,7 @@ _COMPONENT_REGISTRY: Final[dict[str, ComponentDefinition]] = {
         version="v1",
         description="Aggregate dataset over time dimension.",
         inputs=["dataset_id", "start", "end", "target_period_type", "method", "bbox"],
-        outputs=["dataset"],
+        outputs=["temporal_dataset"],
         input_schema={
             "type": "object",
             "properties": {
@@ -128,7 +128,7 @@ _COMPONENT_REGISTRY: Final[dict[str, ComponentDefinition]] = {
             },
             "additionalProperties": False,
         },
-        output_schema={"type": "object", "properties": {"dataset": {"type": "object"}}},
+        output_schema={"type": "object", "properties": {"temporal_dataset": {"type": "object"}}},
         error_codes=_ERROR_CODES_V1,
         endpoint=ComponentEndpoint(path="/components/temporal-aggregation", method="POST"),
     ),
