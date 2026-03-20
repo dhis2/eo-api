@@ -38,8 +38,8 @@ def get_ogc_root(request: Request, f: str | None = None) -> dict[str, Any] | HTM
             {"rel": "self", "type": "application/json", "href": _request_href(request, f="json")},
             {"rel": "alternate", "type": "text/html", "href": _request_href(request, f="html")},
             {"rel": "service-desc", "type": "application/vnd.oai.openapi+json;version=3.0", "href": "/ogcapi/openapi"},
-            {"rel": "conformance", "type": "application/json", "href": f"{base_url}/ogcapi/conformance"},
-            {"rel": "data", "type": "application/json", "href": f"{base_url}/ogcapi/collections"},
+            {"rel": "conformance", "type": "application/json", "href": f"{base_url}/pygeoapi/conformance"},
+            {"rel": "data", "type": "application/json", "href": f"{base_url}/pygeoapi/collections"},
             {"rel": "processes", "type": "application/json", "href": f"{base_url}/ogcapi/processes"},
             {"rel": "jobs", "type": "application/json", "href": f"{base_url}/ogcapi/jobs"},
         ],
@@ -47,7 +47,7 @@ def get_ogc_root(request: Request, f: str | None = None) -> dict[str, Any] | HTM
             {
                 "title": "Browse Collections",
                 "description": "Open the OGC publication surface for collections and items.",
-                "href": f"{base_url}/ogcapi/collections?f=html",
+                "href": f"{base_url}/pygeoapi/collections?f=html",
             },
             {
                 "title": "List Processes",
@@ -306,7 +306,7 @@ def _run_async_workflow_job(
 
 
 def _collection_href(request: Request, collection_id: str) -> str:
-    return str(request.base_url).rstrip("/") + f"/ogcapi/collections/{collection_id}"
+    return str(request.base_url).rstrip("/") + f"/pygeoapi/collections/{collection_id}"
 
 
 def _request_href(request: Request, **updates: Any) -> str:

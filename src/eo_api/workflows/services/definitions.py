@@ -3,58 +3,22 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Final, Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
+from ...publications.capabilities import evaluate_publication_serving
 from ...publications.schemas import PublishedResourceExposure, PublishedResourceKind
-
-ComponentName = Literal[
-    "feature_source",
-    "download_dataset",
-    "temporal_aggregation",
-    "spatial_aggregation",
-    "build_datavalueset",
-]
-
-SUPPORTED_COMPONENTS: Final[set[str]] = set(ComponentName.__args__)  # type: ignore[attr-defined]
-SUPPORTED_COMPONENT_VERSIONS: Final[dict[str, set[str]]] = {component: {"v1"} for component in SUPPORTED_COMPONENTS}
-
-COMPONENT_INPUTS: Final[dict[str, set[str]]] = {
-    "feature_source": set(),
-    "download_dataset": {"bbox"},
-    "temporal_aggregation": {"bbox"},
-    "spatial_aggregation": {"bbox", "features"},
-    "build_datavalueset": {"records"},
-}
-
-COMPONENT_OPTIONAL_INPUTS: Final[dict[str, set[str]]] = {
-    "feature_source": set(),
-    "download_dataset": set(),
-    "temporal_aggregation": set(),
-    "spatial_aggregation": {"temporal_dataset"},
-    "build_datavalueset": set(),
-}
-
-COMPONENT_OUTPUTS: Final[dict[str, set[str]]] = {
-    "feature_source": {"features", "bbox"},
-    "download_dataset": {"status"},
-    "temporal_aggregation": {"temporal_dataset"},
-    "spatial_aggregation": {"records"},
-    "build_datavalueset": {"data_value_set", "output_file"},
-}
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 WORKFLOWS_DIR = SCRIPT_DIR.parent.parent.parent.parent / "data" / "workflows"
 DEFAULT_WORKFLOW_ID = "dhis2_datavalue_set_v1"
-
-
 class WorkflowStep(BaseModel):
     """One component step in a declarative workflow definition."""
 
     id: str | None = None
-    component: ComponentName
+    component: str
     version: str = "v1"
     config: dict[str, Any] = Field(default_factory=dict)
     inputs: dict[str, "WorkflowStepInput"] = Field(default_factory=dict)
@@ -62,7 +26,7 @@ class WorkflowStep(BaseModel):
     @model_validator(mode="after")
     def validate_component_version(self) -> "WorkflowStep":
         """Ensure component@version exists in the registered component catalog."""
-        supported_versions = SUPPORTED_COMPONENT_VERSIONS.get(self.component, set())
+        supported_versions = _supported_component_versions(self.component)
         if self.version not in supported_versions:
             known = ", ".join(sorted(supported_versions)) or "<none>"
             raise ValueError(
@@ -76,6 +40,14 @@ class WorkflowStepInput(BaseModel):
 
     from_step: str
     output: str = Field(validation_alias=AliasChoices("output", "output_key"))
+
+
+class WorkflowOutputBinding(BaseModel):
+    """Expose one named workflow output from a step output."""
+
+    from_step: str
+    output: str = Field(validation_alias=AliasChoices("output", "output_key"))
+    include_in_response: bool = True
 
 
 class WorkflowPublicationPolicy(BaseModel):
@@ -92,16 +64,19 @@ class WorkflowPublicationPolicy(BaseModel):
     )
     exposure: PublishedResourceExposure = PublishedResourceExposure.REGISTRY_ONLY
     required_output_file_suffixes: list[str] = Field(default_factory=list)
+    asset: WorkflowStepInput | None = None
+    asset_format: str | None = None
+    inputs: dict[str, WorkflowStepInput] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_publication_policy(self) -> "WorkflowPublicationPolicy":
-        """Restrict workflow-driven publication to currently supported resource types."""
-        if self.publishable and self.intent != PublishedResourceKind.FEATURE_COLLECTION:
-            raise ValueError("Workflow publication currently supports only intent='feature_collection'")
+        """Normalize workflow publication policy."""
         normalized_suffixes = []
         for suffix in self.required_output_file_suffixes:
             normalized_suffixes.append(suffix if suffix.startswith(".") else f".{suffix}")
         self.required_output_file_suffixes = normalized_suffixes
+        if self.asset_format is not None:
+            self.asset_format = self.asset_format.strip().lower() or None
         return self
 
 
@@ -112,15 +87,14 @@ class WorkflowDefinition(BaseModel):
     version: int = 1
     publication: WorkflowPublicationPolicy = Field(default_factory=WorkflowPublicationPolicy)
     steps: list[WorkflowStep]
+    outputs: dict[str, WorkflowOutputBinding] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_steps(self) -> "WorkflowDefinition":
-        """Require terminal DataValueSet step and validate component compatibility."""
+        """Validate component compatibility and exported workflow outputs."""
         if not self.steps:
             raise ValueError("Workflow steps cannot be empty")
         _assign_step_ids(self.steps)
-        if self.steps[-1].component != "build_datavalueset":
-            raise ValueError("The last workflow step must be 'build_datavalueset'")
         available_outputs: dict[str, set[str]] = {}
         latest_producer_for_output: dict[str, str] = {}
         for step in self.steps:
@@ -134,10 +108,37 @@ class WorkflowDefinition(BaseModel):
             )
             step.inputs = resolved_inputs
 
-            outputs = COMPONENT_OUTPUTS[step.component]
+            outputs = _component_outputs(step.component, step.version)
             available_outputs[step.id] = outputs
             for output_name in outputs:
                 latest_producer_for_output[output_name] = step.id
+
+        if not self.outputs:
+            raise ValueError("Workflow must declare at least one exported output")
+
+        _validate_workflow_outputs(bindings=self.outputs, available_outputs=available_outputs, owner="Workflow outputs")
+        if self.publication.publishable:
+            if self.publication.asset is None and not self.publication.inputs:
+                raise ValueError("Publishable workflows must declare a publication asset or publication inputs")
+            if self.publication.asset is not None:
+                _validate_workflow_outputs(
+                    bindings={"asset": self.publication.asset},
+                    available_outputs=available_outputs,
+                    owner="Workflow publication asset",
+                )
+            if self.publication.inputs:
+                _validate_workflow_outputs(
+                    bindings=self.publication.inputs,
+                    available_outputs=available_outputs,
+                    owner="Workflow publication",
+                )
+            capability = evaluate_publication_serving(
+                kind=self.publication.intent,
+                exposure=self.publication.exposure,
+                asset_format=self.publication.asset_format,
+            )
+            if not capability.supported:
+                raise ValueError(capability.error or "Unsupported publication serving contract")
         return self
 
 
@@ -223,8 +224,8 @@ def _normalize_step_inputs(
     latest_producer_for_output: dict[str, str],
 ) -> dict[str, WorkflowStepInput]:
     declared_inputs = dict(step.inputs)
-    required_inputs = COMPONENT_INPUTS[step.component]
-    optional_inputs = COMPONENT_OPTIONAL_INPUTS.get(step.component, set())
+    required_inputs = _component_required_inputs(step.component, step.version)
+    optional_inputs = _component_optional_inputs(step.component, step.version)
 
     if not declared_inputs:
         for input_name in sorted(required_inputs | optional_inputs):
@@ -258,3 +259,61 @@ def _normalize_step_inputs(
             )
 
     return declared_inputs
+
+
+def _validate_workflow_outputs(
+    *,
+    bindings: dict[str, WorkflowStepInput | WorkflowOutputBinding],
+    available_outputs: dict[str, set[str]],
+    owner: str,
+) -> None:
+    if not bindings:
+        raise ValueError(f"{owner} cannot be empty")
+    for output_name, ref in bindings.items():
+        available_for_step = available_outputs.get(ref.from_step)
+        if available_for_step is None:
+            raise ValueError(f"{owner} reference '{output_name}' points to unknown step '{ref.from_step}'")
+        if ref.output not in available_for_step:
+            raise ValueError(
+                f"{owner} reference '{output_name}' points to missing output "
+                f"'{ref.output}' from step '{ref.from_step}'"
+            )
+
+
+def _component_definition(component: str, version: str) -> tuple[set[str], set[str], set[str]]:
+    from ...components import services as component_services
+
+    definition = component_services.component_registry().get(f"{component}@{version}")
+    if definition is None:
+        raise ValueError(f"Unsupported component version '{component}@{version}'. Supported versions: <none>")
+    return (
+        set(definition.workflow_inputs_required),
+        set(definition.workflow_inputs_optional),
+        set(definition.outputs),
+    )
+
+
+def _supported_component_versions(component: str) -> set[str]:
+    from ...components import services as component_services
+
+    versions: set[str] = set()
+    for key in component_services.component_registry():
+        name, _, version = key.partition("@")
+        if name == component and version:
+            versions.add(version)
+    return versions
+
+
+def _component_required_inputs(component: str, version: str) -> set[str]:
+    required, _, _ = _component_definition(component, version)
+    return required
+
+
+def _component_optional_inputs(component: str, version: str) -> set[str]:
+    _, optional, _ = _component_definition(component, version)
+    return optional
+
+
+def _component_outputs(component: str, version: str) -> set[str]:
+    _, _, outputs = _component_definition(component, version)
+    return outputs

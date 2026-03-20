@@ -19,6 +19,7 @@ dependencies = [
     "earthkit-transforms==0.5.*",
     "metpy>=1.7,<2",
     "zarr==3.1.5",
+    "titiler-xarray>=1.2.0",
 ]
 
 [tool.ruff]

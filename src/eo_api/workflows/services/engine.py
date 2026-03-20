@@ -3,24 +3,26 @@
 from __future__ import annotations
 
 import os
-import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-import httpx
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ...components import services as component_services
 from ...data_registry.services.datasets import get_dataset
 from ...publications.services import register_workflow_output_publication
 from ...shared.api_errors import api_error
 from ..schemas import WorkflowExecuteRequest, WorkflowExecuteResponse, WorkflowJobStatus
-from .definitions import WorkflowDefinition, WorkflowPublicationPolicy, WorkflowStep, load_workflow_definition
+from .definitions import (
+    WorkflowDefinition,
+    WorkflowOutputBinding,
+    WorkflowPublicationPolicy,
+    WorkflowStep,
+    load_workflow_definition,
+)
 from .job_store import initialize_job, mark_job_failed, mark_job_running, mark_job_success
-from .publication_assets import build_feature_collection_asset
+from .publication_assets import build_feature_collection_asset, write_feature_collection_asset, write_json_asset
 from .run_logs import persist_run_log
 from .runtime import WorkflowRuntime
 
@@ -65,6 +67,7 @@ class WorkflowExecutionContext:
         if output_name not in self.latest_outputs:
             raise RuntimeError(f"Workflow definition missing prerequisite for '{output_name}'")
         return self.latest_outputs[output_name]
+
 
 
 def execute_workflow(
@@ -136,16 +139,14 @@ def execute_workflow(
             dataset=dataset,
             context=context,
         )
-        features = context.require_output("features")
-        bbox = context.require_output("bbox")
-        data_value_set = context.require_output("data_value_set")
-        output_file = context.require_output("output_file")
+        exported_outputs = _resolve_workflow_outputs(workflow.outputs, context)
+        output_summary = _summarize_workflow_outputs(exported_outputs)
         run_log_file = persist_run_log(
             run_id=runtime.run_id,
             request=request,
             component_runs=runtime.component_runs,
             status="completed",
-            output_file=output_file,
+            output_file=output_summary["output_file"],
         )
 
         response = WorkflowExecuteResponse(
@@ -154,12 +155,14 @@ def execute_workflow(
             workflow_id=workflow.workflow_id,
             workflow_version=workflow.version,
             dataset_id=request.dataset_id,
-            bbox=bbox,
-            feature_count=len(features["features"]),
-            value_count=len(data_value_set["dataValues"]),
-            output_file=output_file,
+            outputs=exported_outputs,
+            primary_output_name=next(iter(workflow.outputs), None),
+            bbox=output_summary["bbox"],
+            feature_count=output_summary["feature_count"],
+            value_count=output_summary["value_count"],
+            output_file=output_summary["output_file"],
             run_log_file=run_log_file,
-            data_value_set=data_value_set,
+            data_value_set=output_summary["data_value_set"],
             component_runs=runtime.component_runs if include_component_run_details else [],
             component_run_details_included=include_component_run_details,
             component_run_details_available=True,
@@ -175,9 +178,11 @@ def execute_workflow(
                 request=request,
                 publication=workflow.publication,
                 context=context,
+                exported_outputs=exported_outputs,
             )
             register_workflow_output_publication(
                 response=response,
+                kind=workflow.publication.intent,
                 exposure=workflow.publication.exposure,
                 published_path=publication_path,
                 asset_format=publication_asset_format,
@@ -288,11 +293,27 @@ def _build_publication_artifact(
     request: WorkflowExecuteRequest,
     publication: WorkflowPublicationPolicy,
     context: WorkflowExecutionContext,
+    exported_outputs: dict[str, Any],
 ) -> tuple[str, str]:
     """Build the publication-facing artifact for a publishable workflow output."""
+    if publication.asset is not None:
+        asset_value = context.get_step_output(
+            step_id=publication.asset.from_step,
+            output_name=publication.asset.output,
+        )
+        return _materialize_publication_asset(
+            asset_value=asset_value,
+            dataset_id=response.dataset_id,
+            publication=publication,
+        )
+
     if publication.intent.value == "feature_collection":
-        features = context.require_output("features")
-        records = context.require_output("records")
+        features_ref = publication.inputs.get("features")
+        records_ref = publication.inputs.get("records")
+        if features_ref is None or records_ref is None:
+            raise ValueError("Feature collection publication requires declared publication inputs: features, records")
+        features = context.get_step_output(step_id=features_ref.from_step, output_name=features_ref.output)
+        records = context.get_step_output(step_id=records_ref.from_step, output_name=records_ref.output)
         path = build_feature_collection_asset(
             dataset_id=response.dataset_id,
             features=features,
@@ -301,7 +322,94 @@ def _build_publication_artifact(
             feature_id_property=request.feature_source.feature_id_property,
         )
         return path, "geojson"
-    return response.output_file, "datavalueset-json"
+    output_file_ref = publication.inputs.get("output_file")
+    if output_file_ref is not None:
+        path_value = context.get_step_output(step_id=output_file_ref.from_step, output_name=output_file_ref.output)
+        if not isinstance(path_value, str):
+            raise ValueError("Publication input 'output_file' must resolve to a filesystem path string")
+        return path_value, Path(path_value).suffix.lstrip(".") or "file"
+    if response.output_file is not None:
+        return response.output_file, _asset_format_for_path(response.output_file)
+    primary_output_name = response.primary_output_name
+    if primary_output_name is not None:
+        primary_output = exported_outputs.get(primary_output_name)
+        if isinstance(primary_output, str):
+            return primary_output, _asset_format_for_path(primary_output)
+    raise ValueError("Workflow publication could not resolve a publication artifact")
+
+
+def _materialize_publication_asset(
+    *,
+    asset_value: Any,
+    dataset_id: str,
+    publication: WorkflowPublicationPolicy,
+) -> tuple[str, str]:
+    """Resolve a declared publication asset to a persisted asset path and format."""
+    if isinstance(asset_value, str):
+        return asset_value, publication.asset_format or _asset_format_for_path(asset_value)
+    if publication.intent.value == "feature_collection" and isinstance(asset_value, dict):
+        if asset_value.get("type") == "FeatureCollection":
+            return write_feature_collection_asset(collection=asset_value, dataset_id=dataset_id), "geojson"
+    if isinstance(asset_value, (dict, list)):
+        asset_format = publication.asset_format or "json"
+        return write_json_asset(payload=asset_value, dataset_id=dataset_id, suffix=asset_format), asset_format
+    raise ValueError("Declared publication asset must resolve to a file path or JSON-serializable value")
+
+
+def _resolve_workflow_outputs(
+    bindings: dict[str, WorkflowOutputBinding],
+    context: WorkflowExecutionContext,
+) -> dict[str, Any]:
+    """Resolve exported workflow outputs from step-scoped execution context."""
+    resolved: dict[str, Any] = {}
+    for name, binding in bindings.items():
+        if not binding.include_in_response:
+            continue
+        resolved[name] = context.get_step_output(step_id=binding.from_step, output_name=binding.output)
+    return resolved
+
+
+def _summarize_workflow_outputs(outputs: dict[str, Any]) -> dict[str, Any]:
+    """Derive compatibility summary fields from declared workflow outputs."""
+    features = outputs.get("features")
+    bbox = outputs.get("bbox")
+    records = outputs.get("records")
+    data_value_set = outputs.get("data_value_set")
+    output_file = outputs.get("output_file")
+
+    if not isinstance(bbox, list):
+        bbox = None
+    if not isinstance(output_file, str):
+        output_file = None
+
+    feature_count: int | None = None
+    if isinstance(features, dict):
+        feature_items = features.get("features")
+        if isinstance(feature_items, list):
+            feature_count = len(feature_items)
+
+    value_count: int | None = None
+    if isinstance(data_value_set, dict):
+        data_values = data_value_set.get("dataValues")
+        if isinstance(data_values, list):
+            value_count = len(data_values)
+    elif isinstance(records, list):
+        value_count = len(records)
+
+    return {
+        "bbox": bbox,
+        "feature_count": feature_count,
+        "value_count": value_count,
+        "output_file": output_file,
+        "data_value_set": data_value_set if isinstance(data_value_set, dict) else None,
+    }
+
+
+def _asset_format_for_path(path_value: str) -> str:
+    suffix = Path(path_value).suffix.lower()
+    if suffix.startswith("."):
+        suffix = suffix[1:]
+    return suffix or "file"
 
 
 def _is_upstream_connectivity_error(exc: Exception) -> bool:
@@ -328,14 +436,6 @@ def _execute_workflow_steps(
     context: WorkflowExecutionContext,
 ) -> None:
     """Execute workflow components using declarative YAML step order."""
-    executors: dict[str, StepExecutor] = {
-        "feature_source": _run_feature_source,
-        "download_dataset": _run_download_dataset,
-        "temporal_aggregation": _run_temporal_aggregation,
-        "spatial_aggregation": _run_spatial_aggregation,
-        "build_datavalueset": _run_build_datavalueset,
-    }
-
     for step in workflow.steps:
         if step.id is None:
             raise WorkflowComponentError(
@@ -345,18 +445,18 @@ def _execute_workflow_steps(
                 component_version=step.version,
                 status_code=422,
             )
-        executor = executors.get(step.component)
-        if executor is None:
+        runtime_definition = component_services.workflow_runtime_registry().get(f"{step.component}@{step.version}")
+        if runtime_definition is None:
             raise WorkflowComponentError(
                 error_code="INPUT_VALIDATION_FAILED",
-                message=f"Unsupported workflow component '{step.component}'",
+                message=f"Unsupported workflow component '{step.component}@{step.version}'",
                 component=step.component,
                 component_version=step.version,
                 status_code=422,
             )
         try:
             step_config = _resolve_step_config(step.config, request_params or {})
-            _validate_step_config(step.component, step.version, step_config)
+            component_services.validate_component_runtime_config(step.component, step.version, step_config)
         except ValueError as exc:
             raise WorkflowComponentError(
                 error_code="CONFIG_VALIDATION_FAILED",
@@ -368,7 +468,7 @@ def _execute_workflow_steps(
 
         try:
             resolved_inputs = _resolve_step_inputs(step=step, context=context)
-            updates = executor(
+            updates = runtime_definition.executor(
                 step=step,
                 runtime=runtime,
                 request=request,
@@ -408,7 +508,7 @@ def validate_workflow_steps(
     for index, step in enumerate(workflow.steps):
         try:
             resolved_config = _resolve_step_config(step.config, params)
-            _validate_step_config(step.component, step.version, resolved_config)
+            component_services.validate_component_runtime_config(step.component, step.version, resolved_config)
         except ValueError as exc:
             raise ValueError(f"Step {index + 1} ({step.component}@{step.version}) validation failed: {exc}") from exc
         resolved_steps.append(
@@ -425,220 +525,6 @@ def validate_workflow_steps(
             }
         )
     return resolved_steps
-
-
-type StepExecutor = Callable[..., dict[str, Any]]
-
-
-def _run_feature_source(
-    *,
-    step: WorkflowStep,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    resolved_inputs: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    del dataset, resolved_inputs, step
-    execution_mode = str(step_config.get("execution_mode", "local")).lower()
-    if execution_mode == "remote":
-        features, bbox = runtime.run(
-            "feature_source",
-            _invoke_remote_feature_source_component,
-            remote_url=str(step_config["remote_url"]),
-            feature_source=request.feature_source.model_dump(mode="json"),
-            timeout_sec=float(step_config.get("remote_timeout_sec", 30.0)),
-            retries=int(step_config.get("remote_retries", 1)),
-            retry_delay_sec=float(step_config.get("remote_retry_delay_sec", 1.0)),
-        )
-    else:
-        features, bbox = runtime.run(
-            "feature_source",
-            component_services.feature_source_component,
-            config=request.feature_source,
-        )
-    return {"features": features, "bbox": bbox}
-
-
-def _run_download_dataset(
-    *,
-    step: WorkflowStep,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    resolved_inputs: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    execution_mode = str(step_config.get("execution_mode", "local")).lower()
-    if execution_mode not in {"local", "remote"}:
-        raise ValueError("download_dataset.execution_mode must be 'local' or 'remote'")
-
-    overwrite = request.overwrite
-    country_code = request.country_code
-    bbox = resolved_inputs["bbox"]
-    if execution_mode == "remote":
-        remote_url = step_config.get("remote_url")
-        if not isinstance(remote_url, str) or not remote_url:
-            raise ValueError("download_dataset remote mode requires non-empty 'remote_url'")
-        remote_timeout = float(step_config.get("remote_timeout_sec", 30.0))
-        remote_retries = int(step_config.get("remote_retries", 1))
-        remote_retry_delay_sec = float(step_config.get("remote_retry_delay_sec", 1.0))
-        runtime.run(
-            "download_dataset",
-            _invoke_remote_download_component,
-            remote_url=remote_url,
-            dataset_id=request.dataset_id,
-            start=request.start,
-            end=request.end,
-            overwrite=overwrite,
-            country_code=country_code,
-            bbox=bbox,
-            timeout_sec=remote_timeout,
-            retries=remote_retries,
-            retry_delay_sec=remote_retry_delay_sec,
-        )
-    else:
-        runtime.run(
-            "download_dataset",
-            component_services.download_dataset_component,
-            dataset=dataset,
-            start=request.start,
-            end=request.end,
-            overwrite=overwrite,
-            country_code=country_code,
-            bbox=bbox,
-        )
-    return {"status": "downloaded"}
-
-
-def _run_temporal_aggregation(
-    *,
-    step: WorkflowStep,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    resolved_inputs: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    del step
-    target_period_type = request.temporal_aggregation.target_period_type
-    method = request.temporal_aggregation.method
-    execution_mode = str(step_config.get("execution_mode", "local")).lower()
-    if execution_mode == "remote":
-        temporal_ds = runtime.run(
-            "temporal_aggregation",
-            _invoke_remote_temporal_aggregation_component,
-            remote_url=str(step_config["remote_url"]),
-            dataset_id=request.dataset_id,
-            start=request.start,
-            end=request.end,
-            bbox=resolved_inputs["bbox"],
-            target_period_type=target_period_type.value,
-            method=method.value,
-            timeout_sec=float(step_config.get("remote_timeout_sec", 30.0)),
-            retries=int(step_config.get("remote_retries", 1)),
-            retry_delay_sec=float(step_config.get("remote_retry_delay_sec", 1.0)),
-        )
-    else:
-        temporal_ds = runtime.run(
-            "temporal_aggregation",
-            component_services.temporal_aggregation_component,
-            dataset=dataset,
-            start=request.start,
-            end=request.end,
-            bbox=resolved_inputs["bbox"],
-            target_period_type=target_period_type,
-            method=method,
-        )
-    return {"temporal_dataset": temporal_ds}
-
-
-def _run_spatial_aggregation(
-    *,
-    step: WorkflowStep,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    resolved_inputs: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    del step
-    method = request.spatial_aggregation.method
-    feature_id_property = request.dhis2.org_unit_property
-    execution_mode = str(step_config.get("execution_mode", "local")).lower()
-    temporal_dataset = resolved_inputs.get("temporal_dataset")
-    if execution_mode == "remote":
-        if temporal_dataset is not None:
-            raise ValueError(
-                "remote spatial_aggregation does not yet support workflow temporal_aggregation output; "
-                "use local spatial_aggregation for temporally aggregated workflows"
-            )
-        records = runtime.run(
-            "spatial_aggregation",
-            _invoke_remote_spatial_aggregation_component,
-            remote_url=str(step_config["remote_url"]),
-            dataset_id=request.dataset_id,
-            start=request.start,
-            end=request.end,
-            bbox=resolved_inputs["bbox"],
-            feature_source=request.feature_source.model_dump(mode="json"),
-            method=method.value,
-            feature_id_property=feature_id_property,
-            timeout_sec=float(step_config.get("remote_timeout_sec", 30.0)),
-            retries=int(step_config.get("remote_retries", 1)),
-            retry_delay_sec=float(step_config.get("remote_retry_delay_sec", 1.0)),
-        )
-    else:
-        records = runtime.run(
-            "spatial_aggregation",
-            component_services.spatial_aggregation_component,
-            dataset=dataset,
-            start=request.start,
-            end=request.end,
-            bbox=resolved_inputs["bbox"],
-            features=resolved_inputs["features"],
-            method=method,
-            feature_id_property=feature_id_property,
-            aggregated_dataset=temporal_dataset,
-        )
-    return {"records": records}
-
-
-def _run_build_datavalueset(
-    *,
-    step: WorkflowStep,
-    runtime: WorkflowRuntime,
-    request: WorkflowExecuteRequest,
-    dataset: dict[str, Any],
-    resolved_inputs: dict[str, Any],
-    step_config: dict[str, Any],
-) -> dict[str, Any]:
-    del dataset, step
-    period_type = request.temporal_aggregation.target_period_type
-    execution_mode = str(step_config.get("execution_mode", "local")).lower()
-    if execution_mode == "remote":
-        data_value_set, output_file = runtime.run(
-            "build_datavalueset",
-            _invoke_remote_build_datavalueset_component,
-            remote_url=str(step_config["remote_url"]),
-            dataset_id=request.dataset_id,
-            period_type=period_type.value,
-            records=resolved_inputs["records"],
-            dhis2=request.dhis2.model_dump(mode="json"),
-            timeout_sec=float(step_config.get("remote_timeout_sec", 30.0)),
-            retries=int(step_config.get("remote_retries", 1)),
-            retry_delay_sec=float(step_config.get("remote_retry_delay_sec", 1.0)),
-        )
-    else:
-        data_value_set, output_file = runtime.run(
-            "build_datavalueset",
-            component_services.build_datavalueset_component,
-            records=resolved_inputs["records"],
-            dataset_id=request.dataset_id,
-            period_type=period_type,
-            dhis2=request.dhis2,
-        )
-    return {"data_value_set": data_value_set, "output_file": output_file}
 
 
 def _resolve_step_inputs(step: WorkflowStep, context: WorkflowExecutionContext) -> dict[str, Any]:
@@ -683,298 +569,3 @@ def _resolve_value(value: Any, request_params: dict[str, Any]) -> Any:
     if isinstance(value, list):
         return [_resolve_value(v, request_params) for v in value]
     return value
-
-
-class _FeatureSourceStepConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    execution_mode: str = "local"
-    remote_url: str | None = None
-    remote_timeout_sec: float = 30.0
-    remote_retries: int = 1
-    remote_retry_delay_sec: float = 1.0
-
-
-class _DownloadDatasetStepConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    execution_mode: str = "local"
-    remote_url: str | None = None
-    remote_timeout_sec: float = 30.0
-    remote_retries: int = 1
-    remote_retry_delay_sec: float = 1.0
-
-
-class _TemporalAggregationStepConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    execution_mode: str = "local"
-    remote_url: str | None = None
-    remote_timeout_sec: float = 30.0
-    remote_retries: int = 1
-    remote_retry_delay_sec: float = 1.0
-
-
-class _SpatialAggregationStepConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    execution_mode: str = "local"
-    remote_url: str | None = None
-    remote_timeout_sec: float = 30.0
-    remote_retries: int = 1
-    remote_retry_delay_sec: float = 1.0
-
-
-class _BuildDataValueSetStepConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    execution_mode: str = "local"
-    remote_url: str | None = None
-    remote_timeout_sec: float = 30.0
-    remote_retries: int = 1
-    remote_retry_delay_sec: float = 1.0
-
-
-_STEP_CONFIG_MODELS: dict[str, type[BaseModel]] = {
-    "feature_source": _FeatureSourceStepConfig,
-    "download_dataset": _DownloadDatasetStepConfig,
-    "temporal_aggregation": _TemporalAggregationStepConfig,
-    "spatial_aggregation": _SpatialAggregationStepConfig,
-    "build_datavalueset": _BuildDataValueSetStepConfig,
-}
-
-
-def _validate_step_config(component: str, version: str, config: dict[str, Any]) -> None:
-    """Validate step config with strict Pydantic models."""
-    if version != "v1":
-        raise ValueError(f"Unsupported component version for config validation: {component}@{version}")
-    model = _STEP_CONFIG_MODELS.get(component)
-    if model is None:
-        raise ValueError(f"No config schema registered for component '{component}'")
-    try:
-        validated = model.model_validate(config)
-    except ValidationError as exc:
-        raise ValueError(f"Invalid config for component '{component}@{version}': {exc}") from exc
-    mode = str(getattr(validated, "execution_mode", "local")).lower()
-    if mode not in {"local", "remote"}:
-        raise ValueError(
-            f"Invalid config for component '{component}@{version}': execution_mode must be local or remote"
-        )
-    remote_url = getattr(validated, "remote_url", None)
-    remote_timeout_sec = getattr(validated, "remote_timeout_sec", 30.0)
-    remote_retries = getattr(validated, "remote_retries", 1)
-    remote_retry_delay_sec = getattr(validated, "remote_retry_delay_sec", 1.0)
-
-    has_remote_config = bool(
-        (isinstance(remote_url, str) and remote_url.strip())
-        or float(remote_timeout_sec) != 30.0
-        or int(remote_retries) != 1
-        or float(remote_retry_delay_sec) != 1.0
-    )
-
-    if mode == "local" and has_remote_config:
-        raise ValueError(
-            f"Invalid config for component '{component}@{version}': "
-            "remote_url/remote_timeout_sec/remote_retries/remote_retry_delay_sec are only allowed in remote mode"
-        )
-    if mode == "remote":
-        if not isinstance(remote_url, str) or not remote_url.strip():
-            raise ValueError(
-                f"Invalid config for component '{component}@{version}': remote_url is required for remote mode"
-            )
-
-
-def _invoke_remote_download_component(
-    *,
-    remote_url: str,
-    dataset_id: str,
-    start: str,
-    end: str,
-    overwrite: bool,
-    country_code: str | None,
-    bbox: list[float],
-    timeout_sec: float,
-    retries: int,
-    retry_delay_sec: float,
-) -> None:
-    """Invoke remote download component endpoint with retry/timeout."""
-    payload = {
-        "dataset_id": dataset_id,
-        "start": start,
-        "end": end,
-        "overwrite": overwrite,
-        "country_code": country_code,
-        "bbox": bbox,
-    }
-    attempts = max(1, retries)
-    last_exc: Exception | None = None
-    for attempt in range(1, attempts + 1):
-        try:
-            with httpx.Client(timeout=timeout_sec) as client:
-                response = client.post(remote_url, json=payload)
-                response.raise_for_status()
-            return
-        except Exception as exc:
-            last_exc = exc
-            if attempt < attempts:
-                time.sleep(max(0.0, retry_delay_sec))
-    if last_exc is None:
-        raise RuntimeError("Remote download invocation failed without exception context")
-    raise last_exc
-
-
-def _invoke_remote_feature_source_component(
-    *,
-    remote_url: str,
-    feature_source: dict[str, Any],
-    timeout_sec: float,
-    retries: int,
-    retry_delay_sec: float,
-) -> tuple[dict[str, Any], list[float]]:
-    """Invoke remote feature-source component endpoint."""
-    payload = {
-        "feature_source": feature_source,
-        "include_features": True,
-    }
-    result = _post_remote_json(
-        remote_url=remote_url,
-        payload=payload,
-        timeout_sec=timeout_sec,
-        retries=retries,
-        retry_delay_sec=retry_delay_sec,
-    )
-    features = result.get("features")
-    bbox = result.get("bbox")
-    if not isinstance(features, dict) or not isinstance(bbox, list):
-        raise RuntimeError("Remote feature_source response missing features/bbox")
-    return features, [float(x) for x in bbox]
-
-
-def _invoke_remote_temporal_aggregation_component(
-    *,
-    remote_url: str,
-    dataset_id: str,
-    start: str,
-    end: str,
-    bbox: list[float],
-    target_period_type: str,
-    method: str,
-    timeout_sec: float,
-    retries: int,
-    retry_delay_sec: float,
-) -> dict[str, Any]:
-    """Invoke remote temporal-aggregation component endpoint."""
-    payload = {
-        "dataset_id": dataset_id,
-        "start": start,
-        "end": end,
-        "bbox": bbox,
-        "target_period_type": target_period_type,
-        "method": method,
-    }
-    return _post_remote_json(
-        remote_url=remote_url,
-        payload=payload,
-        timeout_sec=timeout_sec,
-        retries=retries,
-        retry_delay_sec=retry_delay_sec,
-    )
-
-
-def _invoke_remote_spatial_aggregation_component(
-    *,
-    remote_url: str,
-    dataset_id: str,
-    start: str,
-    end: str,
-    bbox: list[float],
-    feature_source: dict[str, Any],
-    method: str,
-    feature_id_property: str,
-    timeout_sec: float,
-    retries: int,
-    retry_delay_sec: float,
-) -> list[dict[str, Any]]:
-    """Invoke remote spatial-aggregation component endpoint."""
-    payload = {
-        "dataset_id": dataset_id,
-        "start": start,
-        "end": end,
-        "feature_source": feature_source,
-        "method": method,
-        "bbox": bbox,
-        "feature_id_property": feature_id_property,
-        "include_records": True,
-    }
-    result = _post_remote_json(
-        remote_url=remote_url,
-        payload=payload,
-        timeout_sec=timeout_sec,
-        retries=retries,
-        retry_delay_sec=retry_delay_sec,
-    )
-    records = result.get("records")
-    if not isinstance(records, list):
-        raise RuntimeError("Remote spatial_aggregation response missing records")
-    return records
-
-
-def _invoke_remote_build_datavalueset_component(
-    *,
-    remote_url: str,
-    dataset_id: str,
-    period_type: str,
-    records: list[dict[str, Any]],
-    dhis2: dict[str, Any],
-    timeout_sec: float,
-    retries: int,
-    retry_delay_sec: float,
-) -> tuple[dict[str, Any], str]:
-    """Invoke remote build-datavalue-set component endpoint."""
-    payload = {
-        "dataset_id": dataset_id,
-        "period_type": period_type,
-        "records": records,
-        "dhis2": dhis2,
-    }
-    result = _post_remote_json(
-        remote_url=remote_url,
-        payload=payload,
-        timeout_sec=timeout_sec,
-        retries=retries,
-        retry_delay_sec=retry_delay_sec,
-    )
-    data_value_set = result.get("data_value_set")
-    output_file = result.get("output_file")
-    if not isinstance(data_value_set, dict) or not isinstance(output_file, str):
-        raise RuntimeError("Remote build_datavalueset response missing data_value_set/output_file")
-    return data_value_set, output_file
-
-
-def _post_remote_json(
-    *,
-    remote_url: str,
-    payload: dict[str, Any],
-    timeout_sec: float,
-    retries: int,
-    retry_delay_sec: float,
-) -> dict[str, Any]:
-    """POST JSON to remote component endpoint with retry and return JSON body."""
-    attempts = max(1, retries)
-    last_exc: Exception | None = None
-    for attempt in range(1, attempts + 1):
-        try:
-            with httpx.Client(timeout=timeout_sec) as client:
-                response = client.post(remote_url, json=payload)
-                response.raise_for_status()
-                body = response.json()
-                if not isinstance(body, dict):
-                    raise RuntimeError("Remote component returned non-object JSON response")
-                return body
-        except Exception as exc:
-            last_exc = exc
-            if attempt < attempts:
-                time.sleep(max(0.0, retry_delay_sec))
-    if last_exc is None:
-        raise RuntimeError("Remote component invocation failed without exception context")
-    raise last_exc

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -17,7 +18,7 @@ from .schemas import (
 )
 from .services import collection_id_for_resource, ensure_source_dataset_publications, list_published_resources
 
-_DEFAULT_SERVER_URL = "http://127.0.0.1:8000/ogcapi"
+_DEFAULT_SERVER_URL = "http://127.0.0.1:8000/pygeoapi"
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "pygeoapi_templates"
 
 
@@ -212,12 +213,14 @@ def _description_for_resource(resource: PublishedResource) -> str:
 
 def _build_provider(resource: PublishedResource) -> dict[str, Any]:
     if resource.kind == PublishedResourceKind.COVERAGE:
-        dataset = get_dataset(str(resource.dataset_id))
-        if dataset is None:
-            raise ValueError(f"Unknown dataset_id '{resource.dataset_id}' for resource '{resource.resource_id}'")
-        zarr_path = get_zarr_path(dataset)
+        zarr_path = Path(resource.path) if resource.path is not None else None
         if zarr_path is None:
-            raise ValueError(f"No zarr cache available for dataset '{resource.dataset_id}'")
+            dataset = get_dataset(str(resource.dataset_id))
+            if dataset is None:
+                raise ValueError(f"Unknown dataset_id '{resource.dataset_id}' for resource '{resource.resource_id}'")
+            zarr_path = get_zarr_path(dataset)
+            if zarr_path is None:
+                raise ValueError(f"No zarr cache available for dataset '{resource.dataset_id}'")
         return {
             "name": "xarray",
             "type": "coverage",
@@ -258,7 +261,12 @@ def _pygeoapi_links(resource: PublishedResource) -> list[dict[str, str]]:
         if href == "":
             continue
         link_type = "text/html" if rel == "analytics" else "application/json"
-        title = "Analytics Viewer" if rel == "analytics" else rel.replace("-", " ").title()
+        if rel == "analytics":
+            title = "Analytics Viewer"
+        elif rel == "raster-capabilities":
+            title = "Raster Rendering Capabilities"
+        else:
+            title = rel.replace("-", " ").title()
         links.append(
             {
                 "type": link_type,
@@ -273,4 +281,6 @@ def _pygeoapi_links(resource: PublishedResource) -> list[dict[str, str]]:
 def _absolute_ogc_href(href: str) -> str:
     if href.startswith("http://") or href.startswith("https://"):
         return href
-    return f"{_DEFAULT_SERVER_URL.removesuffix('/ogcapi')}{href}"
+    parsed = urlsplit(_DEFAULT_SERVER_URL)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    return f"{origin}{href}"

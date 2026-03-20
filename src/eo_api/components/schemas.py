@@ -1,8 +1,8 @@
-"""Schemas for component discovery and execution endpoints."""
+"""Schemas for component discovery, manifests, and execution endpoints."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -29,11 +29,59 @@ class ComponentDefinition(BaseModel):
     description: str
     inputs: list[str]
     outputs: list[str]
+    workflow_inputs_required: list[str] = Field(default_factory=list)
+    workflow_inputs_optional: list[str] = Field(default_factory=list)
     input_schema: dict[str, Any] = Field(default_factory=dict)
     config_schema: dict[str, Any] | None = None
     output_schema: dict[str, Any] = Field(default_factory=dict)
     error_codes: list[str] = Field(default_factory=list)
     endpoint: ComponentEndpoint
+
+
+class ComponentRuntimeManifest(BaseModel):
+    """Runtime metadata for one registered component."""
+
+    type: Literal["python"] = "python"
+    supported_execution_modes: list[str] = Field(default_factory=lambda: ["local"])
+    local_handler: str | None = None
+    remote_handler: str | None = None
+    remote_request_bindings: dict[str, Any] = Field(default_factory=dict)
+    remote_response_bindings: dict[str, str] = Field(default_factory=dict)
+
+
+class ComponentManifest(BaseModel):
+    """Internal manifest used to register a component."""
+
+    name: str
+    version: str = "v1"
+    description: str
+    inputs: list[str]
+    outputs: list[str]
+    workflow_inputs_required: list[str] = Field(default_factory=list)
+    workflow_inputs_optional: list[str] = Field(default_factory=list)
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+    config_schema: dict[str, Any] | None = None
+    output_schema: dict[str, Any] = Field(default_factory=dict)
+    error_codes: list[str] = Field(default_factory=list)
+    endpoint: ComponentEndpoint
+    runtime: ComponentRuntimeManifest
+
+    def to_definition(self) -> ComponentDefinition:
+        """Project internal manifest to public discovery metadata."""
+        return ComponentDefinition(
+            name=self.name,
+            version=self.version,
+            description=self.description,
+            inputs=self.inputs,
+            outputs=self.outputs,
+            workflow_inputs_required=self.workflow_inputs_required,
+            workflow_inputs_optional=self.workflow_inputs_optional,
+            input_schema=self.input_schema,
+            config_schema=self.config_schema,
+            output_schema=self.output_schema,
+            error_codes=self.error_codes,
+            endpoint=self.endpoint,
+        )
 
 
 class ComponentCatalogResponse(BaseModel):

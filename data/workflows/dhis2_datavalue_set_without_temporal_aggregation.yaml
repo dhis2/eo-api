@@ -3,6 +3,22 @@ version: 1
 publication:
   publishable: false
   exposure: registry_only
+outputs:
+  bbox:
+    from_step: get_features
+    output: bbox
+  features:
+    from_step: get_features
+    output: features
+  records:
+    from_step: spatial_agg
+    output: records
+  data_value_set:
+    from_step: build_dhis2_payload
+    output: data_value_set
+  output_file:
+    from_step: build_dhis2_payload
+    output: output_file
 steps:
   - id: get_features
     component: feature_source

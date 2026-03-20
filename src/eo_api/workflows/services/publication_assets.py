@@ -45,14 +45,25 @@ def build_feature_collection_asset(
         )
 
     collection = {"type": "FeatureCollection", "features": output_features}
-    return _write_feature_collection(collection=collection, dataset_id=dataset_id)
+    return write_feature_collection_asset(collection=collection, dataset_id=dataset_id)
 
 
-def _write_feature_collection(*, collection: dict[str, Any], dataset_id: str) -> str:
+def write_feature_collection_asset(*, collection: dict[str, Any], dataset_id: str) -> str:
+    """Persist a ready-made GeoJSON FeatureCollection as a publication asset."""
+    return _write_json_asset(payload=collection, dataset_id=dataset_id, suffix="geojson")
+
+
+def write_json_asset(*, payload: Any, dataset_id: str, suffix: str = "json") -> str:
+    """Persist a JSON-serializable publication payload to disk."""
+    normalized_suffix = suffix.lstrip(".") or "json"
+    return _write_json_asset(payload=payload, dataset_id=dataset_id, suffix=normalized_suffix)
+
+
+def _write_json_asset(*, payload: Any, dataset_id: str, suffix: str) -> str:
     DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
     now = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    path = DOWNLOAD_DIR / f"{dataset_id}_feature_collection_{now}.geojson"
-    path.write_text(json.dumps(collection, indent=2), encoding="utf-8")
+    path = DOWNLOAD_DIR / f"{dataset_id}_publication_{now}.{suffix}"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return str(path)
 
 

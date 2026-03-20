@@ -50,12 +50,12 @@ def get_publication_analytics_config(resource_id: str) -> dict[str, Any]:
         "workflow_id": resource.workflow_id,
         "job_id": resource.job_id,
         "data_url": data_url,
-        "ogc_items_url": f"/ogcapi/collections/{resource.resource_id}/items",
+        "ogc_items_url": f"/pygeoapi/collections/{resource.resource_id}/items",
         "links": {
             "ogc_home": "/ogcapi",
             "publication": f"/publications/{resource.resource_id}",
-            "collection": f"/ogcapi/collections/{resource.resource_id}",
-            "items": f"/ogcapi/collections/{resource.resource_id}/items",
+            "collection": f"/pygeoapi/collections/{resource.resource_id}",
+            "items": f"/pygeoapi/collections/{resource.resource_id}/items",
         },
     }
 

@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 
+from ..publications.capabilities import evaluate_publication_serving
 from ..publications.schemas import PublishedResourceExposure
 from ..publications.services import collection_id_for_resource, get_published_resource
 from ..shared.api_errors import api_error
@@ -34,6 +35,33 @@ from .services.simple_mapper import normalize_simple_request
 router = APIRouter()
 
 
+def _workflow_publication_summary(workflow: Any) -> dict[str, Any]:
+    publication = workflow.publication
+    capability = evaluate_publication_serving(
+        kind=publication.intent,
+        exposure=publication.exposure,
+        asset_format=publication.asset_format,
+    )
+    asset_binding = None
+    if publication.asset is not None:
+        asset_binding = {"from_step": publication.asset.from_step, "output": publication.asset.output}
+    publication_inputs = {
+        name: {"from_step": ref.from_step, "output": ref.output} for name, ref in publication.inputs.items()
+    }
+    return {
+        "publication_publishable": publication.publishable,
+        "publication_intent": str(publication.intent) if publication.publishable else None,
+        "publication_exposure": str(publication.exposure) if publication.publishable else None,
+        "publication_asset_format": publication.asset_format,
+        "publication_asset_binding": asset_binding,
+        "publication_inputs": publication_inputs,
+        "serving_supported": capability.supported,
+        "serving_asset_format": capability.asset_format,
+        "serving_targets": list(capability.served_by),
+        "serving_error": capability.error,
+    }
+
+
 @router.get("", response_model=WorkflowCatalogResponse)
 def list_workflows() -> WorkflowCatalogResponse:
     """List all allowlisted workflow definitions."""
@@ -53,13 +81,9 @@ def list_workflows() -> WorkflowCatalogResponse:
             WorkflowCatalogItem(
                 workflow_id=definition.workflow_id,
                 version=definition.version,
-                publication_publishable=definition.publication.publishable,
-                publication_intent=(str(definition.publication.intent) if definition.publication.publishable else None),
-                publication_exposure=(
-                    str(definition.publication.exposure) if definition.publication.publishable else None
-                ),
                 step_count=len(definition.steps),
                 components=[step.component for step in definition.steps],
+                **_workflow_publication_summary(definition),
             )
             for definition in definitions
         ]
@@ -100,7 +124,7 @@ def get_workflow_job(job_id: str, request: Request) -> WorkflowJobRecord:
         links.append(
             {
                 "rel": "collection",
-                "href": f"{str(request.base_url).rstrip('/')}/ogcapi/collections/{collection_id}",
+                "href": f"{str(request.base_url).rstrip('/')}/pygeoapi/collections/{collection_id}",
             }
         )
         analytics_link = next((link for link in publication.links if link.get("rel") == "analytics"), None)
@@ -341,6 +365,7 @@ def validate_workflow_assembly(payload: WorkflowValidateRequest) -> WorkflowVali
             workflow_version=0,
             step_count=0,
             components=[],
+            publication_publishable=False,
             warnings=warnings,
             errors=[str(exc)],
         )
@@ -366,6 +391,7 @@ def validate_workflow_assembly(payload: WorkflowValidateRequest) -> WorkflowVali
         workflow_version=workflow.version,
         step_count=len(workflow.steps),
         components=[step.component for step in workflow.steps],
+        **_workflow_publication_summary(workflow),
         resolved_steps=resolved_steps,
         warnings=warnings,
         errors=errors,

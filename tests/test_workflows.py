@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any, cast
@@ -42,6 +43,34 @@ def _valid_public_payload() -> dict[str, Any]:
             "dry_run": True,
             "include_component_run_details": False,
         }
+    }
+
+
+def _standard_workflow_outputs(
+    *,
+    feature_step: str = "feature_source",
+    spatial_step: str = "spatial_aggregation",
+    build_step: str = "build_datavalueset",
+) -> dict[str, dict[str, str]]:
+    return {
+        "bbox": {"from_step": feature_step, "output": "bbox"},
+        "features": {"from_step": feature_step, "output": "features"},
+        "records": {"from_step": spatial_step, "output": "records"},
+        "data_value_set": {"from_step": build_step, "output": "data_value_set"},
+        "output_file": {"from_step": build_step, "output": "output_file"},
+    }
+
+
+def _standard_publication_inputs(
+    *,
+    feature_step: str = "feature_source",
+    spatial_step: str = "spatial_aggregation",
+    build_step: str = "build_datavalueset",
+) -> dict[str, dict[str, str]]:
+    return {
+        "features": {"from_step": feature_step, "output": "features"},
+        "records": {"from_step": spatial_step, "output": "records"},
+        "output_file": {"from_step": build_step, "output": "output_file"},
     }
 
 
@@ -235,6 +264,13 @@ def test_workflow_catalog_endpoint_returns_allowlisted_workflow(client: TestClie
     assert default["publication_publishable"] is True
     assert default["publication_intent"] == "feature_collection"
     assert default["publication_exposure"] == "ogc"
+    assert default["publication_asset_format"] is None
+    assert default["publication_asset_binding"] is None
+    assert default["publication_inputs"]["features"]["from_step"] == "get_features"
+    assert default["serving_supported"] is True
+    assert default["serving_asset_format"] == "geojson"
+    assert default["serving_targets"] == ["pygeoapi", "analytics"]
+    assert default["serving_error"] is None
     assert default["step_count"] == 5
     assert default["components"] == [
         "feature_source",
@@ -249,6 +285,13 @@ def test_workflow_catalog_endpoint_returns_allowlisted_workflow(client: TestClie
     assert fast["publication_publishable"] is False
     assert fast["publication_intent"] is None
     assert fast["publication_exposure"] is None
+    assert fast["publication_asset_format"] is None
+    assert fast["publication_asset_binding"] is None
+    assert fast["publication_inputs"] == {}
+    assert fast["serving_supported"] is True
+    assert fast["serving_asset_format"] == "geojson"
+    assert fast["serving_targets"] == ["registry"]
+    assert fast["serving_error"] is None
     assert fast["step_count"] == 4
     assert fast["components"] == [
         "feature_source",
@@ -256,6 +299,134 @@ def test_workflow_catalog_endpoint_returns_allowlisted_workflow(client: TestClie
         "spatial_aggregation",
         "build_datavalueset",
     ]
+
+
+def test_workflow_definition_allows_non_datavalueset_terminal_step_when_outputs_declared() -> None:
+    definition = WorkflowDefinition.model_validate(
+        {
+            "workflow_id": "generic_records_v1",
+            "version": 1,
+            "steps": [
+                {"id": "get_features", "component": "feature_source", "version": "v1"},
+                {
+                    "id": "spatial_agg",
+                    "component": "spatial_aggregation",
+                    "version": "v1",
+                    "inputs": {
+                        "bbox": {"from_step": "get_features", "output": "bbox"},
+                        "features": {"from_step": "get_features", "output": "features"},
+                    },
+                },
+            ],
+            "outputs": {
+                "features": {"from_step": "get_features", "output": "features"},
+                "records": {"from_step": "spatial_agg", "output": "records"},
+            },
+        }
+    )
+
+    assert [step.component for step in definition.steps] == ["feature_source", "spatial_aggregation"]
+    assert set(definition.outputs) == {"features", "records"}
+
+
+def test_workflow_definition_requires_explicit_outputs() -> None:
+    with pytest.raises(ValueError, match="declare at least one exported output"):
+        WorkflowDefinition.model_validate(
+            {
+                "workflow_id": "missing_outputs_v1",
+                "version": 1,
+                "steps": [
+                    {"component": "feature_source", "version": "v1"},
+                    {"component": "download_dataset", "version": "v1"},
+                    {"component": "temporal_aggregation", "version": "v1"},
+                    {"component": "spatial_aggregation", "version": "v1"},
+                    {"component": "build_datavalueset", "version": "v1"},
+                ],
+            }
+        )
+
+
+def test_publishable_workflow_can_declare_publication_asset_without_builder_inputs() -> None:
+    definition = WorkflowDefinition.model_validate(
+        {
+            "workflow_id": "coverage_publish_v1",
+            "version": 1,
+            "publication": {
+                "publishable": True,
+                "intent": "coverage",
+                "asset": {"from_step": "build", "output": "output_file"},
+                "asset_format": "zarr",
+            },
+            "steps": [
+                {"id": "feature_source", "component": "feature_source", "version": "v1"},
+                {"id": "download_dataset", "component": "download_dataset", "version": "v1"},
+                {
+                    "id": "spatial_aggregation",
+                    "component": "spatial_aggregation",
+                    "version": "v1",
+                    "inputs": {
+                        "bbox": {"from_step": "feature_source", "output": "bbox"},
+                        "features": {"from_step": "feature_source", "output": "features"},
+                    },
+                },
+                {
+                    "id": "build",
+                    "component": "build_datavalueset",
+                    "version": "v1",
+                    "inputs": {"records": {"from_step": "spatial_aggregation", "output": "records"}},
+                },
+            ],
+            "outputs": _standard_workflow_outputs(
+                feature_step="feature_source",
+                spatial_step="spatial_aggregation",
+                build_step="build",
+            ),
+        }
+    )
+
+    assert definition.publication.asset is not None
+    assert definition.publication.asset.from_step == "build"
+
+
+def test_publishable_workflow_rejects_unsupported_serving_contract() -> None:
+    with pytest.raises(ValueError, match="Unsupported publication serving contract"):
+        WorkflowDefinition.model_validate(
+            {
+                "workflow_id": "tileset_publish_v1",
+                "version": 1,
+                "publication": {
+                    "publishable": True,
+                    "intent": "tileset",
+                    "exposure": "ogc",
+                    "asset": {"from_step": "build", "output": "output_file"},
+                    "asset_format": "tiles",
+                },
+                "steps": [
+                    {"id": "feature_source", "component": "feature_source", "version": "v1"},
+                    {"id": "download_dataset", "component": "download_dataset", "version": "v1"},
+                    {
+                        "id": "spatial_aggregation",
+                        "component": "spatial_aggregation",
+                        "version": "v1",
+                        "inputs": {
+                            "bbox": {"from_step": "feature_source", "output": "bbox"},
+                            "features": {"from_step": "feature_source", "output": "features"},
+                        },
+                    },
+                    {
+                        "id": "build",
+                        "component": "build_datavalueset",
+                        "version": "v1",
+                        "inputs": {"records": {"from_step": "spatial_aggregation", "output": "records"}},
+                    },
+                ],
+                "outputs": _standard_workflow_outputs(
+                    feature_step="feature_source",
+                    spatial_step="spatial_aggregation",
+                    build_step="build",
+                ),
+            }
+        )
 
 
 def test_components_catalog_endpoint_returns_five_components(client: TestClient) -> None:
@@ -362,7 +533,7 @@ def test_workflow_job_result_missing_uses_typed_error_envelope(client: TestClien
 
 
 def test_pygeoapi_collection_missing_returns_not_found(client: TestClient) -> None:
-    response = client.get("/ogcapi/collections/does-not-exist", params={"f": "json"})
+    response = client.get("/pygeoapi/collections/does-not-exist", params={"f": "json"})
     assert response.status_code == 404
 
 
@@ -481,6 +652,7 @@ def test_inline_workflow_execute_endpoint_accepts_assembly(client: TestClient, m
                     {"component": "spatial_aggregation", "version": "v1", "config": {}},
                     {"component": "build_datavalueset", "version": "v1", "config": {}},
                 ],
+                "outputs": _standard_workflow_outputs(),
             },
             "request": {
                 "workflow_id": "adhoc_dhis2_v1",
@@ -511,6 +683,10 @@ def test_inline_workflow_execute_endpoint_rejects_bad_component_chain(client: Te
                     {"component": "download_dataset", "version": "v1", "config": {}},
                     {"component": "build_datavalueset", "version": "v1", "config": {}},
                 ],
+                "outputs": {
+                    "data_value_set": {"from_step": "build_datavalueset", "output": "data_value_set"},
+                    "output_file": {"from_step": "build_datavalueset", "output": "output_file"},
+                },
             },
             "request": {
                 "workflow_id": "bad_adhoc_v1",
@@ -538,6 +714,7 @@ def test_workflow_validate_endpoint_accepts_valid_inline_workflow(client: TestCl
                     {"component": "spatial_aggregation", "version": "v1", "config": {}},
                     {"component": "build_datavalueset", "version": "v1", "config": {}},
                 ],
+                "outputs": _standard_workflow_outputs(),
             },
             "request": {
                 "workflow_id": "adhoc_validate_v1",
@@ -553,6 +730,12 @@ def test_workflow_validate_endpoint_accepts_valid_inline_workflow(client: TestCl
     body = response.json()
     assert body["valid"] is True
     assert body["workflow_id"] == "adhoc_validate_v1"
+    assert body["publication_publishable"] is False
+    assert body["publication_intent"] is None
+    assert body["publication_inputs"] == {}
+    assert body["serving_supported"] is True
+    assert body["serving_asset_format"] == "geojson"
+    assert body["serving_targets"] == ["registry"]
     assert body["step_count"] == 4
     assert len(body["resolved_steps"]) == 4
     assert body["errors"] == []
@@ -571,6 +754,7 @@ def test_workflow_validate_endpoint_rejects_runtime_knobs_in_step_config(client:
                     {"component": "spatial_aggregation", "version": "v1", "config": {}},
                     {"component": "build_datavalueset", "version": "v1", "config": {}},
                 ],
+                "outputs": _standard_workflow_outputs(),
             },
             "request": {
                 "workflow_id": "adhoc_invalid_config_v1",
@@ -585,6 +769,8 @@ def test_workflow_validate_endpoint_rejects_runtime_knobs_in_step_config(client:
     assert response.status_code == 200
     body = response.json()
     assert body["valid"] is False
+    assert body["publication_publishable"] is False
+    assert body["serving_supported"] is True
     assert body["resolved_steps"] == []
     assert len(body["errors"]) == 1
     assert "validation failed" in body["errors"][0].lower()
@@ -596,6 +782,7 @@ def test_workflow_validate_endpoint_unknown_workflow_id(client: TestClient) -> N
     body = response.json()
     assert body["valid"] is False
     assert body["step_count"] == 0
+    assert body["publication_publishable"] is False
     assert len(body["errors"]) == 1
     assert "Unknown workflow_id" in body["errors"][0]
 
@@ -642,7 +829,7 @@ def test_workflow_job_endpoints_return_persisted_result(
     assert links["self"].endswith(f"/workflows/jobs/{run_id}")
     assert links["result"].endswith(f"/workflows/jobs/{run_id}/result")
     assert links["trace"].endswith(f"/workflows/jobs/{run_id}/trace")
-    assert links["collection"].endswith(f"/ogcapi/collections/workflow-output-{run_id}")
+    assert links["collection"].endswith(f"/pygeoapi/collections/workflow-output-{run_id}")
     assert "analytics" not in links
     assert "result" not in job_body
 
@@ -848,6 +1035,84 @@ def test_generated_pygeoapi_config_contains_collection_detail(
     assert collection["type"] == "collection"
     assert collection["title"]["en"]
     assert collection["providers"][0]["type"] == "coverage"
+    raster_link = next(link for link in collection["links"] if link["rel"] == "raster-capabilities")
+    assert raster_link["href"].endswith("/raster/chirps3_precipitation_daily/capabilities")
+    assert raster_link["title"] == "Raster Rendering Capabilities"
+
+
+def test_generated_pygeoapi_config_uses_real_source_coverage_extent(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_pygeoapi, "DOWNLOAD_DIR", tmp_path)
+    zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
+    xr.Dataset(
+        data_vars={
+            "precip": (("time", "y", "x"), np.arange(8, dtype=float).reshape(2, 2, 2)),
+        },
+        coords={
+            "time": np.array(["2024-01-01", "2024-01-02"], dtype="datetime64[ns]"),
+            "y": xr.Variable(("y",), [9.5, 10.5], attrs={"units": "degrees_north"}),
+            "x": xr.Variable(("x",), [39.5, 40.5], attrs={"units": "degrees_east"}),
+        },
+    ).rio.write_crs("EPSG:4326").to_zarr(zarr_path, mode="w")
+    monkeypatch.setattr(publication_pygeoapi, "get_zarr_path", lambda dataset: zarr_path)
+    monkeypatch.setattr(publication_services, "list_datasets", lambda: [
+        {
+            "id": "chirps3_precipitation_daily",
+            "name": "Total precipitation (CHIRPS3)",
+            "variable": "precip",
+            "period_type": "daily",
+            "source": "CHIRPS v3",
+            "source_url": "https://example.test/chirps",
+            "resolution": "5 km x 5 km",
+            "units": "mm",
+        }
+    ])
+    monkeypatch.setattr(
+        publication_services,
+        "get_data_coverage",
+        lambda dataset: {
+            "coverage": {
+                "spatial": {"xmin": 39.5, "ymin": 9.5, "xmax": 40.5, "ymax": 10.5},
+                "temporal": {"start": "2024-01-01", "end": "2024-01-02"},
+            }
+        },
+    )
+
+    response = client.get("/publications/pygeoapi/config")
+    assert response.status_code == 200
+    collection = response.json()["resources"]["chirps3_precipitation_daily"]
+    assert collection["extents"]["spatial"]["bbox"] == [[39.5, 9.5, 40.5, 10.5]]
+    assert collection["extents"]["temporal"]["begin"] == "2024-01-01"
+    assert collection["extents"]["temporal"]["end"] == "2024-01-02"
+
+
+def test_ogc_collection_html_for_coverage_includes_raster_controls(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
+    xr.Dataset(
+        data_vars={
+            "precip": (("time", "y", "x"), np.arange(8, dtype=float).reshape(2, 2, 2)),
+        },
+        coords={
+            "time": np.array(["2024-01-01", "2024-01-02"], dtype="datetime64[ns]"),
+            "y": xr.Variable(("y",), [9.5, 10.5], attrs={"units": "degrees_north"}),
+            "x": xr.Variable(("x",), [39.5, 40.5], attrs={"units": "degrees_east"}),
+        },
+    ).rio.write_crs("EPSG:4326").to_zarr(zarr_path, mode="w")
+    monkeypatch.setattr(publication_pygeoapi, "get_zarr_path", lambda dataset: zarr_path)
+
+    response = client.get("/pygeoapi/collections/chirps3_precipitation_daily?f=html")
+    assert response.status_code == 200
+    assert "Update raster map" in response.text
+    assert "Single-date preview example" in response.text
+    assert "TileJSON example" in response.text
 
 
 def test_workflow_success_registers_derived_publication(
@@ -870,7 +1135,7 @@ def test_workflow_success_registers_derived_publication(
     derived = next(item for item in resources if item["resource_id"] == f"workflow-output-{run_id}")
     assert derived["resource_class"] == "derived"
     assert derived["job_id"] == run_id
-    assert derived["ogc_path"] == f"/ogcapi/collections/workflow-output-{run_id}"
+    assert derived["ogc_path"] == f"/pygeoapi/collections/workflow-output-{run_id}"
     assert derived["exposure"] == "ogc"
     assert derived["asset_format"] == "geojson"
     assert derived["path"].endswith(".geojson")
@@ -896,20 +1161,20 @@ def test_dynamic_ogc_collection_routes_reflect_new_publication_without_restart(
     run_id = response.json()["run_id"]
     collection_id = f"workflow-output-{run_id}"
 
-    collections_response = client.get("/ogcapi/collections", params={"f": "json"})
+    collections_response = client.get("/pygeoapi/collections", params={"f": "json"})
     assert collections_response.status_code == 200
     collections = collections_response.json()["collections"]
     derived = next(item for item in collections if item["id"] == collection_id)
     assert derived["itemType"] == "feature"
 
-    detail_response = client.get(f"/ogcapi/collections/{collection_id}", params={"f": "json"})
+    detail_response = client.get(f"/pygeoapi/collections/{collection_id}", params={"f": "json"})
     assert detail_response.status_code == 200
     detail = detail_response.json()
     detail_links = {link["rel"]: link["href"] for link in detail["links"]}
     assert detail["id"] == collection_id
     assert "analytics" not in detail_links
 
-    items_response = client.get(f"/ogcapi/collections/{collection_id}/items", params={"f": "json", "limit": 5})
+    items_response = client.get(f"/pygeoapi/collections/{collection_id}/items", params={"f": "json", "limit": 5})
     assert items_response.status_code == 200
     items = items_response.json()
     assert items["type"] == "FeatureCollection"
@@ -929,13 +1194,13 @@ def test_dynamic_ogc_collection_routes_drop_deleted_publication_without_restart(
     run_id = response.json()["run_id"]
     collection_id = f"workflow-output-{run_id}"
 
-    before_delete = client.get(f"/ogcapi/collections/{collection_id}", params={"f": "json"})
+    before_delete = client.get(f"/pygeoapi/collections/{collection_id}", params={"f": "json"})
     assert before_delete.status_code == 200
 
     delete_response = client.delete(f"/workflows/jobs/{run_id}")
     assert delete_response.status_code == 200
 
-    after_delete = client.get(f"/ogcapi/collections/{collection_id}", params={"f": "json"})
+    after_delete = client.get(f"/pygeoapi/collections/{collection_id}", params={"f": "json"})
     assert after_delete.status_code == 404
 
 
@@ -955,7 +1220,7 @@ def test_analytics_viewer_config_and_html_for_publication(
     config = config_response.json()
     assert config["resource_id"] == resource_id
     assert config["data_url"].startswith("/data/")
-    assert config["links"]["collection"] == f"/ogcapi/collections/{resource_id}"
+    assert config["links"]["collection"] == f"/pygeoapi/collections/{resource_id}"
 
     viewer_response = client.get(f"/analytics/publications/{resource_id}/viewer")
     assert viewer_response.status_code == 200
@@ -1046,6 +1311,11 @@ def test_inline_workflow_publication_intent_is_blocked_by_server_guardrail(
                 "publishable": True,
                 "strategy": "on_success",
                 "intent": "feature_collection",
+                "inputs": _standard_publication_inputs(
+                    feature_step="feature_source",
+                    spatial_step="spatial_aggregation",
+                    build_step="build_datavalueset",
+                ),
             },
             "steps": [
                 {"component": "feature_source", "version": "v1"},
@@ -1054,6 +1324,11 @@ def test_inline_workflow_publication_intent_is_blocked_by_server_guardrail(
                 {"component": "spatial_aggregation", "version": "v1"},
                 {"component": "build_datavalueset", "version": "v1"},
             ],
+            "outputs": _standard_workflow_outputs(
+                feature_step="feature_source",
+                spatial_step="spatial_aggregation",
+                build_step="build_datavalueset",
+            ),
         },
         "request": _valid_public_payload()["request"] | {"workflow_id": "adhoc_chirps_mixed_exec_v1"},
     }
@@ -1087,6 +1362,11 @@ def test_inline_workflow_publication_intent_can_be_enabled_by_server_policy(
                 "publishable": True,
                 "strategy": "on_success",
                 "intent": "feature_collection",
+                "inputs": _standard_publication_inputs(
+                    feature_step="feature_source",
+                    spatial_step="spatial_aggregation",
+                    build_step="build_datavalueset",
+                ),
             },
             "steps": [
                 {"component": "feature_source", "version": "v1"},
@@ -1095,6 +1375,11 @@ def test_inline_workflow_publication_intent_can_be_enabled_by_server_policy(
                 {"component": "spatial_aggregation", "version": "v1"},
                 {"component": "build_datavalueset", "version": "v1"},
             ],
+            "outputs": _standard_workflow_outputs(
+                feature_step="feature_source",
+                spatial_step="spatial_aggregation",
+                build_step="build_datavalueset",
+            ),
         },
         "request": _valid_public_payload()["request"] | {"workflow_id": "adhoc_chirps_mixed_exec_v1"},
     }
@@ -1126,7 +1411,7 @@ def test_ogc_process_sync_execution_links_to_collection(
     body = response.json()
     collection_links = [item for item in body["links"] if item["rel"] == "collection"]
     assert len(collection_links) == 1
-    assert "/ogcapi/collections/workflow-output-" in collection_links[0]["href"]
+    assert "/pygeoapi/collections/workflow-output-" in collection_links[0]["href"]
 
 
 def test_generated_pygeoapi_config_reflects_publication_registry(
@@ -1206,6 +1491,75 @@ def test_generated_pygeoapi_config_includes_geojson_derived_resource(
     assert not any(link["rel"] == "analytics" for link in derived["links"])
 
 
+def test_generated_pygeoapi_config_includes_derived_coverage_resource(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(publication_pygeoapi, "DOWNLOAD_DIR", tmp_path)
+    zarr_path = tmp_path / "derived_coverage.zarr"
+    zarr_path.mkdir(parents=True)
+
+    response = WorkflowExecuteResponse(
+        status="completed",
+        run_id="coverage-run-1",
+        workflow_id="coverage_publish_v1",
+        workflow_version=1,
+        dataset_id="chirps3_precipitation_daily",
+        outputs={"output_file": str(zarr_path)},
+        primary_output_name="output_file",
+        output_file=str(zarr_path),
+        run_log_file="/tmp/data/workflow_runs/coverage-run-1.json",
+        component_runs=[],
+    )
+    publication_services.register_workflow_output_publication(
+        response=response,
+        kind=publication_services.PublishedResourceKind.COVERAGE,
+        exposure=publication_services.PublishedResourceExposure.OGC,
+        published_path=str(zarr_path),
+        asset_format="zarr",
+    )
+
+    config_response = client.get("/publications/pygeoapi/config")
+    assert config_response.status_code == 200
+    resources = config_response.json()["resources"]
+    derived = resources["workflow-output-coverage-run-1"]
+    assert derived["providers"][0]["type"] == "coverage"
+    assert derived["providers"][0]["data"] == str(zarr_path)
+    link_rels = {link["rel"] for link in derived["links"]}
+    assert "collection" in link_rels
+    assert "raster-capabilities" in link_rels
+
+
+def test_register_workflow_output_publication_rejects_unsupported_serving_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    response = WorkflowExecuteResponse(
+        status="completed",
+        run_id="tiles-run-1",
+        workflow_id="tiles_publish_v1",
+        workflow_version=1,
+        dataset_id="chirps3_precipitation_daily",
+        outputs={"output_file": "/tmp/tiles"},
+        primary_output_name="output_file",
+        output_file="/tmp/tiles",
+        run_log_file="/tmp/data/workflow_runs/tiles-run-1.json",
+        component_runs=[],
+    )
+
+    with pytest.raises(ValueError, match="Unsupported publication serving contract"):
+        publication_services.register_workflow_output_publication(
+            response=response,
+            kind=publication_services.PublishedResourceKind.TILESET,
+            exposure=publication_services.PublishedResourceExposure.OGC,
+            published_path="/tmp/tiles",
+            asset_format="tiles",
+        )
+
+
 def test_materialize_generated_pygeoapi_documents_writes_files(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -1213,6 +1567,9 @@ def test_materialize_generated_pygeoapi_documents_writes_files(
 ) -> None:
     monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
     monkeypatch.setattr(publication_pygeoapi, "DOWNLOAD_DIR", tmp_path)
+    zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
+    zarr_path.mkdir(parents=True)
+    monkeypatch.setattr(publication_pygeoapi, "get_zarr_path", lambda dataset: zarr_path)
 
     response = client.post("/publications/pygeoapi/materialize")
     assert response.status_code == 200
@@ -1221,7 +1578,50 @@ def test_materialize_generated_pygeoapi_documents_writes_files(
     openapi_path = Path(body["openapi_path"])
     assert config_path.exists()
     assert openapi_path.exists()
-    assert "resources:" in config_path.read_text(encoding="utf-8")
+    config_text = config_path.read_text(encoding="utf-8")
+    openapi_text = openapi_path.read_text(encoding="utf-8")
+    assert "resources:" in config_text
+    assert "http://127.0.0.1:8000/pygeoapi" in config_text
+    assert "http://127.0.0.1:8000/pygeoapi" in openapi_text
+    assert "http://127.0.0.1:8000/pygeoapi/collections/chirps3_precipitation_daily" in config_text
+
+
+def test_get_published_resource_normalizes_legacy_pygeoapi_links(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(publication_services, "DOWNLOAD_DIR", tmp_path)
+    resources_dir = tmp_path / "published_resources"
+    resources_dir.mkdir(parents=True)
+    legacy_resource = {
+        "resource_id": "workflow-output-legacy",
+        "resource_class": "derived",
+        "kind": "feature_collection",
+        "title": "Legacy workflow output",
+        "description": "Legacy collection",
+        "dataset_id": "chirps3_precipitation_daily",
+        "workflow_id": "dhis2_datavalue_set_v1",
+        "job_id": "legacy",
+        "run_id": "legacy",
+        "path": "data/downloads/legacy.geojson",
+        "ogc_path": "/ogcapi/collections/workflow-output-legacy",
+        "asset_format": "geojson",
+        "exposure": "ogc",
+        "created_at": "2026-03-20T00:00:00+00:00",
+        "updated_at": "2026-03-20T00:00:00+00:00",
+        "metadata": {},
+        "links": [
+            {"rel": "collection", "href": "/ogcapi/collections/workflow-output-legacy"},
+            {"rel": "job", "href": "/workflows/jobs/legacy"},
+        ],
+    }
+    (resources_dir / "workflow-output-legacy.json").write_text(json.dumps(legacy_resource), encoding="utf-8")
+
+    resource = publication_services.get_published_resource("workflow-output-legacy")
+
+    assert resource is not None
+    assert resource.ogc_path == "/pygeoapi/collections/workflow-output-legacy"
+    assert resource.links[0]["href"] == "/pygeoapi/collections/workflow-output-legacy"
 
 
 def test_component_spatial_aggregation_serializes_numpy_datetime64(
@@ -1496,6 +1896,11 @@ def test_engine_rejects_remote_spatial_after_temporal_aggregation(monkeypatch: p
                 },
                 {"component": "build_datavalueset"},
             ],
+            "outputs": _standard_workflow_outputs(
+                feature_step="feature_source",
+                spatial_step="spatial_aggregation",
+                build_step="build_datavalueset",
+            ),
         }
     )
 
@@ -1662,6 +2067,13 @@ def test_engine_follows_declarative_workflow_order(monkeypatch: pytest.MonkeyPat
                         "inputs": {"records": {"from_step": "aggregate", "output": "records"}},
                     },
                 ],
+                "outputs": {
+                    "bbox": {"from_step": "features", "output": "bbox"},
+                    "features": {"from_step": "features", "output": "features"},
+                    "records": {"from_step": "aggregate", "output": "records"},
+                    "data_value_set": {"from_step": "build", "output": "data_value_set"},
+                    "output_file": {"from_step": "build", "output": "output_file"},
+                },
             }
         ),
     )
@@ -1708,6 +2120,13 @@ def test_validate_workflow_reports_explicit_input_wiring(client: TestClient) -> 
     assert response.status_code == 200
     body = response.json()
     assert body["valid"] is True
+    assert body["publication_publishable"] is True
+    assert body["publication_intent"] == "feature_collection"
+    assert body["publication_exposure"] == "ogc"
+    assert body["publication_inputs"]["records"]["from_step"] == "spatial_agg"
+    assert body["serving_supported"] is True
+    assert body["serving_asset_format"] == "geojson"
+    assert body["serving_targets"] == ["pygeoapi", "analytics"]
     assert body["resolved_steps"][0]["id"] == "get_features"
     assert body["resolved_steps"][1]["resolved_inputs"]["bbox"] == {
         "from_step": "get_features",
@@ -1814,6 +2233,7 @@ def test_engine_resolves_step_config_from_request_params(monkeypatch: pytest.Mon
                     {"component": "spatial_aggregation"},
                     {"component": "build_datavalueset"},
                 ],
+                "outputs": _standard_workflow_outputs(),
             }
         ),
     )
@@ -1883,6 +2303,7 @@ def test_engine_rejects_invalid_step_config(monkeypatch: pytest.MonkeyPatch) -> 
                     {"component": "spatial_aggregation"},
                     {"component": "build_datavalueset"},
                 ],
+                "outputs": _standard_workflow_outputs(),
             }
         ),
     )
@@ -1955,6 +2376,7 @@ def test_engine_download_dataset_remote_mode_uses_remote_adapter(monkeypatch: py
                     {"component": "spatial_aggregation"},
                     {"component": "build_datavalueset"},
                 ],
+                "outputs": _standard_workflow_outputs(),
             }
         ),
     )
@@ -1973,10 +2395,11 @@ def test_engine_download_dataset_remote_mode_uses_remote_adapter(monkeypatch: py
     )
     remote_called: dict[str, Any] = {}
 
-    def _remote_adapter(**kwargs: Any) -> None:
+    def _remote_adapter(**kwargs: Any) -> dict[str, Any]:
         remote_called.update(kwargs)
+        return {"status": "downloaded"}
 
-    monkeypatch.setattr(engine, "_invoke_remote_download_component", _remote_adapter)
+    monkeypatch.setattr(component_services, "_invoke_registered_remote_component", _remote_adapter)
     monkeypatch.setattr(
         engine.component_services,
         "spatial_aggregation_component",
@@ -1991,8 +2414,9 @@ def test_engine_download_dataset_remote_mode_uses_remote_adapter(monkeypatch: py
 
     response = engine.execute_workflow(request)
     assert response.status == "completed"
+    assert remote_called["component_key"] == "download_dataset@v1"
     assert remote_called["remote_url"] == "http://component-host/components/download-dataset"
-    assert remote_called["dataset_id"] == "chirps3_precipitation_daily"
+    assert remote_called["request"].dataset_id == "chirps3_precipitation_daily"
 
 
 def test_engine_rejects_remote_download_without_remote_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2020,6 +2444,7 @@ def test_engine_rejects_remote_download_without_remote_url(monkeypatch: pytest.M
                     {"component": "spatial_aggregation"},
                     {"component": "build_datavalueset"},
                 ],
+                "outputs": _standard_workflow_outputs(),
             }
         ),
     )
@@ -2078,6 +2503,7 @@ def test_engine_rejects_remote_fields_in_local_mode(monkeypatch: pytest.MonkeyPa
                     {"component": "spatial_aggregation"},
                     {"component": "build_datavalueset"},
                 ],
+                "outputs": _standard_workflow_outputs(),
             }
         ),
     )
@@ -2153,6 +2579,7 @@ def test_engine_supports_remote_mode_for_remote_compatible_component_chain(
                         },
                     },
                 ],
+                "outputs": _standard_workflow_outputs(),
             }
         ),
     )
@@ -2169,36 +2596,26 @@ def test_engine_supports_remote_mode_for_remote_compatible_component_chain(
         "build": False,
     }
 
-    monkeypatch.setattr(
-        engine,
-        "_invoke_remote_feature_source_component",
-        lambda **kwargs: (
-            called.__setitem__("feature", True),
-            {"type": "FeatureCollection", "features": [{"id": "OU_1", "properties": {"id": "OU_1"}}]},
-            [0, 0, 1, 1],
-        )[1:],
-    )
-    monkeypatch.setattr(
-        engine,
-        "_invoke_remote_download_component",
-        lambda **kwargs: called.__setitem__("download", True),
-    )
-    monkeypatch.setattr(
-        engine,
-        "_invoke_remote_spatial_aggregation_component",
-        lambda **kwargs: (
-            called.__setitem__("spatial", True),
-            [{"org_unit": "OU_1", "time": "2024-01-01", "value": 10.0}],
-        )[1],
-    )
-    monkeypatch.setattr(
-        engine,
-        "_invoke_remote_build_datavalueset_component",
-        lambda **kwargs: (
-            called.__setitem__("build", True),
-            ({"dataValues": [{"value": "10.0"}]}, "/tmp/data/out.json"),
-        )[1],
-    )
+    def _remote_adapter(**kwargs: Any) -> dict[str, Any]:
+        component_key = kwargs["component_key"]
+        if component_key == "feature_source@v1":
+            called["feature"] = True
+            return {
+                "features": {"type": "FeatureCollection", "features": [{"id": "OU_1", "properties": {"id": "OU_1"}}]},
+                "bbox": [0, 0, 1, 1],
+            }
+        if component_key == "download_dataset@v1":
+            called["download"] = True
+            return {"status": "downloaded"}
+        if component_key == "spatial_aggregation@v1":
+            called["spatial"] = True
+            return {"records": [{"org_unit": "OU_1", "time": "2024-01-01", "value": 10.0}]}
+        if component_key == "build_datavalueset@v1":
+            called["build"] = True
+            return {"data_value_set": {"dataValues": [{"value": "10.0"}]}, "output_file": "/tmp/data/out.json"}
+        raise AssertionError(f"Unexpected remote component key: {component_key}")
+
+    monkeypatch.setattr(component_services, "_invoke_registered_remote_component", _remote_adapter)
     monkeypatch.setattr(engine, "persist_run_log", lambda **kwargs: "/tmp/data/workflow_runs/run.json")
 
     response = engine.execute_workflow(request)

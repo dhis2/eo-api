@@ -115,12 +115,14 @@ class WorkflowExecuteResponse(BaseModel):
     workflow_id: str
     workflow_version: int
     dataset_id: str
-    bbox: list[float]
-    feature_count: int
-    value_count: int
-    output_file: str
+    outputs: dict[str, Any] = Field(default_factory=dict)
+    primary_output_name: str | None = None
+    bbox: list[float] | None = None
+    feature_count: int | None = None
+    value_count: int | None = None
+    output_file: str | None = None
     run_log_file: str
-    data_value_set: dict[str, Any]
+    data_value_set: dict[str, Any] | None = None
     component_runs: list[ComponentRun]
     component_run_details_included: bool = False
     component_run_details_available: bool = True
@@ -223,6 +225,13 @@ class WorkflowCatalogItem(BaseModel):
     publication_publishable: bool
     publication_intent: str | None = None
     publication_exposure: str | None = None
+    publication_asset_format: str | None = None
+    publication_asset_binding: dict[str, str] | None = None
+    publication_inputs: dict[str, dict[str, str]] = Field(default_factory=dict)
+    serving_supported: bool = False
+    serving_asset_format: str | None = None
+    serving_targets: list[str] = Field(default_factory=list)
+    serving_error: str | None = None
     step_count: int
     components: list[str]
 
@@ -369,6 +378,16 @@ class WorkflowValidateResponse(BaseModel):
     workflow_version: int
     step_count: int
     components: list[str]
+    publication_publishable: bool = False
+    publication_intent: str | None = None
+    publication_exposure: str | None = None
+    publication_asset_format: str | None = None
+    publication_asset_binding: dict[str, str] | None = None
+    publication_inputs: dict[str, dict[str, str]] = Field(default_factory=dict)
+    serving_supported: bool = False
+    serving_asset_format: str | None = None
+    serving_targets: list[str] = Field(default_factory=list)
+    serving_error: str | None = None
     resolved_steps: list[WorkflowValidateStep] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
