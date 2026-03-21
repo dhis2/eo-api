@@ -1,0 +1,641 @@
+{% extends "_base.html" %}
+{% block title %}{{ super() }} {{ data['title'] }} {% endblock %}
+{% block desc %}{{ data.get('description','') | truncate(250) }}{% endblock %}
+{% block tags %}{{ data.get('keywords',[]) | join(',') }}{% endblock %}
+{% block crumbs %}{{ super() }}
+/ <a href="{{ data['collections_path'] }}">{% trans %}Collections{% endtrans %}</a>
+/ <a href="./{{ data['id'] }}">{{ data['title'] | truncate( 25 ) }}</a>
+{% endblock %}
+
+{% block extrahead %}
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.3.1/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.3.1/dist/leaflet.js"></script>
+    <script src='https://unpkg.com/leaflet-imageoverlay-ogcapi@0.1.0/Leaflet.ImageOverlay.OGCAPI.js'></script>
+    <style>
+      .action-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 16px;
+        margin: 24px 0 12px;
+      }
+      .action-card {
+        padding: 16px 18px;
+        border: 1px solid rgba(23, 32, 51, 0.12);
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(246, 247, 250, 0.92) 100%);
+        box-shadow: 0 10px 28px rgba(23, 32, 51, 0.05);
+      }
+      .action-card h3 {
+        margin: 0 0 10px;
+        font-size: 1.15rem;
+      }
+      .action-card p {
+        margin: 0 0 12px;
+        color: #5f6c80;
+      }
+      .action-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 600;
+      }
+      .meta-links {
+        margin-top: 8px;
+      }
+      .meta-links ul {
+        margin-bottom: 0;
+      }
+      .section-subtle {
+        color: #5f6c80;
+        margin-top: -4px;
+      }
+      .example-links {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .example-links a {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+      .subtle-code {
+        display: inline-block;
+        margin-top: 8px;
+        color: #b83280;
+      }
+      .coverage-controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        margin: 18px 0 12px;
+      }
+      .coverage-controls label {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: #5f6c80;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .coverage-controls input,
+      .coverage-controls select,
+      .coverage-controls button {
+        width: 100%;
+        padding: 9px 10px;
+        border-radius: 10px;
+        border: 1px solid rgba(23, 32, 51, 0.14);
+        background: white;
+        font: inherit;
+      }
+      .coverage-controls button {
+        background: linear-gradient(135deg, #1b5f94 0%, #dd8d55 100%);
+        color: white;
+        border: none;
+        font-weight: 700;
+      }
+      .coverage-status {
+        margin: 8px 0 14px;
+        color: #5f6c80;
+      }
+      .coverage-legend {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .coverage-legend-bar {
+        flex: 1;
+        height: 16px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #fff7bc 0%, #fec44f 35%, #fe9929 65%, #d95f0e 100%);
+        border: 1px solid rgba(23, 32, 51, 0.14);
+      }
+      .coverage-readout {
+        margin-top: 10px;
+        padding: 12px;
+        border-radius: 14px;
+        background: rgba(27, 95, 148, 0.06);
+        border: 1px solid rgba(27, 95, 148, 0.12);
+      }
+    </style>
+{% endblock %}
+
+{% block body %}
+    <section
+      id="collection"
+      data-collection-id="{{ data['id'] }}"
+      data-is-coverage="{{ 'true' if providers and providers[0]['type'] == 'coverage' else 'false' }}"
+      data-raster-capabilities-url="{{ raster_links[0]['href'] if raster_links else '' }}">
+      {% set resource_config = config.get('resources', {}).get(data['id'], {}) %}
+      {% set resource_metadata = resource_config.get('metadata', {}) %}
+      {% set providers = resource_config.get('providers', []) %}
+      {% set raster_links = data['links'] | selectattr('rel', 'equalto', 'raster-capabilities') | list %}
+      {% set variable_name = resource_metadata.get('variable', '...') %}
+      {% set prefers_aggregated_view = data['id'].startswith('chirps') or variable_name == 'precip' %}
+      {% set single_preview_href = '/raster/' ~ data['id'] ~ '/preview.png?variable=' ~ variable_name ~ '&datetime=2024-01-01' %}
+      {% set aggregate_preview_href = '/raster/' ~ data['id'] ~ '/preview.png?variable=' ~ variable_name ~ '&aggregation=sum&start=2024-01-01&end=2024-01-31' %}
+      {% set tilejson_href = '/raster/' ~ data['id'] ~ '/WebMercatorQuad/tilejson.json?variable=' ~ variable_name ~ '&datetime=2024-01-01' %}
+      <div class="row">
+        <div class="col-sm">
+          <h1>{{ data['title'] }}</h1>
+          <p>{{ data['description'] }}</p>
+          <p>
+            {% for kw in data['keywords'] %}
+              <span class="badge text-bg-primary bg-primary">{{ kw }}</span>
+            {% endfor %}
+          </p>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-sm-12">
+          {% if providers and providers[0]['type'] == 'coverage' %}
+          <div class="coverage-controls">
+            <div>
+              <label for="render-mode">Render Mode</label>
+              <select id="render-mode">
+                <option value="datetime" {% if not prefers_aggregated_view %}selected{% endif %}>Single date</option>
+                <option value="aggregation" {% if prefers_aggregated_view %}selected{% endif %}>Aggregated range</option>
+              </select>
+            </div>
+            <div>
+              <label for="render-datetime">Date</label>
+              <input id="render-datetime" type="date" value="2024-01-01">
+            </div>
+            <div>
+              <label for="render-aggregation">Aggregation</label>
+              <select id="render-aggregation">
+                <option value="sum">sum</option>
+                <option value="mean">mean</option>
+                <option value="max">max</option>
+                <option value="min">min</option>
+              </select>
+            </div>
+            <div>
+              <label for="render-start">Start</label>
+              <input id="render-start" type="date" value="2024-01-01">
+            </div>
+            <div>
+              <label for="render-end">End</label>
+              <input id="render-end" type="date" value="2024-01-31">
+            </div>
+            <div>
+              <label for="render-variable">Variable</label>
+              <input id="render-variable" type="text" value="{{ variable_name }}">
+            </div>
+            <div>
+              <label>&nbsp;</label>
+              <button id="render-apply" type="button">Update raster map</button>
+            </div>
+          </div>
+          <div class="coverage-status" id="coverage-status">Loading raster layer…</div>
+          <div class="coverage-legend">
+            <span id="legend-min">0</span>
+            <div class="coverage-legend-bar"></div>
+            <span id="legend-max">50</span>
+          </div>
+          {% endif %}
+          <div id="collection-map"></div>
+          {% if providers and providers[0]['type'] == 'coverage' %}
+          <div class="coverage-readout" id="coverage-readout">
+            Click the map to inspect the rendered raster value for the active selection.
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      {% set ns = namespace(header_printed=false) %}
+      {% for link in data['links'] %}
+          {% if link['rel'] == 'license' %}
+          {% if not ns.header_printed %}
+          <h3>{% trans %}License{% endtrans %}</h3>
+          {% set ns.header_printed = true %}
+          {% endif %}
+          <ul>
+            <li>
+              <div>
+                <a title="{{ link['title'] }}" href="{{ link['href'] }}">{{ link['title'] or link['href'] }}<a>
+            </li>
+          </ul>
+          {% endif %}
+      {% endfor %}
+
+      {% if data['itemType'] == 'feature' or data['itemType'] == 'record' %}
+      {% set analytics_links = data['links'] | selectattr('rel', 'equalto', 'analytics') | list %}
+      <div class="action-grid">
+        <section class="action-card">
+          <h3>{% trans %}Browse{% endtrans %}</h3>
+          <p>{% trans %}Open the collection items view with map and attribute table.{% endtrans %}</p>
+          <a
+            class="action-link"
+            title="{% trans %}Browse Items{% endtrans %}"
+            href="{{ data['collections_path'] }}/{{ data['id'] }}/items">
+            {% trans %}Open items{% endtrans %}
+          </a>
+        </section>
+        {% if analytics_links %}
+        <section class="action-card">
+          <h3>{% trans %}Analytics{% endtrans %}</h3>
+          <p>{% trans %}Open the separate analytics viewer for this published resource.{% endtrans %}</p>
+          {% for link in analytics_links %}
+          <a class="action-link" title="{{ link['title'] }}" href="{{ link['href'] }}">
+            {{ link['title'] or 'Analytics Viewer' }}
+          </a>
+          {% endfor %}
+        </section>
+        {% endif %}
+        <section class="action-card">
+          <h3>{% trans %}Queryables{% endtrans %}</h3>
+          <p>{% trans %}Inspect the fields that can be used for filtering, such as period.{% endtrans %}</p>
+          <a
+            class="action-link"
+            title="{% trans %}Display Queryables{% endtrans %}"
+            href="{{ data['collections_path'] }}/{{ data['id'] }}/queryables">
+            {% trans %}Open queryables{% endtrans %}
+          </a>
+        </section>
+        <section class="action-card">
+          <h3>{% trans %}Schema{% endtrans %}</h3>
+          <p>{% trans %}View the collection schema exposed by the publication layer.{% endtrans %}</p>
+          <a
+            class="action-link"
+            title="{% trans %}Display Schema{% endtrans %}"
+            href="{{ data['collections_path'] }}/{{ data['id'] }}/schema">
+            {% trans %}Open schema{% endtrans %}
+          </a>
+        </section>
+        {% for provider in providers %}
+          {% if 'tile' in provider['type'] %}
+        <section class="action-card">
+        <h3>{% trans %}Tiles{% endtrans %}</h3>
+        <p>{% trans %}Open tile endpoints for map-oriented publication access.{% endtrans %}</p>
+        <a class="action-link" title="{% trans %}Display Tiles{% endtrans %}" href="{{ data['collections_path'] }}/{{ data['id'] }}/tiles">
+          {% trans %}Open tiles{% endtrans %}
+        </a>
+        </section>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif  %}
+
+      {% if providers and providers[0]['type'] == 'coverage' %}
+      <div class="action-grid">
+        <section class="action-card">
+          <h3>{% trans %}Raster Rendering{% endtrans %}</h3>
+          <p>{% trans %}This collection exposes raster rendering via the backend-owned raster publication surface.{% endtrans %}</p>
+          {% for link in raster_links %}
+          <a class="action-link" title="{{ link['title'] }}" href="{{ link['href'] }}">
+            {{ link['title'] or 'Raster Capabilities' }}
+          </a>
+          {% endfor %}
+        </section>
+        <section class="action-card">
+          <h3>{% trans %}Temporal Contract{% endtrans %}</h3>
+          <p>{% trans %}Temporal raster rendering requires either a single date or an aggregation window.{% endtrans %}</p>
+          <code>?datetime=YYYY-MM-DD</code><br>
+          <code>?aggregation=sum&amp;start=YYYY-MM-DD&amp;end=YYYY-MM-DD</code>
+          <div class="example-links">
+            <a class="action-link" href="{{ single_preview_href }}">Single-date preview example</a>
+            <a class="action-link" href="{{ aggregate_preview_href }}">Aggregated preview example</a>
+          </div>
+        </section>
+        <section class="action-card">
+          <h3>{% trans %}Variable{% endtrans %}</h3>
+          <p>{% trans %}Use the dataset variable when requesting preview, tilejson, or tile rendering.{% endtrans %}</p>
+          <code>variable={{ variable_name }}</code>
+          <div class="example-links">
+            <a class="action-link" href="{{ tilejson_href }}">TileJSON example</a>
+          </div>
+        </section>
+        <section class="action-card">
+          <h3>{% trans %}Default Styling{% endtrans %}</h3>
+          <p>{% trans %}Rendering uses dataset-aware defaults so previews are readable without manual rescaling.{% endtrans %}</p>
+          <div class="subtle-code">CHIRPS defaults: colormap <code>ylorrd</code>, single date <code>0,50</code>, monthly sum <code>0,300</code></div>
+        </section>
+      </div>
+      {% endif %}
+
+      {% if 'parameter_names' in data %}
+      <h3>Parameters</h3>
+      <table class="table table-striped table-bordered">
+        <tr>
+          <th>id</th>
+          <th>name</th>
+          <th>units</th>
+        </tr>
+        {% for parameter in data['parameter_names'].values() %}
+        <tr>
+          <td>{{ parameter['id'] }}</td>
+          <td>{{ parameter['name'] }}</td>
+          <td>{{ parameter['unit']['symbol']['value'] }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% endif %}
+
+      <h3>{% trans %}Links{% endtrans %}</h3>
+      <p class="section-subtle">{% trans %}Raw protocol and related links for this collection.{% endtrans %}</p>
+      <div class="meta-links">
+      <ul>
+      {% for link in data['links'] %}
+          <li>
+            <a title="{{ link['rel'] }}" href="{{ link['href'] }}">
+            <span>{{ link['title'] }}</span> (<span>{{ link['type'] }}</span>)
+            </a></li>
+      {% endfor %}
+      </ul>
+      </div>
+      {% if data['itemType'] == 'feature' %}
+      <h3>{% trans %}Reference Systems{% endtrans %}</h3>
+      <ul>
+      {% for crs in data['crs'] %}
+          <li>
+            <a title="{{ crs }}" href="{{ crs }}"><span>{{ crs }}</span></a>
+            </li>
+      {% endfor %}
+      </ul>
+      <h3>{% trans %}Storage CRS{% endtrans %}</h3>
+      <ul>
+          <li>
+            {% trans %}CRS{% endtrans %}: <a title="{{ data['storageCrs'] }}" href="{{ data['storageCrs'] }}"><span>{{ data['storageCrs'] }}</span></a>
+          </li>
+        <li>
+          {% trans %}Epoch{% endtrans %}: <a><span>{{ data['storageCrsCoordinateEpoch'] or '_(not specified)' }}</span></a>
+        </li>
+      </ul>
+     {% endif %}
+
+    </section>
+{% endblock %}
+
+{% block extrafoot %}
+    <script>
+    function coverageDebug(message) {
+        var status = document.getElementById('coverage-status');
+        if (status) {
+            status.textContent = message;
+        }
+    }
+
+    window.addEventListener('error', function(event) {
+        coverageDebug('JS error: ' + event.message);
+    });
+
+    var collectionRoot = document.getElementById('collection');
+    var renderApplyButton = document.getElementById('render-apply');
+    var collectionId = collectionRoot && collectionRoot.dataset.collectionId
+        ? collectionRoot.dataset.collectionId
+        : window.location.pathname.split('/').filter(Boolean).slice(-1)[0];
+    var isCoverage = Boolean(renderApplyButton);
+    var rasterCapabilitiesUrl = collectionRoot ? (collectionRoot.dataset.rasterCapabilitiesUrl || '') : '';
+    var rasterBase = isCoverage ? "/raster/" + collectionId : "";
+    var rasterCapabilities = isCoverage ? {
+        titiler: {
+            style_defaults: {
+                rescale_by_mode: {
+                    datetime: [0, 50],
+                    sum: [0, 300],
+                    mean: [0, 50],
+                    max: [0, 100],
+                    min: [0, 20]
+                }
+            },
+            endpoints: {
+                tilejson: rasterBase + "/WebMercatorQuad/tilejson.json",
+                tiles: rasterBase + "/tiles/WebMercatorQuad/{z}/{x}/{y}.png",
+                preview: rasterBase + "/preview.png",
+                point: rasterBase + "/point/{lon},{lat}"
+            }
+        }
+    } : null;
+    var rasterLayer = null;
+    var map = L.map('collection-map').setView([{{ 0 }}, {{ 0 }}], 1);
+    map.addLayer(new L.TileLayer(
+      '{{ config['server']['map']['url'] }}', {
+        maxZoom: 18,
+        attribution: '{{ config['server']['map']['attribution'] | safe }}'
+      }
+    ));
+
+   {% if not (providers and providers[0]['type'] == 'coverage') %}
+   {% for link in data['links'] %}
+     {% if link['rel'] == 'http://www.opengis.net/def/rel/ogc/1.0/map' and link['href'] %}
+        L.imageOverlay.ogcapi("{{ data['base_url'] }}", {collection: "{{ data['id'] }}", "opacity": .7, "transparent": true}).addTo(map);
+     {% endif %}
+   {% endfor %}
+   {% endif %}
+
+    var bbox_layer = L.latLngBounds(
+      ['{{ data['extent']['spatial']['bbox'][0][1] }}', '{{ data['extent']['spatial']['bbox'][0][0] }}'],
+      ['{{ data['extent']['spatial']['bbox'][0][3] }}', '{{ data['extent']['spatial']['bbox'][0][2] }}']
+    );
+
+    map.fitBounds(bbox_layer, {maxZoom: 10});
+
+    var firstCorner;
+    var secondCorner;
+    var currentBoundingBox;
+    var boundingBox;
+    var drawingBoundingBox = false;
+
+    map.on('mousedown', setFirstCorner);
+    map.on('mouseup', setSecondCorner);
+    map.on('mousemove', drawCurrentBoundingBox);
+    map.on('click', boundingBoxInfo);
+
+    function boundingBoxInfo(e) {
+        if (map.hasLayer(boundingBox)) {
+            var bboxCoords = boundingBox.getBounds().toBBoxString();
+            L.popup({maxWidth:"auto"})
+            .setLatLng(boundingBox.getBounds().getCenter())
+            .setContent(`bbox=${bboxCoords}`)
+            .addTo(map);
+        }
+    }
+
+    function setFirstCorner(e) {
+        if (e.originalEvent.ctrlKey) {
+            if (map.hasLayer(boundingBox)) {
+                map.removeLayer(boundingBox);
+            }
+            map.dragging.disable();
+            firstCorner = e.latlng;
+            drawingBoundingBox = true;
+        } else if (boundingBox && map.hasLayer(boundingBox) && !boundingBox.getBounds().contains(e.latlng)) {
+            map.removeLayer(boundingBox);
+        }
+    }
+
+    function setSecondCorner(e) {
+        if (map.hasLayer(currentBoundingBox)) {
+             map.removeLayer(currentBoundingBox);
+        }
+        if (e.originalEvent.ctrlKey) {
+            if (drawingBoundingBox) {
+                drawingBoundingBox = false;
+                secondCorner = e.latlng;
+                var bounds = [firstCorner, secondCorner];
+                boundingBox = L.rectangle(bounds, {color:"#ff7800", weight:1});
+                boundingBox.addTo(map);
+            }
+        }
+        drawingBoundingBox = false;
+        map.dragging.enable();
+    }
+
+    function drawCurrentBoundingBox(e) {
+        if (drawingBoundingBox) {
+            if (map.hasLayer(currentBoundingBox)) {
+                map.removeLayer(currentBoundingBox);
+            }
+            secondCorner = e.latlng;
+            var bounds = [firstCorner, secondCorner];
+            currentBoundingBox = L.rectangle(bounds, {dashArray:"4 1", weight:0.4});
+            currentBoundingBox.addTo(map);
+        }
+    }
+
+    function currentRenderRange() {
+        var mode = document.getElementById('render-mode')?.value || 'datetime';
+        if (!rasterCapabilities || !rasterCapabilities.titiler || !rasterCapabilities.titiler.style_defaults) {
+            return [0, 1];
+        }
+        var ranges = rasterCapabilities.titiler.style_defaults.rescale_by_mode || {};
+        var key = mode === 'aggregation'
+            ? (document.getElementById('render-aggregation')?.value || 'sum')
+            : 'datetime';
+        return ranges[key] || ranges.datetime || [0, 1];
+    }
+
+    function updateCoverageLegend() {
+        if (!isCoverage) return;
+        var range = currentRenderRange();
+        document.getElementById('legend-min').textContent = String(range[0]);
+        document.getElementById('legend-max').textContent = String(range[1]);
+    }
+
+    function syncCoverageControls() {
+        if (!isCoverage) return;
+        var mode = document.getElementById('render-mode').value;
+        var isAggregation = mode === 'aggregation';
+        document.getElementById('render-datetime').disabled = isAggregation;
+        document.getElementById('render-aggregation').disabled = !isAggregation;
+        document.getElementById('render-start').disabled = !isAggregation;
+        document.getElementById('render-end').disabled = !isAggregation;
+    }
+
+    function buildRasterQuery() {
+        var params = new URLSearchParams();
+        var variable = document.getElementById('render-variable').value.trim();
+        if (variable) params.set('variable', variable);
+        var mode = document.getElementById('render-mode').value;
+        if (mode === 'aggregation') {
+            params.set('aggregation', document.getElementById('render-aggregation').value);
+            params.set('start', document.getElementById('render-start').value);
+            params.set('end', document.getElementById('render-end').value);
+        } else {
+            params.set('datetime', document.getElementById('render-datetime').value);
+        }
+        return params;
+    }
+
+    async function refreshCoverageLayer() {
+        if (!isCoverage || !rasterCapabilities) return;
+        var applyButton = document.getElementById('render-apply');
+        var status = document.getElementById('coverage-status');
+        applyButton.disabled = true;
+        applyButton.textContent = 'Loading...';
+        status.textContent = 'Requesting raster layer...';
+        var params = buildRasterQuery();
+        var previewUrl = rasterCapabilities.titiler.endpoints.preview + '?' + params.toString();
+        if (rasterLayer) {
+            map.removeLayer(rasterLayer);
+        }
+        var tileBounds = bbox_layer;
+        rasterLayer = L.imageOverlay(previewUrl, tileBounds, {
+            opacity: 0.96,
+        });
+        var settled = false;
+
+        function finish(statusText) {
+            if (settled) return;
+            settled = true;
+            status.textContent = statusText;
+            applyButton.disabled = false;
+            applyButton.textContent = 'Update raster map';
+        }
+
+        rasterLayer.on('add', function() {
+            status.textContent = 'Loading raster layer...';
+        });
+        rasterLayer.on('load', function() {
+            finish('Raster layer updated');
+        });
+        rasterLayer.on('error', function() {
+            finish('Raster layer could not be loaded for this selection');
+        });
+        rasterLayer.addTo(map);
+        map.fitBounds(tileBounds, {maxZoom: 10});
+        window.setTimeout(function() {
+            finish('Raster request sent');
+        }, 1200);
+        updateCoverageLegend();
+    }
+
+    async function coveragePointReadout(e) {
+        if (!isCoverage || !rasterCapabilities) return;
+        var params = buildRasterQuery();
+        var pointPath = rasterCapabilities.titiler.endpoints.point
+            .replace('{lon}', e.latlng.lng)
+            .replace('{lat}', e.latlng.lat);
+        var response = await fetch(pointPath + '?' + params.toString());
+        if (!response.ok) {
+            document.getElementById('coverage-readout').textContent = 'Point query unavailable for this selection.';
+            return;
+        }
+        var body = await response.json();
+        var values = Array.isArray(body.values) ? body.values : [];
+        var renderedValue = values.length === 1 ? values[0] : values.slice(0, 5).join(', ');
+        document.getElementById('coverage-readout').innerHTML =
+            '<strong>Point value</strong><br>' +
+            'lon=' + e.latlng.lng.toFixed(4) + ', lat=' + e.latlng.lat.toFixed(4) + '<br>' +
+            renderedValue;
+    }
+
+    if (isCoverage) {
+        try {
+            document.getElementById('coverage-status').textContent = 'Raster controls ready';
+            document.getElementById('render-apply').addEventListener('click', refreshCoverageLayer);
+            document.getElementById('render-mode').addEventListener('change', function() {
+                syncCoverageControls();
+                updateCoverageLegend();
+            });
+            document.getElementById('render-aggregation').addEventListener('change', updateCoverageLegend);
+            map.on('click', coveragePointReadout);
+            syncCoverageControls();
+            updateCoverageLegend();
+            refreshCoverageLayer();
+        } catch (error) {
+            coverageDebug('Coverage init failed: ' + error.message);
+        }
+    }
+
+    if (isCoverage && rasterCapabilitiesUrl) {
+        fetch(rasterCapabilitiesUrl)
+            .then(function(response) { return response.json(); })
+            .then(function(body) {
+                if (body && body.titiler) {
+                    rasterCapabilities = body;
+                }
+                document.getElementById('coverage-status').textContent = 'Raster capabilities loaded';
+                updateCoverageLegend();
+            })
+            .catch(function() {
+                document.getElementById('coverage-status').textContent = 'Raster controls ready';
+            });
+    }
+    </script>
+{% endblock %}

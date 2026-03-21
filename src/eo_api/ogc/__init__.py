@@ -1,0 +1,1 @@
+"""OGC adapter routes package."""
