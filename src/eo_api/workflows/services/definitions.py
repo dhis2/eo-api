@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -14,6 +15,8 @@ from ...publications.schemas import PublishedResourceExposure, PublishedResource
 SCRIPT_DIR = Path(__file__).parent.resolve()
 WORKFLOWS_DIR = SCRIPT_DIR.parent.parent.parent.parent / "data" / "workflows"
 DEFAULT_WORKFLOW_ID = "dhis2_datavalue_set_v1"
+
+
 class WorkflowStep(BaseModel):
     """One component step in a declarative workflow definition."""
 
@@ -263,7 +266,7 @@ def _normalize_step_inputs(
 
 def _validate_workflow_outputs(
     *,
-    bindings: dict[str, WorkflowStepInput | WorkflowOutputBinding],
+    bindings: Mapping[str, WorkflowStepInput | WorkflowOutputBinding],
     available_outputs: dict[str, set[str]],
     owner: str,
 ) -> None:
@@ -275,8 +278,7 @@ def _validate_workflow_outputs(
             raise ValueError(f"{owner} reference '{output_name}' points to unknown step '{ref.from_step}'")
         if ref.output not in available_for_step:
             raise ValueError(
-                f"{owner} reference '{output_name}' points to missing output "
-                f"'{ref.output}' from step '{ref.from_step}'"
+                f"{owner} reference '{output_name}' points to missing output '{ref.output}' from step '{ref.from_step}'"
             )
 
 

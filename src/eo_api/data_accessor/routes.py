@@ -108,6 +108,7 @@ def get_dataset_preview(
                     resource_id=dataset_id,
                 ),
             )
+        assert xmin is not None and ymin is not None and xmax is not None and ymax is not None
         bbox = [float(xmin), float(ymin), float(xmax), float(ymax)]
     else:
         bbox = None
@@ -151,6 +152,7 @@ def get_dataset_coverage_summary(
                     resource_id=dataset_id,
                 ),
             )
+        assert xmin is not None and ymin is not None and xmax is not None and ymax is not None
         bbox = [float(xmin), float(ymin), float(xmax), float(ymax)]
     else:
         bbox = None

@@ -1165,18 +1165,22 @@ def test_generated_pygeoapi_config_uses_real_source_coverage_extent(
         },
     ).rio.write_crs("EPSG:4326").to_zarr(zarr_path, mode="w")
     monkeypatch.setattr(publication_pygeoapi, "get_zarr_path", lambda dataset: zarr_path)
-    monkeypatch.setattr(publication_services, "list_datasets", lambda: [
-        {
-            "id": "chirps3_precipitation_daily",
-            "name": "Total precipitation (CHIRPS3)",
-            "variable": "precip",
-            "period_type": "daily",
-            "source": "CHIRPS v3",
-            "source_url": "https://example.test/chirps",
-            "resolution": "5 km x 5 km",
-            "units": "mm",
-        }
-    ])
+    monkeypatch.setattr(
+        publication_services,
+        "list_datasets",
+        lambda: [
+            {
+                "id": "chirps3_precipitation_daily",
+                "name": "Total precipitation (CHIRPS3)",
+                "variable": "precip",
+                "period_type": "daily",
+                "source": "CHIRPS v3",
+                "source_url": "https://example.test/chirps",
+                "resolution": "5 km x 5 km",
+                "units": "mm",
+            }
+        ],
+    )
     monkeypatch.setattr(
         publication_services,
         "get_data_coverage",
@@ -1917,6 +1921,7 @@ def test_engine_spatial_aggregation_uses_temporally_aggregated_dataset(monkeypat
 
     response = engine.execute_workflow(request, include_component_run_details=True)
     assert response.status == "completed"
+    assert response.data_value_set is not None
     assert response.data_value_set["dataValues"][0]["period"] == "202401"
 
 

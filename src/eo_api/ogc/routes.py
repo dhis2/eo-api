@@ -112,8 +112,7 @@ def get_ogc_openapi(request: Request) -> dict[str, Any]:
             "title": "DHIS2 EO API - Native OGC Processes",
             "version": "0.1.0",
             "description": (
-                "Native OGC API - Processes service description "
-                "for the FastAPI-owned process and job surface."
+                "Native OGC API - Processes service description for the FastAPI-owned process and job surface."
             ),
         },
         "servers": [{"url": f"{base_url}/ogcapi"}],
@@ -122,9 +121,7 @@ def get_ogc_openapi(request: Request) -> dict[str, Any]:
             "/conformance": {
                 "get": {"summary": "Conformance", "responses": {"200": {"description": "Conformance classes"}}}
             },
-            "/processes": {
-                "get": {"summary": "List processes", "responses": {"200": {"description": "Process list"}}}
-            },
+            "/processes": {"get": {"summary": "List processes", "responses": {"200": {"description": "Process list"}}}},
             "/processes/{process_id}": {
                 "get": {
                     "summary": "Describe process",

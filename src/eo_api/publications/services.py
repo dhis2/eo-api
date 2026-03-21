@@ -114,6 +114,7 @@ def _coverage_metadata_for_dataset(dataset: dict[str, object]) -> dict[str, obje
         xmax = spatial.get("xmax")
         ymax = spatial.get("ymax")
         if all(value is not None for value in (xmin, ymin, xmax, ymax)):
+            assert xmin is not None and ymin is not None and xmax is not None and ymax is not None
             metadata["bbox"] = [float(xmin), float(ymin), float(xmax), float(ymax)]
 
     if isinstance(temporal, dict):

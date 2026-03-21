@@ -105,13 +105,12 @@ def get_point_values(
         ymin, ymax = float(lat_values.min().item()), float(lat_values.max().item())
         if lon < xmin or lon > xmax or lat < ymin or lat > ymax:
             raise ValueError(
-                f"Requested point ({lon}, {lat}) is outside dataset coverage "
-                f"([{xmin}, {ymin}] to [{xmax}, {ymax}])"
+                f"Requested point ({lon}, {lat}) is outside dataset coverage ([{xmin}, {ymin}] to [{xmax}, {ymax}])"
             )
 
-        variable_name = str(dataset.get("variable") or next(iter(ds.data_vars)))
+        variable_name = str(dataset.get("variable") or str(next(iter(ds.data_vars))))
         if variable_name not in ds.data_vars:
-            variable_name = next(iter(ds.data_vars))
+            variable_name = str(next(iter(ds.data_vars)))
         data_array = ds[variable_name]
         point = data_array.sel({lon_dim: lon, lat_dim: lat}, method="nearest")
 
@@ -156,9 +155,9 @@ def get_preview_summary(
         if not ds.data_vars:
             raise ValueError(f"Dataset '{dataset['id']}' has no data variables available")
 
-        variable_name = str(dataset.get("variable") or next(iter(ds.data_vars)))
+        variable_name = str(dataset.get("variable") or str(next(iter(ds.data_vars))))
         if variable_name not in ds.data_vars:
-            variable_name = next(iter(ds.data_vars))
+            variable_name = str(next(iter(ds.data_vars)))
         data_array = ds[variable_name]
         lon_dim, lat_dim = get_lon_lat_dims(data_array)
         time_dim = get_time_dim(data_array)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import xarray as xr
 from fastapi.testclient import TestClient
 
@@ -12,7 +13,7 @@ from eo_api.data_accessor.services.accessor import (
 from eo_api.main import app
 
 
-def test_get_point_values_returns_time_series(monkeypatch) -> None:
+def test_get_point_values_returns_time_series(monkeypatch: pytest.MonkeyPatch) -> None:
     ds = xr.Dataset(
         {"precip": (("time", "lat", "lon"), np.array([[[1.0, 2.0]], [[3.0, 4.0]]]))},
         coords={
@@ -38,7 +39,7 @@ def test_get_point_values_returns_time_series(monkeypatch) -> None:
     assert result["values"] == [{"period": "2024-01", "value": 2.0}, {"period": "2024-02", "value": 4.0}]
 
 
-def test_point_query_outside_coverage_returns_typed_error(monkeypatch) -> None:
+def test_point_query_outside_coverage_returns_typed_error(monkeypatch: pytest.MonkeyPatch) -> None:
     ds = xr.Dataset(
         {"precip": (("time", "lat", "lon"), np.array([[[1.0, 2.0]], [[3.0, 4.0]]]))},
         coords={
@@ -66,7 +67,7 @@ def test_point_query_outside_coverage_returns_typed_error(monkeypatch) -> None:
     assert body["resource_id"] == "chirps3_precipitation_daily"
 
 
-def test_get_preview_summary_returns_stats_and_sample(monkeypatch) -> None:
+def test_get_preview_summary_returns_stats_and_sample(monkeypatch: pytest.MonkeyPatch) -> None:
     ds = xr.Dataset(
         {"precip": (("time", "lat", "lon"), np.array([[[1.0, 2.0]], [[3.0, 4.0]]]))},
         coords={
@@ -92,7 +93,7 @@ def test_get_preview_summary_returns_stats_and_sample(monkeypatch) -> None:
     assert result["sample"][0]["period"] == "2024-01"
 
 
-def test_preview_endpoint_requires_complete_bbox(monkeypatch) -> None:
+def test_preview_endpoint_requires_complete_bbox(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "eo_api.data_registry.services.datasets.get_dataset",
         lambda dataset_id: {"id": dataset_id, "variable": "precip", "period_type": "monthly"},
@@ -111,7 +112,7 @@ def test_preview_endpoint_requires_complete_bbox(monkeypatch) -> None:
     assert body["resource_id"] == "chirps3_precipitation_daily"
 
 
-def test_get_coverage_summary_wraps_preview_and_full_coverage(monkeypatch) -> None:
+def test_get_coverage_summary_wraps_preview_and_full_coverage(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "eo_api.data_accessor.services.accessor.get_preview_summary",
         lambda *args, **kwargs: {
@@ -147,7 +148,7 @@ def test_get_coverage_summary_wraps_preview_and_full_coverage(monkeypatch) -> No
     assert result["subset"]["sample"][0]["value"] == 1.0
 
 
-def test_coverage_endpoint_requires_complete_bbox(monkeypatch) -> None:
+def test_coverage_endpoint_requires_complete_bbox(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "eo_api.data_registry.services.datasets.get_dataset",
         lambda dataset_id: {"id": dataset_id, "variable": "precip", "period_type": "monthly"},

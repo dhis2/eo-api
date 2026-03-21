@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import attr
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -93,6 +93,7 @@ def get_raster_capabilities(resource_id: str) -> dict[str, Any]:
         "titiler": capabilities,
     }
 
+
 def _resource_path_dependency(resource_id: str) -> str:
     """Resolve one published resource to a TiTiler-readable Zarr dataset path."""
     resource = _resolve_published_resource(resource_id)
@@ -149,10 +150,27 @@ class RasterReaderParams(XarrayParams):
             selector_values.append(f"time={self.datetime}")
         self.sel = selector_values or None
 
-    def as_dict(self, **kwargs: Any) -> dict[str, Any]:
-        values = super().as_dict(**kwargs)
+    def as_dict(self, exclude_none: bool = True) -> dict[Any, Any]:
+        values = super().as_dict(exclude_none=exclude_none)
         values.pop("datetime", None)
         return values
+
+
+@dataclass
+class RasterImageRenderingParams(ImageRenderingParams):
+    """Image rendering params with dataset-aware default rescaling."""
+
+    resource_id: str = Query()
+    aggregation: str | None = Query(default=None)
+
+    def __post_init__(self) -> None:
+        raw_rescale = cast(Any, self.__dict__.get("rescale"))
+        if raw_rescale is None:
+            profile = _style_profile_for_resource(self.resource_id)
+            default_range = _default_rescale_for_profile(profile, aggregation=self.aggregation)
+            if default_range is not None:
+                self.__dict__["rescale"] = [f"{default_range[0]},{default_range[1]}"]
+        super().__post_init__()
 
 
 @attr.s
@@ -296,31 +314,13 @@ def _colormap_dependency(
     if profile is None:
         return None
 
-    default_map = cmap.get(str(profile["colormap_name"])).copy()
+    base_colormap = cmap.get(str(profile["colormap_name"]))
+    if not isinstance(base_colormap, dict):
+        return base_colormap
+    default_map = cast(dict[Any, Any], base_colormap.copy())
     if str(profile["colormap_name"]) in {"ylorrd", "blues", "viridis"}:
         default_map[0] = (0, 0, 0, 0)
     return default_map
-
-
-def _render_params_dependency(
-    resource_id: str,
-    aggregation: str | None = Query(default=None),
-    rescale: list[str] | None = Query(
-        default=None,
-        description="Optional explicit min,max rescaling override.",
-    ),
-    color_formula: str | None = Query(default=None),
-    return_mask: bool | None = Query(default=None, alias="return_mask"),
-) -> ImageRenderingParams:
-    params = ImageRenderingParams(rescale=rescale, color_formula=color_formula, add_mask=return_mask)
-    if params.rescale is not None:
-        return params
-
-    profile = _style_profile_for_resource(resource_id)
-    default_range = _default_rescale_for_profile(profile, aggregation=aggregation)
-    if default_range is not None:
-        params.rescale = [default_range]
-    return params
 
 
 _factory = TilerFactory(
@@ -344,7 +344,7 @@ _factory = TilerFactory(
     ],
     extensions=[VariablesExtension()],
     colormap_dependency=_colormap_dependency,
-    render_dependency=_render_params_dependency,
+    render_dependency=RasterImageRenderingParams,
     reader_dependency=RasterReaderParams,
     add_viewer=False,
     add_ogc_maps=False,
@@ -478,7 +478,7 @@ def _default_rescale_for_profile(
     range_value = rescale_by_mode.get(mode) or rescale_by_mode.get("datetime")
     if range_value is None:
         return None
-    return tuple(range_value)
+    return cast(tuple[float, float], tuple(range_value))
 
 
 def _aggregate_temporal_dataarray(

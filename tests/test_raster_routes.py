@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
+import pytest
 import xarray as xr
 from fastapi.testclient import TestClient
 
@@ -8,7 +11,7 @@ from eo_api.main import app
 from eo_api.raster import routes as raster_routes
 
 
-def test_raster_capabilities_report_missing_zarr_archive(monkeypatch) -> None:
+def test_raster_capabilities_report_missing_zarr_archive(monkeypatch: pytest.MonkeyPatch) -> None:
     client = TestClient(app)
     with monkeypatch.context() as patcher:
         patcher.setattr(raster_routes, "get_zarr_path", lambda dataset: None)
@@ -23,7 +26,7 @@ def test_raster_capabilities_report_missing_zarr_archive(monkeypatch) -> None:
     assert "build_zarr" in body["titiler"]["reason"]
 
 
-def test_raster_variables_route_rejects_resource_without_zarr_archive(monkeypatch) -> None:
+def test_raster_variables_route_rejects_resource_without_zarr_archive(monkeypatch: pytest.MonkeyPatch) -> None:
     client = TestClient(app)
     with monkeypatch.context() as patcher:
         patcher.setattr(raster_routes, "get_zarr_path", lambda dataset: None)
@@ -35,7 +38,7 @@ def test_raster_variables_route_rejects_resource_without_zarr_archive(monkeypatc
     assert body["error_code"] == "RASTER_PUBLICATION_UNSUPPORTED"
 
 
-def test_raster_variables_route_uses_zarr_backed_xarray_reader(tmp_path, monkeypatch) -> None:
+def test_raster_variables_route_uses_zarr_backed_xarray_reader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
     xr.Dataset(
         data_vars={
@@ -57,7 +60,7 @@ def test_raster_variables_route_uses_zarr_backed_xarray_reader(tmp_path, monkeyp
     assert response.json() == ["precip"]
 
 
-def test_raster_preview_requires_datetime_for_temporal_dataset(tmp_path, monkeypatch) -> None:
+def test_raster_preview_requires_datetime_for_temporal_dataset(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
     xr.Dataset(
         data_vars={
@@ -81,7 +84,9 @@ def test_raster_preview_requires_datetime_for_temporal_dataset(tmp_path, monkeyp
     assert body["error_code"] == "RASTER_DATETIME_REQUIRED"
 
 
-def test_raster_preview_with_datetime_renders_single_time_slice(tmp_path, monkeypatch) -> None:
+def test_raster_preview_with_datetime_renders_single_time_slice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
     xr.Dataset(
         data_vars={
@@ -97,16 +102,16 @@ def test_raster_preview_with_datetime_renders_single_time_slice(tmp_path, monkey
     monkeypatch.setattr(raster_routes, "get_zarr_path", lambda dataset: zarr_path)
 
     client = TestClient(app)
-    response = client.get(
-        "/raster/chirps3_precipitation_daily/preview.png?variable=precip&datetime=2024-01-01"
-    )
+    response = client.get("/raster/chirps3_precipitation_daily/preview.png?variable=precip&datetime=2024-01-01")
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"
     assert response.content
 
 
-def test_raster_preview_with_aggregation_renders_time_reduced_image(tmp_path, monkeypatch) -> None:
+def test_raster_preview_with_aggregation_renders_time_reduced_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
     xr.Dataset(
         data_vars={
@@ -132,7 +137,7 @@ def test_raster_preview_with_aggregation_renders_time_reduced_image(tmp_path, mo
     assert response.content
 
 
-def test_raster_preview_rejects_aggregation_without_range(tmp_path, monkeypatch) -> None:
+def test_raster_preview_rejects_aggregation_without_range(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
     xr.Dataset(
         data_vars={
@@ -156,7 +161,7 @@ def test_raster_preview_rejects_aggregation_without_range(tmp_path, monkeypatch)
     assert body["error_code"] == "RASTER_TEMPORAL_QUERY_INVALID"
 
 
-def test_raster_tile_outside_bounds_returns_404(tmp_path, monkeypatch) -> None:
+def test_raster_tile_outside_bounds_returns_404(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
     xr.Dataset(
         data_vars={

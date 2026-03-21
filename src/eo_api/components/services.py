@@ -40,6 +40,7 @@ class ComponentRuntimeDefinition:
     executor: WorkflowStepExecutor
     config_model: type[BaseModel]
 
+
 _ERROR_CODES_V1: Final[list[str]] = [
     "INPUT_VALIDATION_FAILED",
     "CONFIG_VALIDATION_FAILED",
@@ -463,6 +464,8 @@ def run_download_dataset_step(
             retries=int(step_config.get("remote_retries", 1)),
             retry_delay_sec=float(step_config.get("remote_retry_delay_sec", 1.0)),
         )
+        if not isinstance(outputs, dict):
+            raise RuntimeError("download_dataset remote mode must return a mapping of outputs")
         return outputs
     else:
         runtime.run(

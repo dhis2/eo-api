@@ -39,6 +39,7 @@ async def tile_outside_bounds_handler(request: Request, exc: TileOutsideBounds) 
         ),
     )
 
+
 app.include_router(system.routes.router, tags=["System"])
 app.include_router(data_registry.routes.router, prefix="/registry", tags=["Data registry"])
 app.include_router(data_manager.routes.router, prefix="/manage", tags=["Data manager"])

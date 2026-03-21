@@ -69,7 +69,6 @@ class WorkflowExecutionContext:
         return self.latest_outputs[output_name]
 
 
-
 def execute_workflow(
     request: WorkflowExecuteRequest,
     *,
@@ -275,6 +274,8 @@ def _should_publish_workflow_output(
     if not _server_allows_workflow_publication(workflow_definition_source=workflow_definition_source):
         return False
     if publication.required_output_file_suffixes:
+        if response.output_file is None:
+            return False
         suffix = Path(response.output_file).suffix.lower()
         return suffix in publication.required_output_file_suffixes
     return True
