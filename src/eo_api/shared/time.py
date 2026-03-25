@@ -1,6 +1,9 @@
+"""Shared time conversion helpers."""
+
 from typing import Any
 
 import numpy as np
+
 
 def numpy_datetime_to_period_string(datetimes: np.ndarray[Any, Any], period_type: str) -> np.ndarray[Any, Any]:
     """Convert an array of numpy datetimes to truncated period strings."""

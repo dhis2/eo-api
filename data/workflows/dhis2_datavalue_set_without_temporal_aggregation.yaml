@@ -1,0 +1,49 @@
+workflow_id: dhis2_datavalue_set_without_temporal_aggregation_v1
+version: 1
+publication:
+  publishable: false
+  exposure: registry_only
+outputs:
+  bbox:
+    from_step: get_features
+    output: bbox
+  features:
+    from_step: get_features
+    output: features
+  records:
+    from_step: spatial_agg
+    output: records
+  data_value_set:
+    from_step: build_dhis2_payload
+    output: data_value_set
+  output_file:
+    from_step: build_dhis2_payload
+    output: output_file
+steps:
+  - id: get_features
+    component: feature_source
+    version: v1
+  - id: download
+    component: download_dataset
+    version: v1
+    inputs:
+      bbox:
+        from_step: get_features
+        output: bbox
+  - id: spatial_agg
+    component: spatial_aggregation
+    version: v1
+    inputs:
+      bbox:
+        from_step: get_features
+        output: bbox
+      features:
+        from_step: get_features
+        output: features
+  - id: build_dhis2_payload
+    component: build_datavalueset
+    version: v1
+    inputs:
+      records:
+        from_step: spatial_agg
+        output: records

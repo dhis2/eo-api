@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from eo_api.schemas import HealthStatus, RootResponse
+from eo_api.system.schemas import HealthStatus, RootResponse
 
 
 def test_root_returns_200(client: TestClient) -> None:
