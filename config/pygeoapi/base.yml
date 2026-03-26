@@ -1,0 +1,47 @@
+server:
+  bind:
+    host: 0.0.0.0
+    port: 8000
+  url: http://127.0.0.1:8000/ogcapi
+  mimetype: application/json; charset=UTF-8
+  encoding: utf-8
+  languages:
+    - en-US
+  limits:
+    default_items: 20
+    max_items: 50
+  map:
+    url: https://tile.openstreetmap.org/{z}/{x}/{y}.png
+    attribution: "© OpenStreetMap contributors"
+  admin: false
+
+logging:
+  level: ERROR
+
+metadata:
+  identification:
+    title:
+      en: DHIS2 EO API
+    description:
+      en: Published EO gridded data collections
+    keywords:
+      en:
+        - EO
+        - coverage
+        - raster
+        - zarr
+        - netcdf
+    terms_of_service: https://dhis2.org
+    url: https://dhis2.org
+  provider:
+    name: DHIS2 EO API
+    url: https://dhis2.org
+  contact:
+    name: DHIS2 Climate Team
+    email: climate@dhis2.org
+    url: https://dhis2.org
+  license:
+    name: CC-BY 4.0
+    url: https://creativecommons.org/licenses/by/4.0/
+
+resources: {}

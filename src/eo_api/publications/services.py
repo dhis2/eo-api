@@ -6,7 +6,8 @@ import os
 from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+from zlib import adler32
 
 import xarray as xr
 import yaml
@@ -15,6 +16,8 @@ from eo_api.artifacts.schemas import ArtifactFormat, ArtifactRecord, Publication
 from eo_api.data_manager.services.utils import get_lon_lat_dims, get_time_dim
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
+CONFIG_DIR = Path(__file__).resolve().parent.parent.parent.parent / "config" / "pygeoapi"
+PYGEOAPI_BASE_CONFIG_PATH = CONFIG_DIR / "base.yml"
 PYGEOAPI_DIR = DATA_DIR / "pygeoapi"
 PYGEOAPI_CONFIG_PATH = PYGEOAPI_DIR / "pygeoapi-config.yml"
 PYGEOAPI_OPENAPI_PATH = PYGEOAPI_DIR / "pygeoapi-openapi.yml"
@@ -34,7 +37,7 @@ def publish_artifact(record: ArtifactRecord) -> ArtifactRecord:
     """Mark an artifact as published and regenerate the pygeoapi config."""
     from eo_api.artifacts.services import list_artifacts
 
-    collection_id = record.publication.collection_id or f"{record.dataset_id}-{record.artifact_id[:8]}"
+    collection_id = record.publication.collection_id or _collection_id_for(record)
     published_record = record.model_copy(
         update={
             "publication": record.publication.model_copy(
@@ -62,42 +65,8 @@ def publish_artifact(record: ArtifactRecord) -> ArtifactRecord:
 
 
 def _write_config(*, resources: dict[str, Any]) -> None:
-    config = {
-        "server": {
-            "bind": {"host": "0.0.0.0", "port": 8000},
-            "url": "http://127.0.0.1:8000/ogcapi",
-            "mimetype": "application/json; charset=UTF-8",
-            "encoding": "utf-8",
-            "languages": ["en-US"],
-            "limits": {"default_items": 20, "max_items": 50},
-            "map": {
-                "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-                "attribution": "© OpenStreetMap contributors",
-            },
-            "admin": False,
-        },
-        "logging": {"level": "ERROR"},
-        "metadata": {
-            "identification": {
-                "title": {"en": "DHIS2 EO API"},
-                "description": {"en": "Published EO gridded data collections"},
-                "keywords": {"en": ["EO", "coverage", "raster", "zarr", "netcdf"]},
-                "terms_of_service": "https://dhis2.org",
-                "url": "https://dhis2.org",
-            },
-            "provider": {"name": "DHIS2 EO API", "url": "https://dhis2.org"},
-            "contact": {
-                "name": "DHIS2 Climate Team",
-                "email": "climate@dhis2.org",
-                "url": "https://dhis2.org",
-            },
-            "license": {
-                "name": "CC-BY 4.0",
-                "url": "https://creativecommons.org/licenses/by/4.0/",
-            },
-        },
-        "resources": resources,
-    }
+    config = _load_base_config()
+    config["resources"] = resources
 
     PYGEOAPI_DIR.mkdir(parents=True, exist_ok=True)
     PYGEOAPI_CONFIG_PATH.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
@@ -146,6 +115,20 @@ def _build_collection_resource(record: ArtifactRecord) -> dict[str, Any]:
         "title": record.dataset_name,
         "description": f"Published EO grid for dataset '{record.dataset_id}'",
         "keywords": [record.dataset_id, record.variable, record.format.value, "eo", "coverage"],
+        "links": [
+            {
+                "type": "application/json",
+                "rel": "alternate",
+                "title": "Native collection detail",
+                "href": f"http://127.0.0.1:8000/collections/{record.publication.collection_id}",
+            },
+            {
+                "type": "application/json",
+                "rel": "alternate",
+                "title": "Latest artifact metadata",
+                "href": f"http://127.0.0.1:8000/artifacts/{record.artifact_id}",
+            },
+        ],
         "extents": {
             "spatial": {
                 "bbox": [bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax],
@@ -177,3 +160,21 @@ def _provider_axes(record: ArtifactRecord) -> tuple[str, str, str]:
         return x_field, y_field, time_field
     finally:
         ds.close()
+
+
+def _collection_id_for(record: ArtifactRecord) -> str:
+    """Build a stable collection identifier for a logical dataset scope."""
+    if record.request_scope.country_code:
+        scope_key = f"country-{record.request_scope.country_code.lower()}"
+    elif record.request_scope.bbox:
+        bbox = ",".join(f"{value:.6f}" for value in record.request_scope.bbox)
+        scope_hash = f"{adler32(bbox.encode('utf-8')):08x}"
+        scope_key = f"bbox-{scope_hash}"
+    else:
+        scope_key = "global"
+    return f"{record.dataset_id}-{scope_key}"
+
+
+def _load_base_config() -> dict[str, Any]:
+    """Load the checked-in base pygeoapi config used for generated publication docs."""
+    return cast(dict[str, Any], yaml.safe_load(PYGEOAPI_BASE_CONFIG_PATH.read_text(encoding="utf-8")))

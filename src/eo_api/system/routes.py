@@ -18,6 +18,7 @@ def read_index(request: Request) -> RootResponse:
         message="Welcome to DHIS2 EO API",
         links=[
             Link(href=f"{base}/ogcapi/", rel="ogcapi", title="OGC API"),
+            Link(href=f"{base}/collections", rel="collections", title="Collections"),
             Link(href=f"{base}/artifacts", rel="artifacts", title="Artifacts"),
             Link(href=f"{base}/prefect/", rel="prefect", title="Prefect"),
             Link(href=f"{base}/docs", rel="docs", title="API Docs"),

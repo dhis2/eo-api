@@ -1,4 +1,4 @@
-"""Pydantic schemas for artifact and publication APIs."""
+"""Pydantic schemas for artifact and ingestion APIs."""
 
 from datetime import datetime
 from enum import StrEnum
@@ -43,6 +43,15 @@ class ArtifactCoverage(BaseModel):
     temporal: CoverageTemporal
 
 
+class ArtifactRequestScope(BaseModel):
+    """Original request parameters used to create an artifact."""
+
+    start: str
+    end: str | None = None
+    bbox: tuple[float, float, float, float] | None = None
+    country_code: str | None = None
+
+
 class ArtifactPublication(BaseModel):
     """Publication metadata for an artifact."""
 
@@ -63,13 +72,14 @@ class ArtifactRecord(BaseModel):
     path: str | None = None
     asset_paths: list[str] = Field(default_factory=list)
     variables: list[str] = Field(default_factory=list)
+    request_scope: ArtifactRequestScope
     coverage: ArtifactCoverage
     created_at: datetime
     publication: ArtifactPublication = Field(default_factory=ArtifactPublication)
 
 
-class CreateDownloadRequest(BaseModel):
-    """Request payload for creating a new EO artifact."""
+class CreateIngestionRequest(BaseModel):
+    """Request payload for ingesting remote EO data into a managed artifact."""
 
     dataset_id: str
     start: str
@@ -81,10 +91,10 @@ class CreateDownloadRequest(BaseModel):
     publish: bool = True
 
 
-class DownloadResponse(BaseModel):
-    """Response returned after creating a new artifact."""
+class IngestionResponse(BaseModel):
+    """Response returned after creating a new artifact via ingestion."""
 
-    download_id: str
+    ingestion_id: str
     status: str
     artifact: ArtifactRecord
 
@@ -93,3 +103,41 @@ class ArtifactListResponse(BaseModel):
     """Collection response for artifacts."""
 
     items: list[ArtifactRecord]
+
+
+class CollectionRecord(BaseModel):
+    """Native FastAPI view of a published collection."""
+
+    collection_id: str
+    dataset_id: str
+    dataset_name: str
+    variable: str
+    latest_artifact_id: str
+    artifact_count: int
+    coverage: ArtifactCoverage
+    latest_created_at: datetime
+    pygeoapi_path: str
+
+
+class CollectionArtifactRecord(BaseModel):
+    """Artifact summary as exposed from a collection detail view."""
+
+    artifact_id: str
+    created_at: datetime
+    format: ArtifactFormat
+    request_scope: ArtifactRequestScope
+    coverage: ArtifactCoverage
+    artifact_path: str | None = None
+    artifact_api_path: str
+
+
+class CollectionDetailRecord(CollectionRecord):
+    """Detailed native FastAPI view of a published collection."""
+
+    artifacts: list[CollectionArtifactRecord]
+
+
+class CollectionListResponse(BaseModel):
+    """Collection response for published collections."""
+
+    items: list[CollectionRecord]
