@@ -58,15 +58,16 @@ uvicorn eo_api.main:app --reload
 To validate the configuration:
 
 ```
-pygeoapi config validate -c pygeoapi-config.yml`
+PYTHONPATH="$(pwd)/src" uv run python -c "from eo_api.publications.services import ensure_pygeoapi_base_config; print(ensure_pygeoapi_base_config())"
+PYTHONPATH="$(pwd)/src" uv run pygeoapi config validate -c data/pygeoapi/pygeoapi-config.yml
 ```
 
-Run after changes are made in pygeoapi-config.yml:
+Run after changes are made in `config/pygeoapi/base.yml` or publication generation logic:
 
 `make openapi` or
 
 ```
-PYTHONPATH="$(pwd)" uv run pygeoapi openapi generate ./pygeoapi-config.yml > pygeoapi-openapi.yml
+PYTHONPATH="$(pwd)/src" uv run python -c "from eo_api.publications.services import ensure_pygeoapi_base_config; ensure_pygeoapi_base_config()"
 ```
 
 ### Endpoints

@@ -35,7 +35,7 @@ All dataset and behaviour configuration happens in YAML, not Python code.
 
 ## Configuration
 
-pygeoapi is configured through a single YAML file whose path is set by the `PYGEOAPI_CONFIG` environment variable. The repo ships a default config at `pygeoapi-config.yml`.
+pygeoapi is configured through a single generated YAML file whose path is set by the `PYGEOAPI_CONFIG` environment variable. In this repo that generated file lives under `data/pygeoapi/pygeoapi-config.yml`, and it is derived from the checked-in base config at `config/pygeoapi/base.yml`.
 
 ### Top-level sections
 

@@ -13,17 +13,20 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock .python-version ./
 COPY src/ src/
+COPY config/ config/
+COPY data/datasets/ data/datasets/
+COPY data/extents.yaml data/extents.yaml
 
 RUN uv sync --frozen --no-dev && \
     mkdir -p /app/.venv/lib/python3.13/site-packages/prefect/server/ui_build && \
     chown eo:eo /app/.venv/lib/python3.13/site-packages/prefect/server/ui_build
 
-RUN mkdir -p /tmp/data && chown eo:eo /tmp/data
+RUN mkdir -p /tmp/data /app/data/pygeoapi /app/data/artifacts && \
+    printf '[]\n' > /app/data/artifacts/records.json && \
+    chown -R eo:eo /tmp/data /app/data
 
-COPY pygeoapi-config.yml pygeoapi-openapi.yml ./
-
-ENV PYGEOAPI_CONFIG=/app/pygeoapi-config.yml
-ENV PYGEOAPI_OPENAPI=/app/pygeoapi-openapi.yml
+ENV PYGEOAPI_CONFIG=/app/data/pygeoapi/pygeoapi-config.yml
+ENV PYGEOAPI_OPENAPI=/app/data/pygeoapi/pygeoapi-openapi.yml
 ENV PORT=8000
 
 USER eo
