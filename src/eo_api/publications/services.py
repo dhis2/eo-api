@@ -120,7 +120,7 @@ def _build_collection_resource(record: ArtifactRecord) -> dict[str, Any]:
                 "type": "application/json",
                 "rel": "alternate",
                 "title": "Native dataset detail",
-                "href": f"http://127.0.0.1:8000/datasets/{managed_dataset_id_for(record)}",
+                "href": _native_dataset_href(managed_dataset_id_for(record)),
             },
         ],
         "extents": {
@@ -172,6 +172,23 @@ def _collection_id_for(record: ArtifactRecord) -> str:
 def managed_dataset_id_for(record: ArtifactRecord) -> str:
     """Return the stable managed dataset id for a stored record."""
     return record.publication.collection_id or _collection_id_for(record)
+
+
+def _native_dataset_href(dataset_id: str) -> str:
+    """Return a dataset-detail link suitable for generated pygeoapi metadata."""
+    path = f"/datasets/{dataset_id}"
+    base_url = os.getenv("EO_API_BASE_URL")
+    if base_url:
+        return f"{base_url.rstrip('/')}{path}"
+
+    ogcapi_base_url = os.getenv("OGCAPI_BASE_URL")
+    if ogcapi_base_url:
+        normalized = ogcapi_base_url.rstrip("/")
+        if normalized.endswith("/ogcapi"):
+            normalized = normalized[: -len("/ogcapi")]
+        return f"{normalized}{path}"
+
+    return path
 
 
 def _load_base_config() -> dict[str, Any]:
