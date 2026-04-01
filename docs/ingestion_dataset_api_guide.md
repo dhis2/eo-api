@@ -113,7 +113,7 @@ Example response:
   "ingestion_id": "a7e06c93-ba78-4c74-b772-160927fdb463",
   "status": "completed",
   "dataset": {
-    "dataset_id": "chirps3_precipitation_daily-extent-sle",
+    "dataset_id": "chirps3_precipitation_daily_sle",
     "source_dataset_id": "chirps3_precipitation_daily",
     "dataset_name": "Total precipitation (CHIRPS3)",
     "short_name": "Total precipitation",
@@ -138,17 +138,17 @@ Example response:
     "last_updated": "2026-04-01T09:03:28.691120Z",
     "links": [
       {
-        "href": "/datasets/chirps3_precipitation_daily-extent-sle",
+        "href": "/datasets/chirps3_precipitation_daily_sle",
         "rel": "self",
         "title": "Dataset detail"
       },
       {
-        "href": "/zarr/chirps3_precipitation_daily-extent-sle",
+        "href": "/zarr/chirps3_precipitation_daily_sle",
         "rel": "zarr",
         "title": "Zarr store"
       },
       {
-        "href": "/ogcapi/collections/chirps3_precipitation_daily-extent-sle",
+        "href": "/ogcapi/collections/chirps3_precipitation_daily_sle",
         "rel": "ogc-collection",
         "title": "OGC collection"
       }
@@ -209,7 +209,7 @@ Example response:
   "kind": "DatasetList",
   "items": [
     {
-      "dataset_id": "chirps3_precipitation_daily-extent-sle",
+      "dataset_id": "chirps3_precipitation_daily_sle",
       "source_dataset_id": "chirps3_precipitation_daily",
       "dataset_name": "Total precipitation (CHIRPS3)",
       "short_name": "Total precipitation",
@@ -234,17 +234,17 @@ Example response:
       "last_updated": "2026-04-01T09:03:28.691120Z",
       "links": [
         {
-          "href": "/datasets/chirps3_precipitation_daily-extent-sle",
+          "href": "/datasets/chirps3_precipitation_daily_sle",
           "rel": "self",
           "title": "Dataset detail"
         },
         {
-          "href": "/zarr/chirps3_precipitation_daily-extent-sle",
+          "href": "/zarr/chirps3_precipitation_daily_sle",
           "rel": "zarr",
           "title": "Zarr store"
         },
         {
-          "href": "/ogcapi/collections/chirps3_precipitation_daily-extent-sle",
+          "href": "/ogcapi/collections/chirps3_precipitation_daily_sle",
           "rel": "ogc-collection",
           "title": "OGC collection"
         }
@@ -272,7 +272,7 @@ What this means:
 Example:
 
 ```bash
-curl -s http://127.0.0.1:8000/datasets/chirps3_precipitation_daily-extent-sle | jq
+curl -s http://127.0.0.1:8000/datasets/chirps3_precipitation_daily_sle | jq
 ```
 
 What this adds beyond the list response:
@@ -290,8 +290,8 @@ If the latest managed dataset version is Zarr-backed, the canonical native raw-d
 Examples:
 
 ```bash
-curl -s http://127.0.0.1:8000/zarr/chirps3_precipitation_daily-extent-sle | jq
-curl -s http://127.0.0.1:8000/zarr/chirps3_precipitation_daily-extent-sle/zarr.json | jq
+curl -s http://127.0.0.1:8000/zarr/chirps3_precipitation_daily_sle | jq
+curl -s http://127.0.0.1:8000/zarr/chirps3_precipitation_daily_sle/zarr.json | jq
 ```
 
 The listing response exposes:
@@ -317,8 +317,8 @@ Examples:
 
 ```bash
 curl -s "http://127.0.0.1:8000/ogcapi/collections?f=json" | jq
-curl -s "http://127.0.0.1:8000/ogcapi/collections/chirps3_precipitation_daily-extent-sle?f=json" | jq
-curl -s "http://127.0.0.1:8000/ogcapi/collections/chirps3_precipitation_daily-extent-sle/coverage?f=json" | jq
+curl -s "http://127.0.0.1:8000/ogcapi/collections/chirps3_precipitation_daily_sle?f=json" | jq
+curl -s "http://127.0.0.1:8000/ogcapi/collections/chirps3_precipitation_daily_sle/coverage?f=json" | jq
 ```
 
 What this means:

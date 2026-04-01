@@ -159,14 +159,14 @@ def _provider_axes(record: ArtifactRecord) -> tuple[str, str, str]:
 def _collection_id_for(record: ArtifactRecord) -> str:
     """Build a stable collection identifier for a logical dataset scope."""
     if record.request_scope.extent_id:
-        scope_key = f"extent-{record.request_scope.extent_id}"
+        scope_key = record.request_scope.extent_id
     elif record.request_scope.bbox:
         bbox = ",".join(f"{value:.6f}" for value in record.request_scope.bbox)
         scope_hash = f"{adler32(bbox.encode('utf-8')):08x}"
-        scope_key = f"bbox-{scope_hash}"
+        scope_key = f"bbox_{scope_hash}"
     else:
         scope_key = "global"
-    return f"{record.dataset_id}-{scope_key}"
+    return f"{record.dataset_id}_{scope_key}"
 
 
 def managed_dataset_id_for(record: ArtifactRecord) -> str:

@@ -22,7 +22,7 @@ def _artifact(
     *,
     artifact_id: str,
     source_dataset_id: str = "chirps3_precipitation_daily",
-    managed_dataset_id: str = "chirps3_precipitation_daily-extent-sle",
+    managed_dataset_id: str = "chirps3_precipitation_daily_sle",
     created_at: str = "2026-01-10T00:00:00+00:00",
     end: str = "2026-01-10",
 ) -> ArtifactRecord:
@@ -104,7 +104,7 @@ def test_list_datasets_groups_artifacts_by_managed_dataset_id(monkeypatch: pytes
 
     assert len(result.items) == 1
     dataset = result.items[0]
-    assert dataset.dataset_id == "chirps3_precipitation_daily-extent-sle"
+    assert dataset.dataset_id == "chirps3_precipitation_daily_sle"
     assert dataset.source_dataset_id == "chirps3_precipitation_daily"
     assert dataset.period_type == "daily"
     assert dataset.units == "mm"
@@ -114,7 +114,7 @@ def test_list_datasets_groups_artifacts_by_managed_dataset_id(monkeypatch: pytes
 
 
 def test_sync_dataset_returns_up_to_date_when_no_new_period_is_due(monkeypatch: pytest.MonkeyPatch) -> None:
-    dataset_id = "chirps3_precipitation_daily-extent-sle"
+    dataset_id = "chirps3_precipitation_daily_sle"
     monkeypatch.setattr(
         services,
         "get_latest_artifact_for_dataset_or_404",
@@ -135,7 +135,7 @@ def test_sync_dataset_returns_up_to_date_when_no_new_period_is_due(monkeypatch: 
 
 
 def test_sync_dataset_creates_new_version_from_next_period(monkeypatch: pytest.MonkeyPatch) -> None:
-    dataset_id = "chirps3_precipitation_daily-extent-sle"
+    dataset_id = "chirps3_precipitation_daily_sle"
     latest = _artifact(artifact_id="a1", managed_dataset_id=dataset_id, end="2026-01-31")
     monkeypatch.setattr(services, "get_latest_artifact_for_dataset_or_404", lambda _: latest)
     monkeypatch.setattr(
@@ -167,4 +167,4 @@ def test_sync_dataset_creates_new_version_from_next_period(monkeypatch: pytest.M
 def test_managed_dataset_id_prefers_extent_id_when_present() -> None:
     artifact = _artifact(artifact_id="a1")
 
-    assert managed_dataset_id_for(artifact) == "chirps3_precipitation_daily-extent-sle"
+    assert managed_dataset_id_for(artifact) == "chirps3_precipitation_daily_sle"

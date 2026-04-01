@@ -201,7 +201,7 @@ class DatasetListResponse(BaseModel):
         examples=[
             [
                 {
-                    "dataset_id": "chirps3_precipitation_daily-extent-sle",
+                    "dataset_id": "chirps3_precipitation_daily_sle",
                     "source_dataset_id": "chirps3_precipitation_daily",
                     "dataset_name": "Total precipitation (CHIRPS3)",
                     "short_name": "Total precipitation",
@@ -218,12 +218,12 @@ class DatasetListResponse(BaseModel):
                     "last_updated": "2026-03-27T08:40:24.344473Z",
                     "links": [
                         {
-                            "href": "/datasets/chirps3_precipitation_daily-extent-sle",
+                            "href": "/datasets/chirps3_precipitation_daily_sle",
                             "rel": "self",
                             "title": "Dataset detail",
                         },
                         {
-                            "href": "/zarr/chirps3_precipitation_daily-extent-sle",
+                            "href": "/zarr/chirps3_precipitation_daily_sle",
                             "rel": "zarr",
                             "title": "Zarr store",
                         },
