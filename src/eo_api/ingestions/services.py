@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import logging
 import mimetypes
 import os
 from collections.abc import Callable
@@ -37,6 +38,8 @@ from eo_api.ingestions.schemas import (
     SyncResponse,
 )
 from eo_api.publications.services import managed_dataset_id_for, publish_artifact
+
+logger = logging.getLogger(__name__)
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
 ARTIFACTS_DIR = DATA_DIR / "artifacts"
@@ -148,7 +151,11 @@ def create_artifact(
             downloader.build_dataset_zarr(dataset)
         except Exception:
             # Fall back to NetCDF when Zarr materialization is not viable.
-            pass
+            logger.warning(
+                "Zarr materialization failed for dataset '%s'; falling back to NetCDF",
+                dataset["id"],
+                exc_info=True,
+            )
 
     zarr_path = downloader.get_zarr_path(dataset)
     cache_files = downloader.get_cache_files(dataset)

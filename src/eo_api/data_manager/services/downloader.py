@@ -3,7 +3,6 @@
 import datetime
 import importlib
 import inspect
-import json
 import logging
 import os
 from collections.abc import Callable
@@ -182,7 +181,8 @@ def _get_default_bbox() -> list[float]:
 
     client = create_client()
     org_units_geojson = get_org_units_geojson(client, level=2)
-    return list(map(float, gpd.read_file(json.dumps(org_units_geojson)).total_bounds))
+    gdf = gpd.GeoDataFrame.from_features(org_units_geojson.get("features", []))
+    return list(map(float, gdf.total_bounds))
 
 
 def _resolve_bbox(*, bbox: list[float] | None) -> list[float]:

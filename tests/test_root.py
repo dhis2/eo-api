@@ -20,8 +20,6 @@ def test_root_returns_links(client: TestClient) -> None:
     rels = [link.rel for link in result.links]
     assert "extents" in rels
     assert "datasets" in rels
-    assert "zarr" in rels
-    assert "sync" in rels
     assert "prefect" in rels
     assert "docs" in rels
 

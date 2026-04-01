@@ -25,7 +25,7 @@ def get_file(
     dataset = _get_dataset_or_404(dataset_id)
 
     # get filtered data
-    if all([xmin, ymin, xmax, ymax]):
+    if all(value is not None for value in (xmin, ymin, xmax, ymax)):
         assert xmin is not None and ymin is not None and xmax is not None and ymax is not None
         bbox: list[float] | None = [xmin, ymin, xmax, ymax]
     else:

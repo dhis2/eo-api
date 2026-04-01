@@ -20,8 +20,6 @@ def read_index(request: Request) -> RootResponse:
             Link(href=f"{base}/ogcapi/", rel="ogcapi", title="OGC API"),
             Link(href=f"{base}/extents", rel="extents", title="Extents"),
             Link(href=f"{base}/datasets", rel="datasets", title="Datasets"),
-            Link(href=f"{base}/zarr", rel="zarr", title="Zarr"),
-            Link(href=f"{base}/sync", rel="sync", title="Sync"),
             Link(href=f"{base}/prefect/", rel="prefect", title="Prefect"),
             Link(href=f"{base}/docs", rel="docs", title="API Docs"),
         ],
