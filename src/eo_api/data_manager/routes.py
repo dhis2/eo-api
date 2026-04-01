@@ -12,6 +12,7 @@ router = APIRouter()
     "/{dataset_id}/download",
     response_model=dict,
     summary="Internal dataset download",
+    include_in_schema=False,
 )
 def download_dataset(
     dataset_id: str,
@@ -38,6 +39,7 @@ def download_dataset(
     "/{dataset_id}/build_zarr",
     response_model=dict,
     summary="Internal dataset Zarr build",
+    include_in_schema=False,
 )
 def build_dataset_zarr(
     dataset_id: str,
