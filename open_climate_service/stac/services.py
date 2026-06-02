@@ -211,7 +211,10 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
         if store_crs:
             template.extra_fields["proj:code"] = store_crs
         x_dimension, y_dimension = get_x_y_dims(ds)
-        time_dimension = get_time_dim(ds)
+        try:
+            time_dimension: str | None = get_time_dim(ds)
+        except ValueError:
+            time_dimension = None  # static dataset with no time dimension
         result = xarray_to_stac(
             ds,
             template,
