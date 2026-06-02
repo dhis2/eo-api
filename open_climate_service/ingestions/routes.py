@@ -17,7 +17,7 @@ from open_climate_service.ingestions.schemas import (
     SyncDetail,
     SyncResponse,
 )
-from open_climate_service.jobs.models import JobRecord
+from open_climate_service.jobs.models import JobLink, JobRecord
 
 ingestions_router = APIRouter()
 datasets_router = APIRouter()
@@ -40,7 +40,9 @@ def get_ingestion_job(job_id: str) -> JobRecord:
     record = store.get_job_record(job_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
-    return record
+    return record.model_copy(
+        update={"links": [JobLink(href=f"/ingestions/jobs/{job_id}", rel="self", title="Job detail")]}
+    )
 
 
 @ingestions_router.post("")

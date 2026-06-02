@@ -47,8 +47,6 @@ def list_workflows() -> WorkflowListResponse:
     """
     merged: dict[str, dict[str, object]] = {}
     for raw in (*_load_builtin_workflows(), *_load_plugin_workflows(), *_load_records()):
-        if not isinstance(raw, dict):
-            continue
         wid = raw.get("id")
         if not isinstance(wid, str) or not wid:
             logger.warning("Skipping workflow with missing or non-string id")

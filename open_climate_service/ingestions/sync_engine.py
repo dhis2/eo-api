@@ -11,7 +11,6 @@ and keeps future scheduler-driven sync jobs on the same code path.
 
 from __future__ import annotations
 
-import importlib
 import inspect
 import logging
 import os
@@ -32,6 +31,7 @@ from open_climate_service.ingestions.schemas import (
 )
 from open_climate_service.providers import availability as provider_availability
 from open_climate_service.publications.services import managed_dataset_id_for
+from open_climate_service.shared.dynamic_import import get_dynamic_function
 from open_climate_service.shared.time import (
     datetime_to_period_string,
     normalize_period_string,
@@ -508,7 +508,7 @@ def _provider_latest_available_end(
         return None
 
     try:
-        latest_available_fn = _get_dynamic_function(function_path)
+        latest_available_fn = get_dynamic_function(function_path)
         params: dict[str, Any] = {}
         signature = inspect.signature(latest_available_fn)
         if "dataset" in signature.parameters:
@@ -528,13 +528,3 @@ def _provider_latest_available_end(
             f"'{result}' for dataset period_type '{source_dataset.get('period_type')}'"
         ) from exc
 
-
-def _get_dynamic_function(full_path: str) -> Callable[..., Any]:
-    """Import and return a function given its dotted module path."""
-    parts = full_path.split(".")
-    if len(parts) < 2 or any(not part for part in parts):
-        raise ValueError(f"Invalid dotted function path '{full_path}'")
-    module_path = ".".join(parts[:-1])
-    function_name = parts[-1]
-    module = importlib.import_module(module_path)
-    return getattr(module, function_name)  # type: ignore[no-any-return]

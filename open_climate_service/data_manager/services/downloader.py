@@ -1,12 +1,10 @@
 """Dataset cache: download, store, and optimize raster data as local files."""
 
 import datetime
-import importlib
 import inspect
 import logging
 import os
 import shutil
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +15,7 @@ from geozarr_toolkit import MultiscalesConventionMetadata, create_geozarr_attrs
 from topozarr.coarsen import create_pyramid
 
 from open_climate_service import config as api_config
+from open_climate_service.shared.dynamic_import import get_dynamic_function
 from open_climate_service.shared.time import resolve_iso_period_step, time_chunk_for_iso_step
 from open_climate_service.transforms.pipeline import run_dataset_transforms
 from open_climate_service.transforms.reproject import reproject_to_instance_crs
@@ -64,7 +63,7 @@ def download_dataset(
                 "Use the plugin-backed ingestion process instead."
             ),
         )
-    eo_download_func = _get_dynamic_function(eo_download_func_path)
+    eo_download_func = get_dynamic_function(eo_download_func_path)
     before_files = {path.resolve(): path.stat().st_mtime_ns for path in get_cache_files(dataset)}
 
     params = dict(ingestion.get("default_params", {}))
@@ -369,14 +368,6 @@ def _validate_spatial_coverage(dataset: dict[str, Any], bbox: list[float] | None
             ),
         )
 
-
-def _get_dynamic_function(full_path: str) -> Callable[..., Any]:
-    """Import and return a function given its dotted module path."""
-    parts = full_path.split(".")
-    module_path = ".".join(parts[:-1])
-    function_name = parts[-1]
-    module = importlib.import_module(module_path)
-    return getattr(module, function_name)  # type: ignore[no-any-return]
 
 
 def _resolve_bbox(*, bbox: list[float] | None) -> list[float]:

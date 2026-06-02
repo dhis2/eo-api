@@ -68,7 +68,7 @@ def test_download_dataset_returns_400_when_country_code_is_required(monkeypatch:
         "ingestion": {"function": "ignored.path"},
     }
     monkeypatch.delenv("COUNTRY_CODE", raising=False)
-    monkeypatch.setattr(downloader, "_get_dynamic_function", lambda _: fake_download)
+    monkeypatch.setattr(downloader, "get_dynamic_function", lambda _: fake_download)
 
     with pytest.raises(HTTPException) as exc_info:
         downloader.download_dataset(
@@ -103,7 +103,7 @@ def test_download_dataset_returns_400_for_missing_bbox(monkeypatch: pytest.Monke
     }
     monkeypatch.delenv("DOWNLOAD_BBOX", raising=False)
     monkeypatch.delenv("DEFAULT_DOWNLOAD_BBOX", raising=False)
-    monkeypatch.setattr(downloader, "_get_dynamic_function", lambda _: fake_download)
+    monkeypatch.setattr(downloader, "get_dynamic_function", lambda _: fake_download)
 
     with pytest.raises(HTTPException) as exc_info:
         downloader.download_dataset(
@@ -137,7 +137,7 @@ def test_download_dataset_returns_502_for_upstream_provider_failure(monkeypatch:
         "id": "worldpop_population_yearly",
         "ingestion": {"function": "ignored.path"},
     }
-    monkeypatch.setattr(downloader, "_get_dynamic_function", lambda _: fake_download)
+    monkeypatch.setattr(downloader, "get_dynamic_function", lambda _: fake_download)
 
     with pytest.raises(HTTPException) as exc_info:
         downloader.download_dataset(

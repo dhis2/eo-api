@@ -12,7 +12,6 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from open_climate_service.ingestions.sync_engine import _get_dynamic_function
 from open_climate_service.jobs import store
 from open_climate_service.jobs.models import (
     JobCancelledError,
@@ -23,6 +22,7 @@ from open_climate_service.jobs.models import (
     JobRecord,
     JobStatus,
 )
+from open_climate_service.shared.dynamic_import import get_dynamic_function
 from open_climate_service.shared.time import utc_now
 
 logger = logging.getLogger(__name__)
@@ -421,7 +421,7 @@ class JobService:
                 f"Job '{record.job_id}' has no execution path recorded"
                 " — this job may have been created before the current server version"
             )
-        func = _get_dynamic_function(fn_path)
+        func = get_dynamic_function(fn_path)
         context = JobExecutionContext(self, record.job_id)
         kwargs = {k: v for k, v in record.request.items() if k != "__fn_path__"}
         if _supports_argument(func, "on_progress"):

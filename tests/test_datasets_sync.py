@@ -1081,7 +1081,10 @@ def test_plan_sync_marks_default_target_end_source(monkeypatch: pytest.MonkeyPat
 
 
 def test_plan_sync_marks_request_target_clamped_by_availability(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sync_engine, "_get_dynamic_function", lambda _: lambda: "2026-03-31")
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.sync_engine.get_dynamic_function",
+        lambda _: lambda: "2026-03-31",
+    )
 
     result = sync_engine.plan_sync(
         source_dataset={
@@ -1135,7 +1138,10 @@ def test_latest_available_end_uses_provider_availability_hook(monkeypatch: pytes
         calls.append({"dataset": dataset, "requested_end": requested_end})
         return "2026-02-05"
 
-    monkeypatch.setattr(sync_engine, "_get_dynamic_function", lambda _: fake_latest_available)
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.sync_engine.get_dynamic_function",
+        lambda _: fake_latest_available,
+    )
 
     source_dataset = {
         "id": "provider_dataset",
@@ -1149,7 +1155,10 @@ def test_latest_available_end_uses_provider_availability_hook(monkeypatch: pytes
 
 
 def test_latest_available_end_clamps_provider_availability_to_requested_end(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sync_engine, "_get_dynamic_function", lambda _: lambda: "2026-03-01")
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.sync_engine.get_dynamic_function",
+        lambda _: lambda: "2026-03-01",
+    )
 
     result = sync_engine._latest_available_end(
         source_dataset={
@@ -1167,7 +1176,7 @@ def test_latest_available_end_wraps_provider_import_errors(monkeypatch: pytest.M
     def fail_import(_: str) -> object:
         raise ImportError("missing provider")
 
-    monkeypatch.setattr(sync_engine, "_get_dynamic_function", fail_import)
+    monkeypatch.setattr("open_climate_service.ingestions.sync_engine.get_dynamic_function", fail_import)
 
     with pytest.raises(
         sync_engine.SyncConfigurationError,
@@ -1184,7 +1193,10 @@ def test_latest_available_end_wraps_provider_import_errors(monkeypatch: pytest.M
 
 
 def test_latest_available_end_rejects_invalid_provider_period_string(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sync_engine, "_get_dynamic_function", lambda _: lambda: "2026-31-99")
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.sync_engine.get_dynamic_function",
+        lambda _: lambda: "2026-31-99",
+    )
 
     with pytest.raises(
         sync_engine.SyncConfigurationError,
@@ -1232,7 +1244,7 @@ def test_sync_plan_route_returns_500_for_provider_hook_misconfiguration(
     def fail_import(_: str) -> object:
         raise ImportError("missing provider")
 
-    monkeypatch.setattr(sync_engine, "_get_dynamic_function", fail_import)
+    monkeypatch.setattr("open_climate_service.ingestions.sync_engine.get_dynamic_function", fail_import)
 
     response = client.get(f"/sync/{dataset_id}/plan", params={"end": "2026-02-10"})
 

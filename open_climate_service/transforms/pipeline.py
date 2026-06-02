@@ -9,6 +9,8 @@ from typing import Any, cast
 
 import xarray as xr
 
+from open_climate_service.shared.dynamic_import import get_dynamic_function
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,7 +33,7 @@ def run_dataset_transforms(ds: xr.Dataset, dataset: dict[str, Any]) -> xr.Datase
                 f" got {type(entry).__name__!r}: {entry!r}"
             )
         logger.info("Applying transform %s to dataset %s", func_path, dataset_id)
-        func = _get_dynamic_function(func_path)
+        func = get_dynamic_function(func_path)
         ds = func(ds, dataset, **params)
     return ds
 
