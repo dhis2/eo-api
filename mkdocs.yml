@@ -77,6 +77,7 @@ nav:
       - Built-in datasets: built_in_datasets.md
       - Transforms: transforms.md
       - Processes: processes.md
+      - Workflows: workflows.md
       - Instance guide: instance_guide.md
       - Adding custom datasets: adding_custom_datasets.md
       - Extensibility: extensibility.md
