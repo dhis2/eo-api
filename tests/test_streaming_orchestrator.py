@@ -346,5 +346,3 @@ def test_orchestrator_resume_supports_custom_time_dimension(tmp_path: Path) -> N
         period_type="daily",
     )
     assert rerun.periods_written == 0
-
-

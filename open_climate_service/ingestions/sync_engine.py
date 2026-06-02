@@ -102,8 +102,7 @@ def plan_sync(
                 action=SyncAction.NO_OP,
                 reason="no_new_period",
                 message=(
-                    f"Data already exists through {current_end}; target {target_end} "
-                    "does not require a new download."
+                    f"Data already exists through {current_end}; target {target_end} does not require a new download."
                 ),
                 current_start=current_start,
                 current_end=current_end,
@@ -455,5 +454,3 @@ def _sync_current_end(*, source_dataset: dict[str, Any], latest_artifact: Artifa
             exc,
         )
         return latest_artifact.coverage.temporal.end
-
-

@@ -159,5 +159,3 @@ def test_dataset_registry_accepts_supported_sync_execution(
     monkeypatch.setattr(datasets, "CONFIGS_DIR", tmp_path)
 
     assert datasets.list_datasets()[0]["sync"]["execution"] == "append"
-
-

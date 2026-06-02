@@ -156,4 +156,3 @@ def _validate_dataset_template(dataset: object, *, source: str) -> None:
     has_plugin = isinstance(plugin, str) and bool(plugin)
     if not has_plugin:
         raise ValueError(f"Dataset template '{dataset_id}' in {source} must define ingestion.plugin")
-

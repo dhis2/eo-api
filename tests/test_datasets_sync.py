@@ -747,8 +747,6 @@ def test_sync_dataset_release_policy_returns_up_to_date_when_release_matches(mon
     assert result.sync_detail.reason == "no_new_release"
 
 
-
-
 def test_default_hourly_target_end_is_utc_aware(monkeypatch: pytest.MonkeyPatch) -> None:
     class FixedDateTime(datetime):
         @classmethod
@@ -983,8 +981,6 @@ def test_sync_route_executes_rematerialize_and_returns_structured_detail(
     assert payload["sync_detail"]["target_end"] == "2026-02-10"
 
 
-
-
 def test_plan_sync_marks_default_target_end_source(monkeypatch: pytest.MonkeyPatch) -> None:
     class FixedDate(date):
         @classmethod
@@ -1008,10 +1004,6 @@ def test_plan_sync_marks_default_target_end_source(monkeypatch: pytest.MonkeyPat
     assert result.target_end_source == "default_today"
     assert result.delta_start == "2024-03-01"
     assert result.delta_end == "2026-04-20"
-
-
-
-
 
 
 def test_run_sync_raises_clear_error_when_append_invariants_are_missing(monkeypatch: pytest.MonkeyPatch) -> None:
