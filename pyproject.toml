@@ -68,6 +68,7 @@ dependencies = [
     "openeo-pg-parser-networkx>=2026.3.3",
     "openeo-processes-dask[implementations]",
     "python-multipart>=0.0.29",
+    "xclim>=0.61.1",
 ]
 
 [project.urls]
