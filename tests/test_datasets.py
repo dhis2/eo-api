@@ -18,8 +18,8 @@ from open_climate_service.ingestions.schemas import (
     DatasetPublication,
     PublicationStatus,
 )
-from open_climate_service.publications.services import managed_dataset_id_for
 from open_climate_service.plugins.datasets.chirps3 import CHIRPS3DailyPlugin
+from open_climate_service.publications.services import managed_dataset_id_for
 
 
 @pytest.fixture(autouse=True)
