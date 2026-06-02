@@ -178,19 +178,19 @@ class MyStreamingPlugin:
 
 Responsibilities are split: the plugin knows the source; the orchestrator owns resume, concurrency, and store commits; `open_climate_service.ingestions` owns artifacts, publication, and API responses.
 
-Multiple YAML templates can reference the same plugin class and differentiate via `ingestion.default_params`. This is the intended pattern for sources that expose multiple variables:
+Multiple YAML templates can reference the same plugin class and differentiate via `ingestion.params`. This is the intended pattern for sources that expose multiple variables:
 
 ```yaml
 # era5land_temperature_hourly.yaml
 ingestion:
   plugin: dhis2eo.streaming.era5_land.ERA5LandPlugin
-  default_params:
+  params:
     variable: 2m_temperature
 
 # era5land_precipitation_hourly.yaml
 ingestion:
   plugin: dhis2eo.streaming.era5_land.ERA5LandPlugin
-  default_params:
+  params:
     variable: total_precipitation
 ```
 

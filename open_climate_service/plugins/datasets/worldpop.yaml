@@ -18,7 +18,7 @@
       resolution: P1Y
   ingestion:
     plugin: open_climate_service.plugins.datasets.worldpop.WorldPopYearlyPlugin
-    default_params:
+    params:
       version: global2
       product: total
       variable: pop_total
