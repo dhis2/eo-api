@@ -1,8 +1,8 @@
 """Curated overrides for xclim climate index processes.
 
-The base layer of xclim processes is auto-registered from the indicator
-modules in plugin_processes._scan_xclim_indicators. This file only needs
-to override indicators where the auto-generated metadata is insufficient.
+The base layer of xclim processes is auto-registered by xclim_processes.scan().
+This file only needs to override indicators where the auto-generated metadata
+is insufficient.
 """
 
 from typing import Any, cast
@@ -14,7 +14,7 @@ from xclim.core.indicator import InputKind
 
 from open_climate_service.process import process
 
-_VARIABLE_SCHEMA: dict[str, str] = {"type": "object", "subtype": "datacube"}
+_VARIABLE_SCHEMA: dict[str, Any] = {"type": "object", "subtype": "datacube"}
 
 
 def _xclim_params(indicator: Any, *names: str) -> dict[str, dict[str, Any]]:

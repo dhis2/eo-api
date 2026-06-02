@@ -12,8 +12,6 @@ logger = logging.getLogger(__name__)
 
 _cache: list[Any] | None = None
 
-_KIND_SCHEMA: dict[Any, dict[str, str]] = {}  # populated lazily after xclim import
-
 
 def scan() -> list[Any]:
     """Return all xclim indicators as process callables (cached after first call)."""
@@ -22,10 +20,10 @@ def scan() -> list[Any]:
         return _cache
     try:
         _cache = _collect()
+        return _cache
     except Exception:
         logger.warning("Failed to load xclim indicators", exc_info=True)
-        _cache = []
-    return _cache
+        return []
 
 
 def _collect() -> list[Any]:
