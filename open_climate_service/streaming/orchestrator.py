@@ -79,6 +79,7 @@ async def run_streaming_ingest(
     on_progress: Callable[[int | None, int | None, str | None], None] | None = None,
     is_cancel_requested: Callable[[], bool] | None = None,
     save_cursor: Callable[[dict[str, Any]], None] | None = None,
+    pre_computed_periods: list[str] | None = None,
 ) -> StreamingIngestResult:
     """Stream one dataset into a flat Zarr v3 store one period at a time.
 
@@ -87,11 +88,15 @@ async def run_streaming_ingest(
 
     This avoids replaying already-committed periods after crashes that happen
     between a store commit and a later cursor write.
+
+    ``pre_computed_periods`` may be supplied by the sync planner to avoid a
+    second ``plugin.periods()`` probe when the list was already fetched during
+    planning.
     """
     from open_climate_service.jobs.models import JobCancelledError
 
     spec: GridSpec = await plugin.probe(bbox, **params)
-    all_periods = await plugin.periods(start, end)
+    all_periods = pre_computed_periods if pre_computed_periods is not None else await plugin.periods(start, end)
     if not all_periods:
         return StreamingIngestResult(store_path=store_path, period_type=period_type, periods_written=0)
 
@@ -223,6 +228,7 @@ def run_streaming_ingest_sync(
     on_progress: Callable[[int | None, int | None, str | None], None] | None = None,
     is_cancel_requested: Callable[[], bool] | None = None,
     save_cursor: Callable[[dict[str, Any]], None] | None = None,
+    pre_computed_periods: list[str] | None = None,
 ) -> StreamingIngestResult:
     """Synchronous wrapper for threaded job execution.
 
@@ -250,5 +256,6 @@ def run_streaming_ingest_sync(
             on_progress=on_progress,
             is_cancel_requested=is_cancel_requested,
             save_cursor=save_cursor,
+            pre_computed_periods=pre_computed_periods,
         )
     )

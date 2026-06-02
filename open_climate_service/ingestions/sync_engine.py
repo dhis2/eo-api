@@ -111,8 +111,10 @@ def plan_sync(
                 target_end_source=target_end_source,
             )
         # Probe the plugin for actually-available periods before committing to a sync.
-        available_end = _probe_available_end(source_dataset, next_period_start, target_end)
-        if available_end is None:
+        # The full list is stored on the SyncDetail so the orchestrator can reuse it
+        # without a second probe at execution time.
+        available_periods = _probe_available_periods(source_dataset, next_period_start, target_end)
+        if available_periods is not None and not available_periods:
             return SyncDetail(
                 source_dataset_id=latest_artifact.dataset_id,
                 sync_kind=sync_kind,
@@ -124,8 +126,8 @@ def plan_sync(
                 target_end=target_end,
                 target_end_source=target_end_source,
             )
-        if available_end < target_end:
-            target_end = available_end
+        if available_periods is not None and available_periods[-1] < target_end:
+            target_end = available_periods[-1]
             target_end_source = "plugin_availability"
         action = SyncAction.APPEND if _supports_append(source_dataset, latest_artifact) else SyncAction.REMATERIALIZE
         reason = "new_periods_available_for_append" if action == SyncAction.APPEND else "new_periods_available"
@@ -147,6 +149,7 @@ def plan_sync(
             target_end_source=target_end_source,
             delta_start=next_period_start,
             delta_end=target_end,
+            pre_computed_periods=available_periods,
         )
 
     if current_end >= target_end:
@@ -267,6 +270,7 @@ def run_sync(
         overwrite=False,
         publish=publish,
         on_progress=on_progress,
+        pre_computed_periods=sync_detail.pre_computed_periods,
     )
     logger.info(
         "Sync completed for dataset '%s': artifact_id=%s action=%s",
@@ -307,26 +311,30 @@ def _sync_plan_message(
     return f"Data exists through {current_end}. Sync will rematerialize the dataset through {target_end}."
 
 
-def _probe_available_end(
+def _probe_available_periods(
     source_dataset: dict[str, Any],
     start: str,
     target_end: str,
-) -> str | None:
-    """Ask the plugin which periods are actually available and return the last one.
+) -> list[str] | None:
+    """Ask the plugin which periods are actually available.
+
+    Returns the full period list so the result can be reused at execution time,
+    avoiding a second probe in the orchestrator.
 
     Returns None if no periods are available (nothing to sync).
-    Returns target_end unchanged if the dataset has no plugin (non-streaming).
+    Returns None if the dataset has no plugin (non-streaming) — caller falls
+    back to the requested target_end.
     """
     from open_climate_service.shared.dynamic_import import get_dynamic_function
 
     plugin_path = source_dataset.get("ingestion", {}).get("plugin")
     if not plugin_path:
-        return target_end
+        return None
     default_params: dict[str, Any] = source_dataset.get("ingestion", {}).get("default_params") or {}
     PluginClass = get_dynamic_function(plugin_path)
     plugin = PluginClass(**default_params)
     available = asyncio.run(plugin.periods(start, target_end))
-    return available[-1] if available else None
+    return available if available else None
 
 
 def _next_period_start(latest_period_end: str, *, period_type: str) -> str:

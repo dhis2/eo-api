@@ -314,6 +314,14 @@ class SyncDetail(BaseModel):
         default=None,
         description="Last missing period planned for append execution, when applicable.",
     )
+    pre_computed_periods: list[str] | None = Field(
+        default=None,
+        description=(
+            "Period list already fetched from the plugin during planning. "
+            "Passed to the orchestrator to avoid a second periods() probe at execution time."
+        ),
+        exclude=True,
+    )
 
 
 class SyncResponse(BaseModel):

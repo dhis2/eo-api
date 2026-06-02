@@ -201,6 +201,7 @@ def create_artifact(
     on_progress: Callable[[int | None, int | None, str | None], None] | None = None,
     is_cancel_requested: Callable[[], bool] | None = None,
     save_cursor: Callable[[dict[str, object]], None] | None = None,
+    pre_computed_periods: list[str] | None = None,
 ) -> ArtifactRecord:
     """Materialize one managed dataset artifact and persist its metadata.
 
@@ -247,6 +248,7 @@ def create_artifact(
             on_progress=on_progress,
             is_cancel_requested=is_cancel_requested,
             save_cursor=save_cursor,
+            pre_computed_periods=pre_computed_periods,
         )
     raise HTTPException(status_code=500, detail=f"Dataset '{dataset['id']}' does not define ingestion.plugin")
 
@@ -265,6 +267,7 @@ def _create_streaming_artifact(
     on_progress: Callable[[int | None, int | None, str | None], None] | None = None,
     is_cancel_requested: Callable[[], bool] | None = None,
     save_cursor: Callable[[dict[str, object]], None] | None = None,
+    pre_computed_periods: list[str] | None = None,
 ) -> ArtifactRecord:
     """Create or update one plugin-backed Icechunk artifact.
 
@@ -324,6 +327,7 @@ def _create_streaming_artifact(
             on_progress=on_progress,
             is_cancel_requested=is_cancel_requested,
             save_cursor=save_cursor,
+            pre_computed_periods=pre_computed_periods,
         )
         if result.periods_written == 0 and not store_path.exists():
             raise HTTPException(status_code=409, detail="Source has no data for the requested temporal scope")
