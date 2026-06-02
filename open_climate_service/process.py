@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, TypeVar, overload
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -16,6 +16,20 @@ _PYTHON_TYPE_MAP: dict[type, str] = {
     float: "number",
     bool: "boolean",
 }
+
+
+@overload
+def process(func: F) -> F: ...
+
+
+@overload
+def process(
+    func: None = None,
+    *,
+    summary: str | None = None,
+    description: str | None = None,
+    parameters: dict[str, dict[str, Any]] | None = None,
+) -> Callable[[F], F]: ...
 
 
 def process(

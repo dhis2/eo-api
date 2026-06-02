@@ -34,6 +34,7 @@ def test_process_decorator_with_explicit_metadata() -> None:
         return data * scale
 
     meta = get_process_metadata(my_func2)
+    assert meta is not None
     assert meta["summary"] == "Custom summary"
     scale_param = next(p for p in meta["parameters"] if p["name"] == "scale")
     assert scale_param["description"] == "Scale factor"
