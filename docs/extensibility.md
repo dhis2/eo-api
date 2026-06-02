@@ -27,18 +27,7 @@ plugins_dir: ./plugins/
 
 All `*.yaml` files in `plugins_dir/datasets/` are merged with the built-ins. A custom template with the same `id` as a built-in overrides it — useful for adjusting lag times, display ranges, or availability settings on an existing dataset.
 
-A Python plugin class can be declared alongside the YAML using the `ingestion.plugin` dotted path, and transform functions are declared as a list of dotted paths under `transforms:`:
-
-```yaml
-ingestion:
-  plugin: mypackage.sources.chirps3.CHIRPS3DailyPlugin
-  default_params:
-    stage: final
-
-transforms:
-  - open_climate_service.transforms.kelvin_to_celsius
-  - mypackage.transforms.clamp_negatives
-```
+A Python plugin class is declared alongside the YAML using the `ingestion.plugin` dotted path. Any data transformations (unit conversion, clamping, etc.) are applied inside `fetch_period` before the `xr.Dataset` is returned — no separate framework-level declaration is needed.
 
 Plugin modules can live in any importable package or directly under `plugins_dir`, which is automatically added to `sys.path`.
 

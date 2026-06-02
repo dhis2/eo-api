@@ -32,11 +32,7 @@ my-climate-service/
 │   ├── <source>/           # custom streaming plugin classes
 │   │   ├── __init__.py
 │   │   └── plugin.py
-│   ├── transforms/         # custom transform functions
-│   │   ├── __init__.py
-│   │   └── my_transform.py
-│   └── processes/          # custom process YAMLs + Python functions
-│       ├── my_process.yaml
+│   └── processes/          # custom @process-decorated functions
 │       └── my_process.py
 └── data/                   # gitignored — downloaded files and Zarr stores
 ```
@@ -165,16 +161,12 @@ Plugins extend the instance with custom datasets, processes, and workflows. They
 ```
 plugins/
 ├── datasets/
-│   └── enacts_rainfall.yaml    # custom dataset template
-├── enacts/
-│   ├── __init__.py
-│   └── plugin.py               # streaming plugin class referenced in the YAML
-├── transforms/
-│   ├── __init__.py
-│   └── enacts.py               # transform function
-└── processes/
-    ├── spatial_stats.yaml
-    └── spatial_stats.py
+│   ├── enacts_rainfall.yaml    # custom dataset template
+│   └── enacts.py               # streaming plugin class
+├── processes/
+│   └── spatial_stats.py        # @process-decorated functions
+└── workflows/
+    └── aggregate_for_dhis2.json
 ```
 
 See [Extensibility](extensibility.md) for the three plugin types, and [Adding custom datasets](adding_custom_datasets.md) for the dataset template field reference and streaming plugin contract.

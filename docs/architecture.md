@@ -17,7 +17,7 @@ A template defines:
 - the dataset identifier and display metadata
 - the variable name, units, and period type
 - how to ingest the data (`ingestion.plugin` — a dotted path to a streaming plugin class)
-- what transforms to apply (`transforms`)
+- any data transformations applied inside the plugin before returning
 - what sync strategy to use (`sync.kind`, `sync.execution`)
 
 Templates are config, not code. If a template needs custom logic, the logic goes into a Python function referenced by dotted path from the YAML.
@@ -282,7 +282,7 @@ The artifact store keeps the full history of records for sync deduplication and 
 
 ## What the framework guarantees
 
-Plugin code (ingestion functions, streaming plugins, transforms, `@process` functions) can rely on the following being handled automatically by the framework:
+Plugin code (streaming plugins, `@process` functions) can rely on the following being handled automatically by the framework:
 
 | Concern                                               | Where handled                               |
 | ----------------------------------------------------- | ------------------------------------------- |

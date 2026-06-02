@@ -75,7 +75,6 @@ nav:
       - Accessing data: user_guide.md
       - openEO: openeo.md
       - Built-in datasets: built_in_datasets.md
-      - Transforms: transforms.md
       - Processes: processes.md
       - Workflows: workflows.md
       - Instance guide: instance_guide.md

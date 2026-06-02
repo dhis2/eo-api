@@ -140,16 +140,6 @@ Multiple templates can share the same plugin class and differ only in `default_p
       variable: total_precipitation
 ```
 
-**Transforms** — applied after each period is fetched, before writing to Zarr:
-
-```yaml
-transforms:
-  - open_climate_service.transforms.kelvin_to_celsius
-  - datasets.my_transforms.clamp_negatives
-```
-
-See [Transforms](transforms.md) for the full pipeline description, built-in options, and how to write a custom transform.
-
 **Spatial and temporal extents** — declares what the source dataset covers. Used to validate ingest requests before hitting the provider:
 
 ```yaml
