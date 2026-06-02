@@ -1,7 +1,5 @@
 """Climate extreme indices via xclim."""
 
-from __future__ import annotations
-
 import xarray as xr
 import xclim.indicators.atmos as xclim_atmos
 import xclim.indices
