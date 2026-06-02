@@ -59,7 +59,7 @@ class CHIRPS3DailyPlugin:
     max_concurrency = 4
     commit_batch_size = 30
 
-    def __init__(self, stage: str = "final", flavor: str = "rnl") -> None:
+    def __init__(self, stage: str = "final", flavor: str = "rnl", **_: Any) -> None:
         if stage not in {"final", "prelim"}:
             raise ValueError(f"stage must be 'final' or 'prelim', got {stage!r}")
         if stage == "final" and flavor not in {"rnl", "sat"}:

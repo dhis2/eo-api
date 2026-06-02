@@ -23,7 +23,7 @@ class ERA5LandHourlySingleBandPlugin:
     max_concurrency = 2
     commit_batch_size = 24
 
-    def __init__(self, variable: str) -> None:
+    def __init__(self, variable: str, **_: Any) -> None:
         if not variable:
             raise ValueError("ERA5LandHourlySingleBandPlugin requires a non-empty variable")
         self.variable = variable
@@ -113,7 +113,7 @@ class ERA5LandPrecipitationPlugin(ERA5LandHourlySingleBandPlugin):
     precipitation canonicalization work and should be added here later.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, **_: Any) -> None:
         super().__init__(variable="tp")
 
     def _fetch_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
