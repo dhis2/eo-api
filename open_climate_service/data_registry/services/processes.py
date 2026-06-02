@@ -41,7 +41,7 @@ def _normalize_process_definition(process: dict[str, Any]) -> dict[str, Any]:
 def list_processes() -> list[dict[str, Any]]:
     """Load all process definitions and return a flat list.
 
-    Built-in definitions from open_climate_service/data/processes/ are always loaded. When
+    Built-in definitions from open_climate_service/plugins/processes/ are always loaded. When
     plugins_dir is set in CLIMATE_SERVICE_CONFIG, definitions from plugins_dir/processes/
     are merged on top — a custom definition with the same id overrides the built-in.
 
@@ -91,7 +91,7 @@ def get_process_function(process_id: str) -> Any:
 
 def _load_builtin_processes() -> list[dict[str, Any]]:
     """Load built-in process definitions from package data via importlib.resources."""
-    pkg = importlib.resources.files("open_climate_service") / "data" / "processes"
+    pkg = importlib.resources.files("open_climate_service") / "plugins" / "processes"
     processes: list[dict[str, Any]] = []
     for resource in pkg.iterdir():
         if not resource.name.endswith((".yaml", ".yml")):

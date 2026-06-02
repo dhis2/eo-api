@@ -23,7 +23,7 @@ SUPPORTED_SYNC_EXECUTIONS = {"append", "rematerialize"}
 def list_datasets() -> list[dict[str, Any]]:
     """Load all dataset templates and return a flat list.
 
-    Built-in templates from open_climate_service/data/datasets/ are always loaded. When
+    Built-in templates from open_climate_service/plugins/datasets/ are always loaded. When
     plugins_dir is set in CLIMATE_SERVICE_CONFIG, templates from that directory are
     merged on top — a custom template with the same id overrides the built-in one.
 
@@ -77,7 +77,7 @@ def _load_builtin_datasets() -> list[dict[str, Any]]:
     package lives inside site-packages with no guarantee that the project root
     directory (and its data/ folder) is accessible.
     """
-    pkg = importlib.resources.files("open_climate_service") / "data" / "datasets"
+    pkg = importlib.resources.files("open_climate_service") / "plugins" / "datasets"
     datasets: list[dict[str, Any]] = []
     for resource in pkg.iterdir():
         if not resource.name.endswith((".yaml", ".yml")):

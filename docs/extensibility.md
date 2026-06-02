@@ -16,7 +16,7 @@ The same pattern applies at every extension point:
 
 ## Dataset templates
 
-Dataset templates are YAML files that describe a data source. Built-ins live in the package (`open_climate_service/data/datasets/`). Custom templates are loaded from `plugins_dir/datasets/`.
+Dataset templates are YAML files that describe a data source. Built-ins live in the package (`open_climate_service/plugins/datasets/`). Custom templates are loaded from `plugins_dir/datasets/`.
 
 ```
 plugins/
@@ -133,7 +133,7 @@ For the built-in transforms and a full description of the pipeline, see [Transfo
 
 Processes are named operations that produce derived datasets (e.g. temporal resampling). They are backed by YAML files and dispatched via `POST /processes/{id}/execution`.
 
-Built-in processes live in `open_climate_service/data/processes/`. Custom processes are loaded from `plugins_dir/processes/`.
+Built-in processes live in `open_climate_service/plugins/processes/`. Custom processes are loaded from `plugins_dir/processes/`.
 
 ```
 plugins/

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.resources
 import json
 from collections.abc import Callable
 from pathlib import Path
@@ -36,8 +37,19 @@ def _ensure_store() -> None:
 
 
 def list_udps() -> UDPListResponse:
-    """Return all stored user-defined processes."""
-    records = [UDPRecord.model_validate(raw) for raw in _load_records()]
+    """Return all UDPs: built-ins, plugin, and runtime-registered.
+
+    Plugin UDPs override built-ins with the same id; runtime-registered
+    UDPs override both.
+    """
+    merged: dict[str, dict[str, object]] = {}
+    for raw in _load_builtin_udps():
+        merged[str(raw.get("id", ""))] = raw
+    for raw in _load_plugin_udps():
+        merged[str(raw.get("id", ""))] = raw
+    for raw in _load_records():
+        merged[str(raw.get("id", ""))] = raw
+    records = [UDPRecord.model_validate(raw) for raw in merged.values()]
     return UDPListResponse(
         processes=records,
         links=[{"rel": "self", "href": "/process_graphs", "type": "application/json"}],
@@ -45,8 +57,17 @@ def list_udps() -> UDPListResponse:
 
 
 def get_udp(process_graph_id: str) -> UDPRecord | None:
-    """Return one UDP by id, or None if not found."""
+    """Return one UDP by id, or None if not found.
+
+    Checks runtime-registered first, then plugin, then built-in.
+    """
     for raw in _load_records():
+        if raw.get("id") == process_graph_id:
+            return UDPRecord.model_validate(raw)
+    for raw in _load_plugin_udps():
+        if raw.get("id") == process_graph_id:
+            return UDPRecord.model_validate(raw)
+    for raw in _load_builtin_udps():
         if raw.get("id") == process_graph_id:
             return UDPRecord.model_validate(raw)
     return None
@@ -96,6 +117,37 @@ def _read_records_from_disk() -> list[dict[str, object]]:
     if not isinstance(payload, list):
         raise ValueError("process_graphs.json must contain a list")
     return payload
+
+
+def _load_builtin_udps() -> list[dict[str, object]]:
+    """Load built-in UDPs from open_climate_service/plugins/workflows/."""
+    pkg = importlib.resources.files("open_climate_service") / "plugins" / "workflows"
+    udps: list[dict[str, object]] = []
+    try:
+        for resource in pkg.iterdir():
+            if resource.name.endswith(".json"):
+                udps.append(json.loads(resource.read_text(encoding="utf-8")))
+    except (FileNotFoundError, NotADirectoryError):
+        pass
+    return udps
+
+
+def _load_plugin_udps() -> list[dict[str, object]]:
+    """Load UDPs from plugins_dir/workflows/ if configured."""
+    config = api_config.get_config()
+    plugins_dir = config.get("plugins_dir") if config else None
+    if not plugins_dir:
+        return []
+    workflows_dir = Path(plugins_dir) / "workflows"
+    if not workflows_dir.is_dir():
+        return []
+    udps: list[dict[str, object]] = []
+    for path in sorted(workflows_dir.glob("*.json")):
+        try:
+            udps.append(json.loads(path.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return udps
 
 
 def _mutate_records(mutation: Callable[[list[dict[str, object]]], _T]) -> _T:
