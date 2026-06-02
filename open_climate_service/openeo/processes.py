@@ -118,7 +118,14 @@ def get_openeo_process(process_id: str) -> dict[str, Any] | None:
 
     Avoids rebuilding the full list just to look up a single entry.
     """
-    # Backend processes first
+    from open_climate_service.openeo.plugin_processes import load_plugin_processes, to_openeo_descriptor
+
+    # Plugin processes take highest precedence
+    for pid, func in load_plugin_processes():
+        if pid == process_id:
+            return to_openeo_descriptor(func)
+
+    # Backend processes
     for p in _BACKEND_PROCESSES:
         if p["id"] == process_id:
             return p
@@ -151,20 +158,27 @@ def get_openeo_process(process_id: str) -> dict[str, Any] | None:
 def list_openeo_processes() -> list[dict[str, Any]]:
     """Return all openEO-compatible process descriptions.
 
-    Merges openeo-processes-dask standard processes with backend-specific processes
-    (load_collection, save_result) and any exposed native plugin processes.
+    Merges openeo-processes-dask standard processes, backend-specific processes
+    (load_collection, save_result), and @process-decorated plugin functions.
+    Plugin processes override standard processes with the same id.
     """
+    from open_climate_service.openeo.plugin_processes import load_plugin_processes, to_openeo_descriptor
+
     standard = _load_standard_processes()
-    standard_ids = {p.get("id") for p in standard}
 
     # Backend processes take precedence over any stub in the standard list
     result: list[dict[str, Any]] = list(_BACKEND_PROCESSES)
-    backend_ids = {p["id"] for p in _BACKEND_PROCESSES}
+
+    merged: dict[str, dict[str, Any]] = {p["id"]: p for p in result if p.get("id")}
 
     for p in standard:
         pid = p.get("id")
-        if pid and pid not in backend_ids:
-            result.append(p)
-            standard_ids.add(pid)
+        if pid and pid not in merged:
+            merged[pid] = p
 
-    return result
+    # Plugin processes override everything with the same id
+    for _pid, func in load_plugin_processes():
+        descriptor = to_openeo_descriptor(func)
+        merged[descriptor["id"]] = descriptor
+
+    return list(merged.values())

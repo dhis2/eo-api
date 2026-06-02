@@ -51,6 +51,12 @@ def _build_process_registry() -> Any:
     registry["load_collection"] = Process(spec={}, implementation=_load_collection_impl)
     registry["save_result"] = Process(spec={}, implementation=_save_result_impl)
 
+    # @process-decorated plugin functions — override standard processes with same id.
+    from open_climate_service.openeo.plugin_processes import load_plugin_processes, to_openeo_descriptor
+
+    for process_id, func in load_plugin_processes():
+        registry[process_id] = Process(spec=to_openeo_descriptor(func), implementation=func)
+
     _registry = registry
     return registry
 

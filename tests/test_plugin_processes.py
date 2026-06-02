@@ -1,0 +1,114 @@
+"""Tests for @process decorator and plugin process discovery."""
+
+from pathlib import Path
+
+import pytest
+import xarray as xr
+from fastapi.testclient import TestClient
+
+from open_climate_service.process import get_process_metadata, process
+
+
+def test_process_decorator_attaches_metadata() -> None:
+    @process
+    def my_func(data: xr.DataArray, scale: float = 1.0) -> xr.DataArray:
+        """Scale a DataArray."""
+        return data * scale
+
+    meta = get_process_metadata(my_func)
+    assert meta is not None
+    assert meta["id"] == "my_func"
+    assert meta["summary"] == "Scale a DataArray."
+    param_names = [p["name"] for p in meta["parameters"]]
+    assert "data" in param_names
+    assert "scale" in param_names
+    scale_param = next(p for p in meta["parameters"] if p["name"] == "scale")
+    assert scale_param["optional"] is True
+    assert scale_param["default"] == 1.0
+    assert scale_param["schema"] == {"type": "number"}
+
+
+def test_process_decorator_with_explicit_metadata() -> None:
+    @process(summary="Custom summary", parameters={"scale": {"description": "Scale factor"}})
+    def my_func2(data: xr.DataArray, scale: float = 2.0) -> xr.DataArray:
+        return data * scale
+
+    meta = get_process_metadata(my_func2)
+    assert meta["summary"] == "Custom summary"
+    scale_param = next(p for p in meta["parameters"] if p["name"] == "scale")
+    assert scale_param["description"] == "Scale factor"
+
+
+def test_process_decorator_preserves_function_behaviour() -> None:
+    @process(summary="Double")
+    def double(data: xr.DataArray) -> xr.DataArray:
+        return data * 2
+
+    da = xr.DataArray([1.0, 2.0, 3.0])
+    result = double(data=da)
+    assert list(result.values) == [2.0, 4.0, 6.0]
+
+
+def test_plugin_processes_appear_in_get_processes(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A @process function in plugins_dir/processes/ appears in GET /processes."""
+    import open_climate_service.openeo.execution as execution_mod
+
+    processes_dir = tmp_path / "processes"
+    processes_dir.mkdir()
+    (processes_dir / "my_index.py").write_text(
+        """
+import xarray as xr
+from open_climate_service.process import process
+
+@process(summary="My custom climate index")
+def my_index(data: xr.DataArray, thresh: float = 0.5) -> xr.DataArray:
+    return (data > thresh).astype(float)
+""",
+        encoding="utf-8",
+    )
+    config_file = tmp_path / "climate-service.yaml"
+    config_file.write_text(f"plugins_dir: {tmp_path}\n", encoding="utf-8")
+
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
+    # Invalidate the execution registry singleton so it picks up new plugins
+    monkeypatch.setattr(execution_mod, "_registry", None)
+
+    response = client.get("/processes")
+    assert response.status_code == 200
+    ids = {p["id"] for p in response.json()["processes"]}
+    assert "my_index" in ids
+
+
+def test_plugin_process_summary_in_catalog(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import open_climate_service.openeo.execution as execution_mod
+
+    processes_dir = tmp_path / "processes"
+    processes_dir.mkdir()
+    (processes_dir / "cdd.py").write_text(
+        """
+import xarray as xr
+from open_climate_service.process import process
+
+@process(summary="Consecutive dry days")
+def cdd(pr: xr.DataArray, thresh: str = "1mm/day") -> xr.DataArray:
+    return pr
+""",
+        encoding="utf-8",
+    )
+    config_file = tmp_path / "climate-service.yaml"
+    config_file.write_text(f"plugins_dir: {tmp_path}\n", encoding="utf-8")
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
+    monkeypatch.setattr(execution_mod, "_registry", None)
+
+    response = client.get("/processes")
+    procs = {p["id"]: p for p in response.json()["processes"]}
+    assert "cdd" in procs
+    assert procs["cdd"]["summary"] == "Consecutive dry days"
