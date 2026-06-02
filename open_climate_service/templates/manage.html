@@ -235,28 +235,84 @@
         background: #fef9c3;
         color: #854d0e;
       }
+      .badge-sync-idle {
+        background: #e2e8f0;
+        color: #475569;
+        cursor: pointer;
+      }
+      .badge-sync-active {
+        background: #dbeafe;
+        color: #1d4ed8;
+      }
 
       .sync-form {
-        display: inline;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.6rem;
       }
       .sync-btn {
-        background: none;
-        border: 1px solid #cbd5e1;
-        border-radius: 4px;
-        padding: 0.2rem 0.6rem;
-        font-size: 0.78rem;
+        background: #1a2332;
+        color: #fff;
+        border: none;
+        border-radius: 5px;
+        padding: 0.5rem 1.25rem;
+        font-size: 0.875rem;
         font-weight: 500;
-        color: #475569;
         cursor: pointer;
         font-family: inherit;
       }
       .sync-btn:hover {
-        background: #f1f5f9;
-        border-color: #94a3b8;
+        background: #263547;
       }
       .sync-btn:disabled {
         opacity: 0.55;
         cursor: not-allowed;
+      }
+      .sync-trigger {
+        border: none;
+        padding: 0;
+        background: transparent;
+        font: inherit;
+      }
+      .secondary-btn {
+        background: #fff;
+        color: #475569;
+        border: 1px solid #cbd5e1;
+        border-radius: 5px;
+        padding: 0.45rem 1rem;
+        font-size: 0.82rem;
+        font-weight: 500;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .secondary-btn:hover {
+        background: #f8fafc;
+        border-color: #94a3b8;
+      }
+      .secondary-btn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .sync-panel {
+        display: none;
+        min-width: 260px;
+        padding: 0.85rem 1rem;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+      }
+      .sync-panel.open {
+        display: block;
+      }
+      .sync-panel .field {
+        gap: 0.35rem;
+      }
+      .sync-panel-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        margin-top: 0.85rem;
       }
 
       .divider {
@@ -417,12 +473,13 @@
               <th>Name</th>
               <th>Period</th>
               <th>Temporal coverage</th>
-              <th>Status</th>
-              <th></th>
+              <th>Publication</th>
+              <th>Sync</th>
             </tr>
           </thead>
           <tbody>
             {% for ds in datasets %}
+            {% set sync_dom_id = "sync-row-" ~ loop.index0 %}
             <tr>
               <td>
                 <a href="{{ base }}/datasets/{{ ds.dataset_id }}">{{ ds.dataset_name }}</a>
@@ -437,12 +494,50 @@
                 {% endif %}
               </td>
               <td>
-                <form method="post" action="{{ base }}/manage/sync" class="sync-form"
-                      onsubmit="runJob(event, this, 'btn-sync-{{ ds.dataset_id }}', 'sync-progress-{{ ds.dataset_id }}')">
+                <form
+                  method="post"
+                  action="{{ base }}/manage/sync"
+                  class="sync-form"
+                  data-trigger-id="sync-trigger-{{ sync_dom_id }}"
+                  data-progress-id="sync-progress-{{ sync_dom_id }}"
+                  data-status-id="sync-status-{{ sync_dom_id }}"
+                  onsubmit="runJob(event, this, this.dataset.triggerId, this.dataset.progressId, this.dataset.statusId)"
+                >
                   <input type="hidden" name="dataset_id" value="{{ ds.dataset_id }}" />
                   <input type="hidden" name="publish" value="on" />
-                  <button type="submit" id="btn-sync-{{ ds.dataset_id }}" class="sync-btn">Sync</button>
-                  <div id="sync-progress-{{ ds.dataset_id }}" class="progress-area" style="display:none">
+                  <button
+                    type="button"
+                    id="sync-trigger-{{ sync_dom_id }}"
+                    class="sync-trigger"
+                    data-dataset-id="{{ ds.dataset_id }}"
+                    data-sync-dom-id="{{ sync_dom_id }}"
+                    onclick="openSyncPanel(this.dataset.syncDomId)"
+                  >
+                    <span id="sync-status-{{ sync_dom_id }}" class="badge badge-sync-idle">Start sync</span>
+                  </button>
+                  <div id="sync-panel-{{ sync_dom_id }}" class="sync-panel">
+                    <div class="field">
+                      <label for="sync-end-{{ sync_dom_id }}">Cutoff end <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+                      <input
+                        type="text"
+                        id="sync-end-{{ sync_dom_id }}"
+                        name="end"
+                        placeholder="YYYY-MM-DD"
+                      />
+                      <span class="hint">Leave blank to sync through the latest available period.</span>
+                    </div>
+                    <div class="sync-panel-actions">
+                      <button type="submit" class="sync-btn">Start sync</button>
+                      <button
+                        type="button"
+                        class="secondary-btn"
+                        data-dataset-id="{{ ds.dataset_id }}"
+                        data-sync-dom-id="{{ sync_dom_id }}"
+                        onclick="closeSyncPanel(this.dataset.syncDomId)"
+                      >Cancel</button>
+                    </div>
+                  </div>
+                  <div id="sync-progress-{{ sync_dom_id }}" class="progress-area" style="display:none">
                     <div class="progress-bar-track">
                       <div class="progress-bar-fill indeterminate"></div>
                     </div>
@@ -467,22 +562,64 @@
     </footer>
 
     <script>
-      async function runJob(event, form, btnId, progressId) {
+      function openSyncPanel(syncDomId) {
+        const panel = document.getElementById(`sync-panel-${syncDomId}`);
+        const input = document.getElementById(`sync-end-${syncDomId}`);
+        if (!panel) return;
+        panel.classList.add('open');
+        if (input) input.focus();
+      }
+
+      function closeSyncPanel(syncDomId) {
+        const panel = document.getElementById(`sync-panel-${syncDomId}`);
+        const input = document.getElementById(`sync-end-${syncDomId}`);
+        if (!panel) return;
+        panel.classList.remove('open');
+        if (input) input.value = '';
+      }
+
+      function restoreJobControls(controls, btn, status) {
+        controls.forEach(control => {
+          control.disabled = false;
+        });
+        if (status) {
+          status.className = 'badge badge-sync-idle';
+          status.textContent = 'Start sync';
+        }
+        if (btn) {
+          btn.disabled = false;
+        }
+      }
+
+      async function runJob(event, form, btnId, progressId, statusId = null) {
         event.preventDefault();
         const btn = document.getElementById(btnId);
         const area = document.getElementById(progressId);
         const fill = area.querySelector('.progress-bar-fill');
         const label = area.querySelector('.progress-label');
+        const status = statusId ? document.getElementById(statusId) : null;
+        const formData = new FormData(form);
+        const controls = form.querySelectorAll('button, input:not([type="hidden"]), select, textarea');
 
-        btn.disabled = true;
+        controls.forEach(control => {
+          control.disabled = true;
+        });
         area.style.display = 'block';
         fill.className = 'progress-bar-fill indeterminate';
+        fill.style.width = '0%';
         label.textContent = 'Starting…';
+        if (status) {
+          status.className = 'badge badge-sync-active';
+          status.textContent = 'syncing';
+        }
+        if (btn) {
+          btn.disabled = true;
+        }
 
         try {
           const resp = await fetch(form.action, {
             method: 'POST',
-            body: new FormData(form),
+            body: formData,
           });
 
           if (!resp.ok || !resp.body) {
@@ -517,9 +654,12 @@
               }
             }
           }
+          label.textContent = 'Error: Sync ended unexpectedly.';
+          restoreJobControls(controls, btn, status);
         } catch (err) {
-          label.textContent = 'Error: ' + err.message;
-          btn.disabled = false;
+          const message = err instanceof Error ? err.message : String(err);
+          label.textContent = 'Error: ' + message;
+          restoreJobControls(controls, btn, status);
         }
       }
     </script>
