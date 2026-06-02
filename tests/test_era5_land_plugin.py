@@ -63,7 +63,9 @@ def test_era5_land_fetch_period_normalizes_coordinates(monkeypatch: pytest.Monke
     assert "y" in dataset.dims
     assert "longitude" not in dataset.dims
     assert "latitude" not in dataset.dims
-    assert dataset["t2m"].values.tolist() == [[[281.0]]]
+    # 281.0 K → 281.0 - 273.15 = 7.85 °C
+    np.testing.assert_allclose(dataset["t2m"].values, [[[281.0 - 273.15]]], rtol=1e-4)
+    assert dataset["t2m"].attrs.get("units") == "degC"
 
 
 def test_era5_land_precipitation_plugin_defaults_to_tp(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,7 +87,9 @@ def test_era5_land_precipitation_plugin_defaults_to_tp(monkeypatch: pytest.Monke
     dataset = asyncio.run(plugin.fetch_period("2026-01-01T00", [1.0, 2.0, 3.0, 4.0]))
 
     assert list(dataset.data_vars) == ["tp"]
-    np.testing.assert_allclose(dataset["tp"].values, [[[0.002]]])
+    # 0.002 m → 0.002 * 1000 = 2.0 mm
+    np.testing.assert_allclose(dataset["tp"].values, [[[2.0]]], rtol=1e-4)
+    assert dataset["tp"].attrs.get("units") == "mm"
 
 
 def test_era5_land_cached_region_closes_previous_dataset_when_bbox_changes(

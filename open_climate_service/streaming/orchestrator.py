@@ -32,7 +32,6 @@ from open_climate_service.streaming.store import (
     read_committed_period_ids,
     write_geozarr_attrs,
 )
-from open_climate_service.transforms.pipeline import run_dataset_transforms
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +140,6 @@ async def run_streaming_ingest(
 
             period_id, task = in_flight.popleft()
             ds = await task
-            if dataset is not None:
-                ds = run_dataset_transforms(ds, dataset)
             _strip_cf_encoding(ds, period_type, time_dim=spec.time_dim)
             try:
                 spatial_shape = (int(ds.sizes[spec.y_dim]), int(ds.sizes[spec.x_dim]))
