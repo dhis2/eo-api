@@ -91,6 +91,6 @@ WorldPop Global2 provides gridded population estimates and projections at 100 m 
 
 ---
 
-## Derived datasets
+## Temporal resampling
 
-In addition to the four built-in sources, the API can produce **derived datasets** by resampling any ingested dataset to a coarser temporal resolution. Derived datasets are created on demand via the `resample` process. See [Processes](processes.md) for details.
+Any ingested dataset can be resampled to a coarser temporal resolution (e.g. hourly → daily, daily → monthly) using the standard openEO `aggregate_temporal_period` process in a process graph. See [Processes](processes.md) for an example.

@@ -17,6 +17,15 @@ from open_climate_service.ingestions.schemas import (
     SyncDetail,
     SyncResponse,
 )
+from open_climate_service.jobs.models import JobLink, JobRecord
+from open_climate_service.jobs.service import get_job_service
+
+ingestions_router = APIRouter()
+datasets_router = APIRouter()
+zarr_router = APIRouter()
+sync_router = APIRouter()
+
+INGESTION_JOB_HREF_BASE = "/ingestions/jobs"
 
 
 def _prefer_respond_async(prefer: str | None) -> bool:
@@ -26,10 +35,28 @@ def _prefer_respond_async(prefer: str | None) -> bool:
     return "respond-async" in directives
 
 
-ingestions_router = APIRouter()
-datasets_router = APIRouter()
-zarr_router = APIRouter()
-sync_router = APIRouter()
+def _with_ingestion_job_self_link(record: JobRecord) -> JobRecord:
+    self_link = JobLink(href=f"{INGESTION_JOB_HREF_BASE}/{record.job_id}", rel="self", title="Job detail")
+    other_links = [link for link in record.links if link.rel != "self"]
+    return record.model_copy(update={"links": [self_link, *other_links]})
+
+
+@ingestions_router.get("/jobs/{job_id}", response_model=JobRecord)
+def get_ingestion_job(job_id: str) -> JobRecord:
+    """Return the status of an async ingestion or sync job."""
+    from open_climate_service.jobs import store
+
+    record = store.get_job_record(job_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found")
+    return _with_ingestion_job_self_link(record)
+
+
+@ingestions_router.delete("/jobs/{job_id}", response_model=JobRecord, status_code=202)
+def cancel_ingestion_job(job_id: str) -> JobRecord:
+    """Request cooperative cancellation for an async ingestion or sync job."""
+    record = get_job_service().request_cancellation(job_id)
+    return _with_ingestion_job_self_link(record)
 
 
 @ingestions_router.post("")
@@ -41,7 +68,7 @@ def create_ingestion(
     """Create or update a managed dataset from a dataset template and configured extent.
 
     Pass ``Prefer: respond-async`` to queue the ingestion as a background job and
-    return immediately with 202 + ``Location: /jobs/{id}``.
+    return immediately with 202 + ``Location: /ingestions/jobs/{id}``.
     """
     if _prefer_respond_async(prefer):
         _get_dataset_or_404(request.dataset_id)
@@ -54,11 +81,11 @@ def create_ingestion(
             func=execute_ingestion,
             label="ingestion",
             request=request.model_dump(),
+            job_href_base=INGESTION_JOB_HREF_BASE,
         )
         response.status_code = 202
-        response.headers["Location"] = f"/jobs/{job.job_id}"
+        response.headers["Location"] = f"{INGESTION_JOB_HREF_BASE}/{job.job_id}"
         return IngestionResponse(ingestion_id=job.job_id, status=job.status, dataset=None)
-
     dataset = _get_dataset_or_404(request.dataset_id)
     extent = get_extent_or_404()
     resolved_bbox = list(extent["bbox"])
@@ -140,7 +167,7 @@ def sync_dataset(
     """Sync a managed dataset forward from its latest available time step.
 
     Pass ``Prefer: respond-async`` to queue the sync as a background job and
-    return immediately with 202 + ``Location: /jobs/{id}``.
+    return immediately with 202 + ``Location: /ingestions/jobs/{id}``.
     """
     if _prefer_respond_async(prefer):
         services.plan_sync_dataset(dataset_id=dataset_id, end=request.end)
@@ -152,9 +179,10 @@ def sync_dataset(
             func=execute_sync,
             label="sync",
             request={"dataset_id": dataset_id, **request.model_dump()},
+            job_href_base=INGESTION_JOB_HREF_BASE,
         )
         response.status_code = 202
-        response.headers["Location"] = f"/jobs/{job.job_id}"
+        response.headers["Location"] = f"{INGESTION_JOB_HREF_BASE}/{job.job_id}"
         return SyncResponse(sync_id=None, status=job.status, message="Sync queued", dataset=None, sync_detail=None)
 
     return services.sync_dataset(

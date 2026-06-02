@@ -8,7 +8,7 @@ The Open Climate Service is a FastAPI-based REST API that downloads, processes, 
 
 Key concepts:
 
-- **Dataset templates** — YAML files in `data/datasets/` describing a data source (variable, period type, download function). These are blueprints.
+- **Dataset templates** — YAML files in `plugins/datasets/` describing a data source (variable, period type, download function). These are blueprints.
 - **Artifacts / managed datasets** — ingested instances of a template for a specific spatial extent and time range. Exposed under `/datasets` and `/zarr/{dataset_id}`.
 - **Extent** — a single named spatial bounding box configured at instance setup time (`id`, `bbox`, optional `country_code`). Exposed at `GET /extent`.
 - **GeoZarr stores** — datasets are stored as chunked Zarr v3 archives with GeoZarr spatial attributes. Flat stores for small extents; multiscale pyramids for large ones. Served chunk-by-chunk over HTTP with no specialised server middleware.
@@ -44,7 +44,7 @@ The `.env` file is required for `make run` and `make openapi`. Copy `.env.exampl
 
 ## Dataset templates
 
-Each YAML in `data/datasets/` defines a dataset template. The `ingestion` block controls download and zarr build behaviour:
+Each YAML in `plugins/datasets/` defines a dataset template. The `ingestion` block controls download and zarr build behaviour:
 
 ```yaml
 ingestion:

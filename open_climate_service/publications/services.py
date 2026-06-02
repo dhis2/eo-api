@@ -214,5 +214,5 @@ def _native_dataset_href(dataset_id: str) -> str:
 
 def _load_base_config() -> dict[str, Any]:
     """Load the bundled base pygeoapi config via importlib.resources."""
-    resource = importlib.resources.files("open_climate_service") / "data" / "pygeoapi" / "base.yml"
+    resource = importlib.resources.files("open_climate_service") / "pygeoapi" / "base.yml"
     return cast(dict[str, Any], yaml.safe_load(resource.read_text(encoding="utf-8")))

@@ -28,16 +28,13 @@ my-climate-service/
 ├── .env.example            # committed template for environment variables
 ├── .gitignore
 ├── plugins/
-│   ├── datasets/           # custom dataset template YAMLs
-│   ├── <source>/           # custom download / ingestion functions
-│   │   ├── __init__.py
-│   │   └── daily.py
-│   ├── transforms/         # custom transform functions
-│   │   ├── __init__.py
-│   │   └── my_transform.py
-│   └── processes/          # custom process YAMLs + Python functions
-│       ├── my_process.yaml
-│       └── my_process.py
+│   ├── datasets/           # dataset templates (.yaml) + plugin classes (.py)
+│   │   ├── enacts_rainfall.yaml
+│   │   └── enacts.py
+│   ├── processes/          # @process-decorated functions (.py)
+│   │   └── my_process.py
+│   └── workflows/          # reusable process graph compositions (.json)
+│       └── my_workflow.json
 └── data/                   # gitignored — downloaded files and Zarr stores
 ```
 
@@ -120,7 +117,7 @@ plugins_dir: ./plugins/
 | `extent.country_code` | No | ISO 3166-1 alpha-3 — required for WorldPop downloads |
 | `data_dir` | Yes | Directory for downloaded files and Zarr stores, resolved relative to the config file |
 | `crs` | No | EPSG code for the output Zarr CRS. Defaults to `EPSG:4326` |
-| `plugins_dir` | No | Directory containing custom datasets, functions, and processes |
+| `plugins_dir` | No | Directory containing `datasets/`, `processes/`, and `workflows/` plugin subdirectories |
 
 To find the bounding box for a region, [bboxfinder.com](http://bboxfinder.com) is a useful tool.
 
@@ -160,24 +157,20 @@ Visit `http://localhost:8000` to confirm the API is running. The `/extent` endpo
 
 ## Adding plugins
 
-Plugins extend the instance with custom datasets, download functions, transforms, and processes. They live in `plugins_dir` and are loaded automatically at startup. The `plugins_dir` is added to `sys.path`, so Python modules placed directly inside it are importable.
+Plugins extend the instance with custom datasets, processes, and workflows. They live in `plugins_dir` and are loaded automatically. The `plugins_dir` is added to `sys.path`, so Python modules placed directly inside it are importable.
 
 ```
 plugins/
 ├── datasets/
-│   └── enacts_rainfall.yaml    # custom dataset template
-├── enacts/
-│   ├── __init__.py
-│   └── daily.py                # download function referenced in the YAML
-├── transforms/
-│   ├── __init__.py
-│   └── enacts.py               # transform function
-└── processes/
-    ├── spatial_stats.yaml
-    └── spatial_stats.py
+│   ├── enacts_rainfall.yaml    # custom dataset template
+│   └── enacts.py               # streaming plugin class
+├── processes/
+│   └── spatial_stats.py        # @process-decorated functions
+└── workflows/
+    └── aggregate_for_dhis2.json
 ```
 
-See [Extensibility](extensibility.md) for the full specification of each extension point, and [Adding custom datasets](adding_custom_datasets.md) for the dataset template field reference and download function contract.
+See [Extensibility](extensibility.md) for the three plugin types, and [Adding custom datasets](adding_custom_datasets.md) for the dataset template field reference and streaming plugin contract.
 
 ---
 

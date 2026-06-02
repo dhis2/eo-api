@@ -236,7 +236,7 @@ def test_sync_dataset_append_policy_uses_store_based_append_for_plugin_backed_da
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
     )
 
@@ -285,7 +285,7 @@ def test_plan_sync_for_plugin_backed_icechunk_uses_committed_store_state(
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -356,7 +356,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_without
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -396,7 +396,7 @@ def test_plan_sync_for_plugin_backed_icechunk_skips_non_local_store_path(
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -441,7 +441,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_for_win
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -487,7 +487,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_for_fil
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -528,7 +528,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_when_st
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -558,7 +558,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_when_co
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -592,7 +592,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_for_unt
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -626,7 +626,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_for_rel
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -662,7 +662,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_when_co
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -692,7 +692,7 @@ def test_sync_dataset_append_policy_falls_back_for_plugin_backed_non_icechunk_ar
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
     )
 
@@ -1081,7 +1081,10 @@ def test_plan_sync_marks_default_target_end_source(monkeypatch: pytest.MonkeyPat
 
 
 def test_plan_sync_marks_request_target_clamped_by_availability(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sync_engine, "_get_dynamic_function", lambda _: lambda: "2026-03-31")
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.sync_engine.get_dynamic_function",
+        lambda _: lambda: "2026-03-31",
+    )
 
     result = sync_engine.plan_sync(
         source_dataset={
@@ -1135,7 +1138,10 @@ def test_latest_available_end_uses_provider_availability_hook(monkeypatch: pytes
         calls.append({"dataset": dataset, "requested_end": requested_end})
         return "2026-02-05"
 
-    monkeypatch.setattr(sync_engine, "_get_dynamic_function", lambda _: fake_latest_available)
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.sync_engine.get_dynamic_function",
+        lambda _: fake_latest_available,
+    )
 
     source_dataset = {
         "id": "provider_dataset",
@@ -1149,7 +1155,10 @@ def test_latest_available_end_uses_provider_availability_hook(monkeypatch: pytes
 
 
 def test_latest_available_end_clamps_provider_availability_to_requested_end(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sync_engine, "_get_dynamic_function", lambda _: lambda: "2026-03-01")
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.sync_engine.get_dynamic_function",
+        lambda _: lambda: "2026-03-01",
+    )
 
     result = sync_engine._latest_available_end(
         source_dataset={
@@ -1167,7 +1176,7 @@ def test_latest_available_end_wraps_provider_import_errors(monkeypatch: pytest.M
     def fail_import(_: str) -> object:
         raise ImportError("missing provider")
 
-    monkeypatch.setattr(sync_engine, "_get_dynamic_function", fail_import)
+    monkeypatch.setattr("open_climate_service.ingestions.sync_engine.get_dynamic_function", fail_import)
 
     with pytest.raises(
         sync_engine.SyncConfigurationError,
@@ -1184,7 +1193,10 @@ def test_latest_available_end_wraps_provider_import_errors(monkeypatch: pytest.M
 
 
 def test_latest_available_end_rejects_invalid_provider_period_string(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sync_engine, "_get_dynamic_function", lambda _: lambda: "2026-31-99")
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.sync_engine.get_dynamic_function",
+        lambda _: lambda: "2026-31-99",
+    )
 
     with pytest.raises(
         sync_engine.SyncConfigurationError,
@@ -1232,7 +1244,7 @@ def test_sync_plan_route_returns_500_for_provider_hook_misconfiguration(
     def fail_import(_: str) -> object:
         raise ImportError("missing provider")
 
-    monkeypatch.setattr(sync_engine, "_get_dynamic_function", fail_import)
+    monkeypatch.setattr("open_climate_service.ingestions.sync_engine.get_dynamic_function", fail_import)
 
     response = client.get(f"/sync/{dataset_id}/plan", params={"end": "2026-02-10"})
 

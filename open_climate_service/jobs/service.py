@@ -12,7 +12,6 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from open_climate_service.data_registry.services import processes as process_registry
 from open_climate_service.jobs import store
 from open_climate_service.jobs.models import (
     JobCancelledError,
@@ -23,6 +22,7 @@ from open_climate_service.jobs.models import (
     JobRecord,
     JobStatus,
 )
+from open_climate_service.shared.dynamic_import import get_dynamic_function
 from open_climate_service.shared.time import utc_now
 
 logger = logging.getLogger(__name__)
@@ -34,8 +34,11 @@ def _retry_delay_seconds(attempt: int) -> int:
     return int(min(240, 60 * (2**exponent)))
 
 
-def _job_links(job_id: str) -> list[JobLink]:
-    return [JobLink(href=f"/jobs/{job_id}", rel="self", title="Job detail")]
+def _job_links(job_id: str, href_base: str = "/jobs") -> list[JobLink]:
+    base = href_base.rstrip("/")
+    if not base:
+        base = "/jobs"
+    return [JobLink(href=f"{base}/{job_id}", rel="self", title="Job detail")]
 
 
 def _catalog_links() -> list[JobLink]:
@@ -140,6 +143,7 @@ class JobService:
         label: str,
         request: dict[str, Any],
         max_attempts: int = 1,
+        job_href_base: str = "/jobs",
     ) -> JobRecord:
         """Submit a callable directly as a background job — no YAML registry needed.
 
@@ -159,22 +163,8 @@ class JobService:
             process_id=label,
             request=safe_request,
             max_attempts=max_attempts,
+            job_href_base=job_href_base,
         )
-
-    def submit_process_job(
-        self,
-        *,
-        process_id: str,
-        request: dict[str, Any],
-        max_attempts: int = 1,
-    ) -> JobRecord:
-        """Submit a YAML-registered process as a background job."""
-        process = process_registry.get_process(process_id)
-        if process is None or not process["expose"]:
-            raise HTTPException(status_code=404, detail=f"Unknown process '{process_id}'")
-        # Strip the reserved key so a caller-supplied __fn_path__ cannot hijack execution.
-        safe_request = {k: v for k, v in request.items() if k != "__fn_path__"}
-        return self._create_and_enqueue(process_id=process_id, request=safe_request, max_attempts=max_attempts)
 
     def _create_and_enqueue(
         self,
@@ -182,6 +172,7 @@ class JobService:
         process_id: str,
         request: dict[str, Any],
         max_attempts: int,
+        job_href_base: str,
     ) -> JobRecord:
         job_id = str(uuid4())
         record = JobRecord(
@@ -192,7 +183,7 @@ class JobService:
             max_attempts=max_attempts,
             executor_kind=self._executor.kind,
             request=request,
-            links=_job_links(job_id),
+            links=_job_links(job_id, href_base=job_href_base),
         )
         store.create_job_record(record)
         self._enqueue_job(record.job_id)
@@ -427,13 +418,16 @@ class JobService:
 
     def _invoke_process(self, record: JobRecord) -> Any:
         fn_path = record.request.get("__fn_path__")
-        if fn_path and isinstance(fn_path, str):
-            func = process_registry._get_dynamic_function(fn_path)
-        else:
-            process = process_registry.get_process(record.process_id)
-            if process is None or not process["expose"]:
-                raise ValueError(f"Unknown process '{record.process_id}'")
-            func = process_registry.get_process_function(record.process_id)
+        if not fn_path or not isinstance(fn_path, str):
+            logger.warning(
+                "Job '%s' has no __fn_path__ (may be a pre-migration job) — marking failed",
+                record.job_id,
+            )
+            raise ValueError(
+                f"Job '{record.job_id}' has no execution path recorded"
+                " — this job may have been created before the current server version"
+            )
+        func = get_dynamic_function(fn_path)
         context = JobExecutionContext(self, record.job_id)
         kwargs = {k: v for k, v in record.request.items() if k != "__fn_path__"}
         if _supports_argument(func, "on_progress"):

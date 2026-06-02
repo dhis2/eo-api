@@ -3,7 +3,7 @@ from datetime import date
 
 import pytest
 
-from open_climate_service.streaming.plugins.chirps3 import CHIRPS3DailyPlugin
+from open_climate_service.plugins.datasets.chirps3 import CHIRPS3DailyPlugin
 
 
 def test_chirps3_plugin_probe_estimates_grid_from_bbox() -> None:

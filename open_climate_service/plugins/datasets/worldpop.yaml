@@ -17,7 +17,7 @@
       end: "2030"
       resolution: P1Y
   ingestion:
-    plugin: open_climate_service.streaming.plugins.worldpop.WorldPopYearlyPlugin
+    plugin: open_climate_service.plugins.datasets.worldpop.WorldPopYearlyPlugin
     default_params:
       version: global2
       product: total

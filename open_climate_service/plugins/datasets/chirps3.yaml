@@ -15,7 +15,7 @@
       begin: "1981-01-01"
       resolution: P1D
   ingestion:
-    plugin: open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin
+    plugin: open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin
   units: mm
   resolution: 5 km x 5 km
   source: CHIRPS v3
