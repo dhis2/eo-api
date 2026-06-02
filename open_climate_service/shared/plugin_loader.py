@@ -21,4 +21,8 @@ def instantiate_plugin(plugin_path: str, default_params: dict[str, Any]) -> Inge
     accepts_var_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
     kwargs = default_params if accepts_var_kwargs else {k: v for k, v in default_params.items() if k in sig.parameters}
     plugin: IngestionPlugin = PluginClass(**kwargs)
+    if not isinstance(plugin, IngestionPlugin):
+        raise TypeError(
+            f"'{plugin_path}' does not implement the IngestionPlugin protocol"
+        )
     return plugin
