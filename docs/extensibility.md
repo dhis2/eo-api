@@ -37,32 +37,61 @@ See [Adding custom datasets](adding_custom_datasets.md) for the full template fi
 
 ## Processes
 
-Custom processes are Python functions decorated with `@process` and placed in `plugins_dir/processes/`. They appear in `GET /processes` alongside standard openEO processes and are callable directly by `process_id` in any process graph — no `run_udf` indirection needed.
+### Built-in xclim layer
+
+All 179 [xclim](https://xclim.readthedocs.io) climate indicators are auto-registered at startup — no code or YAML required. They appear in `GET /processes` with full metadata (summary, parameter descriptions, types, and defaults) read directly from xclim. See [Climate indices](climate_indices.md) for usage examples.
+
+### Custom process plugins
+
+Python functions decorated with `@process` and placed in `plugins_dir/processes/` appear in `GET /processes` alongside standard openEO processes and are callable directly by `process_id` in any process graph — no `run_udf` indirection needed.
 
 ```python
-# plugins/processes/climate_indices.py
+# plugins/processes/my_indices.py
 import xarray as xr
 from open_climate_service.process import process
 
-@process(summary="Maximum consecutive dry days")
-def cdd(pr: xr.DataArray, thresh: str = "1mm/day") -> xr.DataArray:
-    """Maximum number of consecutive days with precipitation below threshold."""
-    import xclim.atmos
-    return xclim.atmos.maximum_consecutive_dry_days(pr, thresh=thresh)
+@process(summary="Cumulative rainfall anomaly")
+def rainfall_anomaly(pr: xr.DataArray, baseline_mean: float = 0.0) -> xr.DataArray:
+    """Deviation of precipitation from a baseline mean."""
+    return pr - baseline_mean
 ```
 
-The `@process` decorator derives the process id (function name), summary, parameter names, types, and defaults from the function signature and docstring. Use explicit metadata to override:
+The `@process` decorator derives the process id (function name), summary, parameter names, types, and defaults from the function signature and docstring. Use explicit metadata to override descriptions or add schema hints:
 
 ```python
 @process(
-    summary="Custom summary",
-    parameters={"thresh": {"description": "Precipitation threshold"}},
+    summary="Cumulative rainfall anomaly",
+    parameters={"baseline_mean": {"description": "Long-term mean precipitation (kg m-2 s-1)."}},
 )
-def cdd(pr: xr.DataArray, thresh: str = "1mm/day") -> xr.DataArray:
+def rainfall_anomaly(pr: xr.DataArray, baseline_mean: float = 0.0) -> xr.DataArray:
     ...
 ```
 
-A plugin process with the same id as a standard openEO process overrides it. The server must be restarted to pick up new process files.
+### Override an existing process
+
+A plugin process with the same id as an existing process (xclim auto-registered or standard openEO) overrides it. This is useful for adjusting default parameters or adding domain-specific documentation without forking core code:
+
+```python
+# plugins/processes/climate_indices.py — lower CDD threshold for Rwanda
+import xarray as xr
+import xclim.indicators.atmos as xclim_atmos
+from open_climate_service.process import process
+
+@process(summary="Consecutive dry days (Rwanda threshold)")
+def cdd(pr: xr.DataArray, thresh: str = "0.5 mm/day", freq: str = "MS") -> xr.DataArray:
+    """CDD with a lower threshold suited to Rwanda's dry season definition."""
+    return xclim_atmos.maximum_consecutive_dry_days(pr, thresh=thresh, freq=freq)
+```
+
+### Resolution order
+
+| Priority | Source |
+|---|---|
+| 1 (lowest) | xclim auto-registered indicators |
+| 2 | Built-in file plugins (`open_climate_service/plugins/processes/`) |
+| 3 (highest) | Instance plugins (`plugins_dir/processes/`) |
+
+The server must be restarted to pick up new or changed process files.
 
 ---
 
