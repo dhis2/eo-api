@@ -11,6 +11,7 @@ and keeps future scheduler-driven sync jobs on the same code path.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import Callable
@@ -109,6 +110,23 @@ def plan_sync(
                 target_end=target_end,
                 target_end_source=target_end_source,
             )
+        # Probe the plugin for actually-available periods before committing to a sync.
+        available_end = _probe_available_end(source_dataset, next_period_start, target_end)
+        if available_end is None:
+            return SyncDetail(
+                source_dataset_id=latest_artifact.dataset_id,
+                sync_kind=sync_kind,
+                action=SyncAction.NO_OP,
+                reason="no_new_period",
+                message=f"Data already exists through {current_end}; no new periods available from the source.",
+                current_start=current_start,
+                current_end=current_end,
+                target_end=target_end,
+                target_end_source=target_end_source,
+            )
+        if available_end < target_end:
+            target_end = available_end
+            target_end_source = "plugin_availability"
         action = SyncAction.APPEND if _supports_append(source_dataset, latest_artifact) else SyncAction.REMATERIALIZE
         reason = "new_periods_available_for_append" if action == SyncAction.APPEND else "new_periods_available"
         return SyncDetail(
@@ -287,6 +305,28 @@ def _sync_plan_message(
             f"{delta_start} through {delta_end} and extend coverage through {target_end}."
         )
     return f"Data exists through {current_end}. Sync will rematerialize the dataset through {target_end}."
+
+
+def _probe_available_end(
+    source_dataset: dict[str, Any],
+    start: str,
+    target_end: str,
+) -> str | None:
+    """Ask the plugin which periods are actually available and return the last one.
+
+    Returns None if no periods are available (nothing to sync).
+    Returns target_end unchanged if the dataset has no plugin (non-streaming).
+    """
+    from open_climate_service.shared.dynamic_import import get_dynamic_function
+
+    plugin_path = source_dataset.get("ingestion", {}).get("plugin")
+    if not plugin_path:
+        return target_end
+    default_params: dict[str, Any] = source_dataset.get("ingestion", {}).get("default_params") or {}
+    PluginClass = get_dynamic_function(plugin_path)
+    plugin = PluginClass(**default_params)
+    available = asyncio.run(plugin.periods(start, target_end))
+    return available[-1] if available else None
 
 
 def _next_period_start(latest_period_end: str, *, period_type: str) -> str:
