@@ -55,7 +55,6 @@ dependencies = [
     "pystac>=1.10,<2",
     "geojson-pydantic>=2.1.0",
     "httpx>=0.28.1",
-    "earthkit-transforms==0.5.*",
     "metpy>=1.7,<2",
     "xstac>=1.0,<2",
     "zarr>=3.1.6,<4",
