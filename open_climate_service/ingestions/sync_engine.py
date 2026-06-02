@@ -134,7 +134,7 @@ def plan_sync(
             target_end_source = "plugin_availability"
         action = SyncAction.APPEND if _supports_append(source_dataset, latest_artifact) else SyncAction.REMATERIALIZE
         reason = "new_periods_available_for_append" if action == SyncAction.APPEND else "new_periods_available"
-        # Only pass pre_computed_periods for APPEND — it covers [next_period_start, target_end].
+        # Only pass periods for APPEND — it covers [next_period_start, target_end].
         # For REMATERIALIZE the orchestrator must probe the full [current_start, target_end]
         # range so we pass None and let it call plugin.periods() with the correct bounds.
         periods_for_orchestrator = available_periods if action == SyncAction.APPEND else None
@@ -156,7 +156,7 @@ def plan_sync(
             target_end_source=target_end_source,
             delta_start=next_period_start,
             delta_end=target_end,
-            pre_computed_periods=periods_for_orchestrator,
+            periods=periods_for_orchestrator,
         )
 
     if current_end >= target_end:
@@ -277,7 +277,7 @@ def run_sync(
         overwrite=False,
         publish=publish,
         on_progress=on_progress,
-        pre_computed_periods=sync_detail.pre_computed_periods,
+        periods=sync_detail.periods,
     )
     logger.info(
         "Sync completed for dataset '%s': artifact_id=%s action=%s",

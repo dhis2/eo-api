@@ -493,7 +493,7 @@ def test_create_artifact_uses_streaming_plugin_for_direct_ingest(
         "on_progress": None,
         "is_cancel_requested": None,
         "save_cursor": None,
-        "pre_computed_periods": None,
+        "periods": None,
     }
     assert artifact.format == ArtifactFormat.ICECHUNK
     assert artifact.path == str(store_path.resolve())
