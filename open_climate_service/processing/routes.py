@@ -6,7 +6,6 @@ from fastapi import APIRouter, Body, Header, HTTPException, Response
 
 from open_climate_service.data_registry.services import processes as process_registry
 from open_climate_service.jobs.service import get_job_service
-from open_climate_service.processing import services as processing_services
 from open_climate_service.processing.schemas import (
     ProcessDetail,
     ProcessField,
@@ -107,8 +106,6 @@ def _validate_required_process_inputs(process: dict[str, Any], request: dict[str
 
 def _validate_process_request(process: dict[str, Any], request: dict[str, Any]) -> None:
     _validate_required_process_inputs(process, request)
-    if process.get("id") == "resample":
-        processing_services.validate_resample_request(**request)
 
 
 def _supports_async_execution(process: dict[str, Any]) -> bool:

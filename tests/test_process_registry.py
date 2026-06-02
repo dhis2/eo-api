@@ -5,25 +5,6 @@ import pytest
 from open_climate_service.data_registry.services import processes as process_registry
 
 
-def test_builtin_processes_include_resample(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(process_registry, "CONFIGS_DIR", None)
-    monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
-
-    ids = {p["id"] for p in process_registry.list_processes()}
-    assert "resample" in ids
-
-
-def test_builtin_resample_has_execution_function(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(process_registry, "CONFIGS_DIR", None)
-    monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
-
-    resample = process_registry.get_process("resample")
-    assert resample is not None
-    assert resample["title"] == "Temporal resampling"
-    assert resample["execution"]["function"] == "open_climate_service.processing.services.execute_resample"
-    assert resample["jobControlOptions"] == ["sync-execute", "async-execute"]
-
-
 def test_get_process_returns_none_for_unknown_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(process_registry, "CONFIGS_DIR", None)
     monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
@@ -82,18 +63,17 @@ def test_plugins_dir_processes_subdir_adds_to_builtin(monkeypatch: pytest.Monkey
 
     ids = {p["id"] for p in process_registry.list_processes()}
     assert "custom_process" in ids
-    assert "resample" in ids
 
 
 def test_plugins_dir_process_overrides_builtin_by_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     processes_subdir = tmp_path / "plugins" / "processes"
     processes_subdir.mkdir(parents=True)
-    (processes_subdir / "resample.yaml").write_text(
+    (processes_subdir / "ingestion.yaml").write_text(
         """
-- id: resample
-  title: Custom resample override
+- id: ingestion
+  title: Custom ingestion override
   execution:
-    function: mypackage.resample.execute
+    function: mypackage.ingestion.execute
 """,
         encoding="utf-8",
     )
@@ -104,8 +84,8 @@ def test_plugins_dir_process_overrides_builtin_by_id(monkeypatch: pytest.MonkeyP
     monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
 
     processes = {p["id"]: p for p in process_registry.list_processes()}
-    assert processes["resample"]["title"] == "Custom resample override"
-    assert processes["resample"]["execution"]["function"] == "mypackage.resample.execute"
+    assert processes["ingestion"]["title"] == "Custom ingestion override"
+    assert processes["ingestion"]["execution"]["function"] == "mypackage.ingestion.execute"
 
 
 def test_process_registry_rejects_legacy_name_without_title(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

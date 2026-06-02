@@ -1,12 +1,7 @@
 from pathlib import Path
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-
-from open_climate_service.ingestions.schemas import DatasetRecord
-from open_climate_service.processing import services as processing_services
-from tests.helpers import dataset_record
 
 
 def test_get_processes_omits_internal_only_processes(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -41,33 +36,6 @@ def test_get_processes_omits_internal_only_processes(client: TestClient, monkeyp
     # The list also includes all standard openEO processes, so we check membership.
     assert "internal_process" not in ids
     assert "public_process" in ids
-
-
-def test_get_processes_returns_openeo_catalog_while_execution_stays_native(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        processing_services,
-        "run_resample_process",
-        lambda **kwargs: ("artifact-123", dataset_record("chirps3_precipitation_daily_w_mon_sum")),
-    )
-
-    catalog_response = client.get("/processes")
-    execution_response = client.post(
-        "/processes/resample/execution",
-        json={
-            "source_dataset_id": "chirps3_precipitation_daily",
-            "frequency": "W-MON",
-            "method": "sum",
-            "start": "2026-01-05",
-        },
-    )
-
-    assert catalog_response.status_code == 200
-    assert "processes" in catalog_response.json()
-    assert execution_response.status_code == 200
-    assert execution_response.json()["status"] == "completed"
 
 
 def test_get_unknown_process_detail_returns_404(client: TestClient) -> None:
@@ -126,56 +94,29 @@ def test_expose_false_yaml_fixture_is_hidden_from_catalog_and_routes(
     assert execution_response.status_code == 404
 
 
-def test_post_resample_execution_returns_completed_response(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        processing_services,
-        "run_resample_process",
-        lambda **kwargs: ("artifact-123", dataset_record("chirps3_precipitation_daily_w_mon_sum")),
-    )
-
-    response = client.post(
-        "/processes/resample/execution",
-        json={
-            "source_dataset_id": "chirps3_precipitation_daily",
-            "frequency": "W-MON",
-            "method": "sum",
-            "start": "2026-01-05",
-            "end": "2026-01-12",
-            "publish": True,
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["artifact_id"] == "artifact-123"
-    assert payload["status"] == "completed"
-    assert payload["dataset"]["dataset_id"] == "chirps3_precipitation_daily_w_mon_sum"
-
-
 def test_post_process_execution_honors_case_insensitive_prefer_tokens(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        processing_services,
-        "run_resample_process",
-        lambda **kwargs: ("artifact-123", dataset_record("chirps3_precipitation_daily_w_mon_sum")),
+        "open_climate_service.processing.routes.process_registry.get_process",
+        lambda process_id: {
+            "id": process_id,
+            "title": "Async process",
+            "execution": {"function": "mypackage.async_process.execute"},
+            "expose": True,
+            "jobControlOptions": ["sync-execute", "async-execute"],
+        },
+    )
+    monkeypatch.setattr(
+        "open_climate_service.processing.routes.process_registry._get_dynamic_function",
+        lambda path: lambda **kwargs: {"status": "completed"},
     )
 
     response = client.post(
-        "/processes/resample/execution",
+        "/processes/async-process/execution",
         headers={"Prefer": "Respond-Async, wait=10"},
-        json={
-            "source_dataset_id": "chirps3_precipitation_daily",
-            "frequency": "W-MON",
-            "method": "sum",
-            "start": "2026-01-05",
-            "end": "2026-01-12",
-            "publish": True,
-        },
+        json={},
     )
 
     assert response.status_code == 202
@@ -224,88 +165,6 @@ def test_post_internal_process_execution_returns_404(client: TestClient, monkeyp
     response = client.post("/processes/internal_process/execution", json={})
 
     assert response.status_code == 404
-
-
-def test_post_resample_execution_passes_params_to_service(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, Any] = {}
-
-    def fake_run_resample_process(**kwargs: object) -> tuple[str, DatasetRecord]:
-        captured.update(kwargs)
-        return "artifact-456", dataset_record("chirps3_precipitation_daily_w_mon_sum")
-
-    monkeypatch.setattr(processing_services, "run_resample_process", fake_run_resample_process)
-
-    response = client.post(
-        "/processes/resample/execution",
-        json={
-            "source_dataset_id": "chirps3_precipitation_daily",
-            "frequency": "W-MON",
-            "method": "sum",
-            "start": "2026-01-05",
-            "end": "2026-01-12",
-            "overwrite": True,
-            "publish": False,
-        },
-    )
-
-    assert response.status_code == 200
-    assert captured["source_dataset_id"] == "chirps3_precipitation_daily"
-    assert captured["frequency"] == "W-MON"
-    assert captured["method"] == "sum"
-    assert captured["start"] == "2026-01-05"
-    assert captured["end"] == "2026-01-12"
-    assert captured["overwrite"] is True
-    assert captured["publish"] is False
-
-
-def test_post_resample_execution_returns_400_for_invalid_frequency(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    response = client.post(
-        "/processes/resample/execution",
-        json={
-            "source_dataset_id": "chirps3_precipitation_daily",
-            "frequency": "invalid",
-            "method": "sum",
-            "start": "2026-01-01",
-        },
-    )
-    assert response.status_code == 400
-
-
-def test_post_resample_execution_returns_400_for_null_frequency(client: TestClient) -> None:
-    response = client.post(
-        "/processes/resample/execution",
-        json={
-            "source_dataset_id": "chirps3_precipitation_daily",
-            "frequency": None,
-            "method": "sum",
-            "start": "2026-01-01",
-        },
-    )
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "frequency is required"
-
-
-def test_post_resample_execution_returns_400_for_unsupported_method(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    response = client.post(
-        "/processes/resample/execution",
-        json={
-            "source_dataset_id": "chirps3_precipitation_daily",
-            "frequency": "W-MON",
-            "method": "median",
-            "start": "2026-01-05",
-        },
-    )
-    assert response.status_code == 400
 
 
 def test_post_unknown_process_id_returns_404(client: TestClient) -> None:
