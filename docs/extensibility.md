@@ -37,61 +37,31 @@ See [Adding custom datasets](adding_custom_datasets.md) for the full template fi
 
 ## Processes
 
-### Built-in xclim layer
-
-All 179 [xclim](https://xclim.readthedocs.io) climate indicators are auto-registered at startup — no code or YAML required. They appear in `GET /processes` with full metadata (summary, parameter descriptions, types, and defaults) read directly from xclim. See [Climate indices](climate_indices.md) for usage examples.
-
-### Custom process plugins
-
-Python functions decorated with `@process` and placed in `plugins_dir/processes/` appear in `GET /processes` alongside standard openEO processes and are callable directly by `process_id` in any process graph — no `run_udf` indirection needed.
+Custom processes are Python functions decorated with `@process` and placed in `plugins_dir/processes/`. They appear in `GET /processes` alongside standard openEO processes and are callable directly by `process_id` in any process graph.
 
 ```python
-# plugins/processes/my_indices.py
+# plugins/processes/indices.py
 import xarray as xr
 from open_climate_service.process import process
 
-@process(summary="Cumulative rainfall anomaly")
-def rainfall_anomaly(pr: xr.DataArray, baseline_mean: float = 0.0) -> xr.DataArray:
-    """Deviation of precipitation from a baseline mean."""
-    return pr - baseline_mean
+@process(summary="Precipitation anomaly relative to a baseline mean")
+def precip_anomaly(pr: xr.DataArray, baseline: float = 0.0) -> xr.DataArray:
+    """Deviation of precipitation from a long-term baseline mean."""
+    return pr - baseline
 ```
 
-The `@process` decorator derives the process id (function name), summary, parameter names, types, and defaults from the function signature and docstring. Use explicit metadata to override descriptions or add schema hints:
+The `@process` decorator derives the process id (function name), summary, parameter names, types, and defaults from the function signature and docstring. Use explicit metadata to override descriptions:
 
 ```python
 @process(
-    summary="Cumulative rainfall anomaly",
-    parameters={"baseline_mean": {"description": "Long-term mean precipitation (kg m-2 s-1)."}},
+    summary="Precipitation anomaly relative to a baseline mean",
+    parameters={"baseline": {"description": "Long-term mean precipitation (kg m-2 s-1)."}},
 )
-def rainfall_anomaly(pr: xr.DataArray, baseline_mean: float = 0.0) -> xr.DataArray:
+def precip_anomaly(pr: xr.DataArray, baseline: float = 0.0) -> xr.DataArray:
     ...
 ```
 
-### Override an existing process
-
-A plugin process with the same id as an existing process (xclim auto-registered or standard openEO) overrides it. This is useful for adjusting default parameters or adding domain-specific documentation without forking core code:
-
-```python
-# plugins/processes/climate_indices.py — lower CDD threshold for Rwanda
-import xarray as xr
-import xclim.indicators.atmos as xclim_atmos
-from open_climate_service.process import process
-
-@process(summary="Consecutive dry days (Rwanda threshold)")
-def cdd(pr: xr.DataArray, thresh: str = "0.5 mm/day", freq: str = "MS") -> xr.DataArray:
-    """CDD with a lower threshold suited to Rwanda's dry season definition."""
-    return xclim_atmos.maximum_consecutive_dry_days(pr, thresh=thresh, freq=freq)
-```
-
-### Resolution order
-
-| Priority | Source |
-|---|---|
-| 1 (lowest) | xclim auto-registered indicators |
-| 2 | Built-in file plugins (`open_climate_service/plugins/processes/`) |
-| 3 (highest) | Instance plugins (`plugins_dir/processes/`) |
-
-The server must be restarted to pick up new or changed process files.
+A plugin process with the same id as an existing process overrides it. The server must be restarted to pick up new process files. For built-in climate indices, see [Climate indices](climate_indices.md).
 
 ---
 
@@ -102,7 +72,70 @@ Reusable pipeline compositions are implemented as **UDPs** (User Defined Process
 ```
 plugins/
 └── workflows/
-    └── my_workflow.json
+    └── monthly_rainfall.json
+```
+
+### Example: monthly rainfall totals
+
+```json
+{
+  "id": "monthly_rainfall",
+  "summary": "Monthly total precipitation for a collection and time range",
+  "parameters": [
+    {"name": "collection_id", "description": "Collection to load", "schema": {"type": "string"}},
+    {"name": "temporal_extent", "description": "Time range [start, end]", "schema": {"type": "array"}}
+  ],
+  "process_graph": {
+    "load": {
+      "process_id": "load_collection",
+      "arguments": {
+        "id": {"from_parameter": "collection_id"},
+        "temporal_extent": {"from_parameter": "temporal_extent"}
+      }
+    },
+    "aggregate": {
+      "process_id": "aggregate_temporal_period",
+      "arguments": {
+        "data": {"from_node": "load"},
+        "period": "month",
+        "reducer": {
+          "process_graph": {
+            "sum": {
+              "process_id": "sum",
+              "arguments": {"data": {"from_parameter": "data"}},
+              "result": true
+            }
+          }
+        }
+      }
+    },
+    "save": {
+      "process_id": "save_result",
+      "arguments": {"data": {"from_node": "aggregate"}, "format": "Zarr"},
+      "result": true
+    }
+  }
+}
+```
+
+Calling the workflow from any openEO client:
+
+```python
+import openeo
+
+conn = openeo.connect("http://your-instance:8000")
+job = conn.execute_batch_job({
+    "process_graph": {
+        "result": {
+            "process_id": "monthly_rainfall",
+            "arguments": {
+                "collection_id": "chirps_rainfall_daily",
+                "temporal_extent": ["2020-01-01", "2023-12-31"]
+            },
+            "result": true
+        }
+    }
+})
 ```
 
 Workflow JSON files are loaded on each request to `GET /process_graphs`, so changes on disk take effect without restarting the server. A plugin workflow with the same `id` as a built-in overrides it.
