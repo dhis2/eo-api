@@ -48,11 +48,8 @@ _tx_ind = xclim_atmos.tx_days_above
 @process(
     summary="Standardized Precipitation Index (SPI)",
     parameters={
-        **_xclim_params(_spi_ind, "pr"),
+        **_xclim_params(_spi_ind, "pr", "cal_start", "cal_end", "freq"),
         "window": {"description": "Accumulation window in months (1 = SPI-1, 3 = SPI-3, 6 = SPI-6)."},
-        "cal_start": {"description": "Calibration period start date (YYYY-MM-DD). Defaults to start of record."},
-        "cal_end": {"description": "Calibration period end date (YYYY-MM-DD). Defaults to end of record."},
-        "freq": {"description": "Output frequency. 'MS' = monthly (default). Use None if input is pre-aggregated."},
     },
 )
 def spi(
@@ -79,11 +76,7 @@ def spi(
 
 @process(
     summary="Maximum consecutive dry days (CDD)",
-    parameters={
-        **_xclim_params(_cdd_ind, "pr"),
-        "thresh": {"description": "Precipitation threshold below which a day is considered dry (e.g. '1 mm/day')."},
-        "freq": {"description": "Resampling frequency. 'YS' = annual (default), 'MS' = monthly."},
-    },
+    parameters=_xclim_params(_cdd_ind, "pr", "thresh", "freq"),
 )
 def cdd(
     pr: xr.DataArray,
@@ -102,11 +95,7 @@ def cdd(
 
 @process(
     summary="Maximum consecutive wet days (CWD)",
-    parameters={
-        **_xclim_params(_cwd_ind, "pr"),
-        "thresh": {"description": "Precipitation threshold for a wet day (e.g. '1 mm/day')."},
-        "freq": {"description": "Resampling frequency. 'YS' = annual (default), 'MS' = monthly."},
-    },
+    parameters=_xclim_params(_cwd_ind, "pr", "thresh", "freq"),
 )
 def cwd(
     pr: xr.DataArray,
@@ -125,11 +114,7 @@ def cwd(
 
 @process(
     summary="Number of days with maximum temperature above threshold (TX days above)",
-    parameters={
-        **_xclim_params(_tx_ind, "tasmax"),
-        "thresh": {"description": "Temperature threshold (e.g. '25 degC', '30 degC')."},
-        "freq": {"description": "Resampling frequency. 'YS' = annual (default), 'MS' = monthly."},
-    },
+    parameters=_xclim_params(_tx_ind, "tasmax", "thresh", "freq"),
 )
 def tx_days_above(
     tasmax: xr.DataArray,
