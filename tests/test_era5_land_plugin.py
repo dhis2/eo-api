@@ -8,8 +8,9 @@ import xarray as xr
 from open_climate_service.plugins.datasets.era5_land import ERA5LandHourlySingleBandPlugin, ERA5LandPrecipitationPlugin
 
 
-def test_era5_land_periods_enumerate_hours() -> None:
+def test_era5_land_periods_enumerate_hours(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = ERA5LandHourlySingleBandPlugin(variable="t2m")
+    monkeypatch.setattr(plugin, "_latest_available", lambda: "2099-12-31T23")
 
     periods = asyncio.run(plugin.periods("2026-01-01T00", "2026-01-01T02"))
 
