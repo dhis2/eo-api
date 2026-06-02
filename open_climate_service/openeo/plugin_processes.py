@@ -92,22 +92,33 @@ def _load_from_module(module_name: str) -> list[Any]:
         return []
 
 
+_xclim_indicator_cache: list[Any] | None = None
+
+
 def _scan_xclim_indicators() -> list[Any]:
-    """Auto-register all xclim indicators as process callables."""
+    """Auto-register all xclim indicators as process callables (result is cached)."""
+    global _xclim_indicator_cache
+    if _xclim_indicator_cache is not None:
+        return _xclim_indicator_cache
     try:
-        return _collect_xclim_indicators()
+        _xclim_indicator_cache = _collect_xclim_indicators()
     except Exception:
         logger.warning("Failed to load xclim indicators", exc_info=True)
-        return []
+        _xclim_indicator_cache = []
+    return _xclim_indicator_cache
 
 
 def _collect_xclim_indicators() -> list[Any]:
+    import inspect
+
     import xclim.indicators.atmos as atmos
     import xclim.indicators.land as land
     import xclim.indicators.seaIce as seaice
     from xclim.core.indicator import InputKind
 
     _SKIP_KINDS = {InputKind.DATASET, InputKind.KWARGS}
+    # Kinds whose default is a dataset variable name, not a real scalar default
+    _VARIABLE_KINDS = {InputKind.VARIABLE, InputKind.OPTIONAL_VARIABLE}
     _KIND_SCHEMA: dict[InputKind, dict[str, str]] = {
         InputKind.VARIABLE: {"type": "object", "subtype": "datacube"},
         InputKind.OPTIONAL_VARIABLE: {"type": "object", "subtype": "datacube"},
@@ -140,10 +151,18 @@ def _collect_xclim_indicators() -> list[Any]:
                 param_meta: dict[str, Any] = {"name": name, "schema": _KIND_SCHEMA.get(p.kind, {})}
                 if p.description:
                     param_meta["description"] = p.description
-                # VARIABLE defaults are dataset-mode variable name strings, not real defaults
-                if p.kind not in (InputKind.VARIABLE,):
+                # Only expose defaults that are real JSON-serializable scalars.
+                # VARIABLE/OPTIONAL_VARIABLE defaults are dataset-mode variable name
+                # strings (e.g. "pr"), not meaningful API defaults.
+                if p.kind not in _VARIABLE_KINDS:
+                    default = p.default
+                    if default is not inspect.Parameter.empty and isinstance(
+                        default, (str, int, float, bool, type(None))
+                    ):
+                        param_meta["optional"] = True
+                        param_meta["default"] = default
+                elif p.kind is InputKind.OPTIONAL_VARIABLE:
                     param_meta["optional"] = True
-                    param_meta["default"] = p.default
                 params.append(param_meta)
 
             meta: dict[str, Any] = {

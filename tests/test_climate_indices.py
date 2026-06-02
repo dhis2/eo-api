@@ -136,12 +136,12 @@ def test_cdd_computes_via_xclim(daily_precip: xr.DataArray) -> None:
 
 
 def test_cdd_cwd_complementary_via_xclim(daily_precip: xr.DataArray) -> None:
-    r_cdd = xclim_atmos.maximum_consecutive_dry_days(daily_precip)
-    r_cwd = xclim_atmos.maximum_consecutive_wet_days(daily_precip)
+    r_cdd = xr.DataArray(xclim_atmos.maximum_consecutive_dry_days(daily_precip))
+    r_cwd = xr.DataArray(xclim_atmos.maximum_consecutive_wet_days(daily_precip))
     assert not np.allclose(r_cdd.values, r_cwd.values, equal_nan=True)
 
 
 def test_tx_days_above_higher_threshold_gives_fewer_days(daily_tasmax: xr.DataArray) -> None:
-    r25 = xclim_atmos.tx_days_above(daily_tasmax, thresh="25 degC")
-    r35 = xclim_atmos.tx_days_above(daily_tasmax, thresh="35 degC")
-    assert float(r35.mean()) <= float(r25.mean())
+    r25 = xr.DataArray(xclim_atmos.tx_days_above(daily_tasmax, thresh="25 degC"))
+    r35 = xr.DataArray(xclim_atmos.tx_days_above(daily_tasmax, thresh="35 degC"))
+    assert float(r35.mean().item()) <= float(r25.mean().item())

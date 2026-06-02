@@ -5,7 +5,7 @@ modules in plugin_processes._scan_xclim_indicators. This file only needs
 to override indicators where the auto-generated metadata is insufficient.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import xarray as xr
 import xclim.indicators.atmos as xclim_atmos
@@ -56,10 +56,11 @@ def spi(
     fitted to the calibration period. Values below -1 indicate drought conditions;
     values above +1 indicate wet conditions.
     """
+    # DateStr is NewType(str) in xclim — cast to satisfy pyright without importing private types
     return xclim.indices.standardized_precipitation_index(  # type: ignore[no-any-return]
         pr,
         freq=freq,
         window=window,
-        cal_start=cal_start,
-        cal_end=cal_end,
+        cal_start=cast(Any, cal_start),
+        cal_end=cast(Any, cal_end),
     )
