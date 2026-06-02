@@ -12,7 +12,7 @@ import xarray as xr
 from fastapi.testclient import TestClient
 
 from open_climate_service.openeo.execution import (
-    _augment_with_udps,
+    _augment_with_workflows,
     _bbox_to_dict,
     _RegistryOverlay,
     _temporal_to_list,
@@ -108,20 +108,20 @@ def test_registry_overlay_tuple_key_uses_name() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _augment_with_udps
+# _augment_with_workflows
 # ---------------------------------------------------------------------------
 
 
-def test_augment_with_udps_returns_base_when_no_udps(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_augment_with_workflows_returns_base_when_no_udps(monkeypatch: pytest.MonkeyPatch) -> None:
     import open_climate_service.openeo.workflows as workflow_module
 
     monkeypatch.setattr(workflow_module, "list_workflows", lambda: MagicMock(processes=[]))
     base = object()
-    result = _augment_with_udps(base)
+    result = _augment_with_workflows(base)
     assert result is base
 
 
-def test_augment_with_udps_registers_udp(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_augment_with_workflows_registers_udp(monkeypatch: pytest.MonkeyPatch) -> None:
     import open_climate_service.openeo.workflows as workflow_module
 
     udp = MagicMock()
@@ -136,7 +136,7 @@ def test_augment_with_udps_registers_udp(monkeypatch: pytest.MonkeyPatch) -> Non
     base = ProcessRegistry()
     base["save_result"] = Process(spec={}, implementation=lambda data, **kw: data)
 
-    overlay = _augment_with_udps(base)
+    overlay = _augment_with_workflows(base)
     assert isinstance(overlay, _RegistryOverlay)
     assert "my_udp" in overlay._udps
 

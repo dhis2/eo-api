@@ -1,6 +1,6 @@
 """Routes for EO ingestion, datasets, and sync operations."""
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from starlette.responses import Response
 
@@ -18,14 +18,6 @@ from open_climate_service.ingestions.schemas import (
     SyncResponse,
 )
 
-
-def _prefer_respond_async(prefer: str | None) -> bool:
-    if prefer is None:
-        return False
-    directives = [item.strip().split(";", 1)[0].strip().lower() for item in prefer.split(",")]
-    return "respond-async" in directives
-
-
 ingestions_router = APIRouter()
 datasets_router = APIRouter()
 zarr_router = APIRouter()
@@ -35,30 +27,8 @@ sync_router = APIRouter()
 @ingestions_router.post("")
 def create_ingestion(
     request: CreateIngestionRequest,
-    response: Response,
-    prefer: str | None = Header(default=None),
 ) -> IngestionResponse:
-    """Create or update a managed dataset from a dataset template and configured extent.
-
-    Pass ``Prefer: respond-async`` to queue the ingestion as a background job and
-    return immediately with 202 + ``Location: /jobs/{id}``.
-    """
-    if _prefer_respond_async(prefer):
-        _get_dataset_or_404(request.dataset_id)
-        get_extent_or_404()
-
-        from open_climate_service.ingestions.processes import execute_ingestion
-        from open_climate_service.jobs.service import get_job_service
-
-        job = get_job_service().submit_callable_job(
-            func=execute_ingestion,
-            label="ingestion",
-            request=request.model_dump(),
-        )
-        response.status_code = 202
-        response.headers["Location"] = f"/jobs/{job.job_id}"
-        return IngestionResponse(ingestion_id=job.job_id, status=job.status, dataset=None)
-
+    """Create or update a managed dataset from a dataset template and configured extent."""
     dataset = _get_dataset_or_404(request.dataset_id)
     extent = get_extent_or_404()
     resolved_bbox = list(extent["bbox"])
@@ -134,29 +104,8 @@ def get_canonical_zarr_store_file(dataset_id: str, relative_path: str) -> FileRe
 def sync_dataset(
     dataset_id: str,
     request: SyncDatasetRequest,
-    response: Response,
-    prefer: str | None = Header(default=None),
 ) -> SyncResponse:
-    """Sync a managed dataset forward from its latest available time step.
-
-    Pass ``Prefer: respond-async`` to queue the sync as a background job and
-    return immediately with 202 + ``Location: /jobs/{id}``.
-    """
-    if _prefer_respond_async(prefer):
-        services.plan_sync_dataset(dataset_id=dataset_id, end=request.end)
-
-        from open_climate_service.ingestions.processes import execute_sync
-        from open_climate_service.jobs.service import get_job_service
-
-        job = get_job_service().submit_callable_job(
-            func=execute_sync,
-            label="sync",
-            request={"dataset_id": dataset_id, **request.model_dump()},
-        )
-        response.status_code = 202
-        response.headers["Location"] = f"/jobs/{job.job_id}"
-        return SyncResponse(sync_id=None, status=job.status, message="Sync queued", dataset=None, sync_detail=None)
-
+    """Sync a managed dataset forward from its latest available time step."""
     return services.sync_dataset(
         dataset_id=dataset_id,
         end=request.end,

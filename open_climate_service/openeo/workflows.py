@@ -46,12 +46,14 @@ def list_workflows() -> WorkflowListResponse:
     workflows override both.
     """
     merged: dict[str, dict[str, object]] = {}
-    for raw in _load_builtin_workflows():
-        merged[str(raw.get("id", ""))] = raw
-    for raw in _load_plugin_workflows():
-        merged[str(raw.get("id", ""))] = raw
-    for raw in _load_records():
-        merged[str(raw.get("id", ""))] = raw
+    for raw in (*_load_builtin_workflows(), *_load_plugin_workflows(), *_load_records()):
+        if not isinstance(raw, dict):
+            continue
+        wid = raw.get("id")
+        if not isinstance(wid, str) or not wid:
+            logger.warning("Skipping workflow with missing or non-string id")
+            continue
+        merged[wid] = raw
     records = []
     for raw in merged.values():
         try:
@@ -138,8 +140,16 @@ def _load_builtin_workflows() -> list[dict[str, object]]:
     workflows: list[dict[str, object]] = []
     try:
         for resource in pkg.iterdir():
-            if resource.name.endswith(".json"):
-                workflows.append(json.loads(resource.read_text(encoding="utf-8")))
+            if not resource.name.endswith(".json"):
+                continue
+            try:
+                data = json.loads(resource.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    logger.warning("Skipping built-in workflow %s: expected a JSON object", resource.name)
+                    continue
+                workflows.append(data)
+            except json.JSONDecodeError as exc:
+                logger.warning("Skipping built-in workflow %s: %s", resource.name, exc)
     except (FileNotFoundError, NotADirectoryError):
         pass
     return workflows
@@ -159,7 +169,11 @@ def _load_plugin_workflows() -> list[dict[str, object]]:
     workflows: list[dict[str, object]] = []
     for path in sorted(workflows_dir.glob("*.json")):
         try:
-            workflows.append(json.loads(path.read_text(encoding="utf-8")))
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                logger.warning("Skipping workflow file %s: expected a JSON object", path)
+                continue
+            workflows.append(data)
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Skipping workflow file %s: %s", path, exc)
     return workflows

@@ -29,7 +29,7 @@ def _build_process_registry() -> Any:
 
     Contains: all openeo-processes-dask standard processes, backend load_collection /
     save_result, and any exposed native YAML-configured processing plugins.
-    UDPs are NOT included here — they are added per-execution by _augment_with_udps.
+    UDPs are NOT included here — they are added per-execution by _augment_with_workflows.
     """
     global _registry
     if _registry is not None:
@@ -72,48 +72,48 @@ class _RegistryOverlay:
         return self._base[key]
 
 
-def _augment_with_udps(base_registry: Any) -> Any:
-    """Return a registry overlay that adds currently stored UDPs to the base registry.
+def _augment_with_workflows(base_registry: Any) -> Any:
+    """Return a registry overlay that adds currently stored workflows to the base registry.
 
-    UDPs are loaded fresh on every call so that PUT /process_graphs changes take effect
-    without restarting the server.  Returns the base registry unchanged when no UDPs exist.
+    Workflows are loaded fresh on every call so that PUT /process_graphs changes take
+    effect without restarting the server. Returns the base registry unchanged when none exist.
     """
     from openeo_pg_parser_networkx.process_registry import Process
 
     from open_climate_service.openeo import workflows as workflow_store
 
-    udp_records = workflow_store.list_workflows().processes
-    if not udp_records:
+    workflow_records = workflow_store.list_workflows().processes
+    if not workflow_records:
         return base_registry
 
-    udp_map: dict[str, Any] = {}
-    overlay = _RegistryOverlay(base_registry, udp_map)
+    workflow_map: dict[str, Any] = {}
+    overlay = _RegistryOverlay(base_registry, workflow_map)
 
-    for udp in udp_records:
-        if not udp.process_graph:
+    for wf in workflow_records:
+        if not wf.process_graph:
             continue
-        pg_dict: dict[str, Any] = dict(udp.process_graph)
+        pg_dict: dict[str, Any] = dict(wf.process_graph)
 
-        def _make_udp_impl(pg: dict[str, Any], udp_id: str) -> Any:
+        def _make_workflow_impl(pg: dict[str, Any], wf_id: str) -> Any:
             _executing: set[str] = set()
 
-            def _udp_impl(**kwargs: Any) -> Any:
+            def _workflow_impl(**kwargs: Any) -> Any:
                 from openeo_pg_parser_networkx import OpenEOProcessGraph
 
-                if udp_id in _executing:
+                if wf_id in _executing:
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Recursive UDP call detected: '{udp_id}' called itself",
+                        detail=f"Recursive workflow call detected: '{wf_id}' called itself",
                     )
-                _executing.add(udp_id)
+                _executing.add(wf_id)
                 try:
                     return OpenEOProcessGraph(pg).to_callable(overlay, parameters=kwargs)()  # pyright: ignore[reportArgumentType]
                 finally:
-                    _executing.discard(udp_id)
+                    _executing.discard(wf_id)
 
-            return _udp_impl
+            return _workflow_impl
 
-        udp_map[udp.id] = Process(spec={}, implementation=_make_udp_impl(pg_dict, udp.id))
+        workflow_map[wf.id] = Process(spec={}, implementation=_make_workflow_impl(pg_dict, wf.id))
 
     return overlay
 
@@ -300,7 +300,7 @@ def run_process_graph(
     if not isinstance(process_graph, dict):
         raise HTTPException(status_code=422, detail="process.process_graph must be an object")
 
-    registry = _augment_with_udps(_build_process_registry())
+    registry = _augment_with_workflows(_build_process_registry())
     try:
         graph = OpenEOProcessGraph(process_graph)
         return graph.to_callable(registry)()

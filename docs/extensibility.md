@@ -153,7 +153,7 @@ plugins/
     └── my_workflow.json
 ```
 
-UDP files are loaded on startup and appear in `GET /process_graphs` alongside runtime-registered UDPs. A plugin UDP with the same `id` as a built-in overrides it.
+Workflow JSON files are loaded on each request to `GET /process_graphs`, so changes on disk take effect without restarting the server. A plugin workflow with the same `id` as a built-in overrides it.
 
 ---
 
