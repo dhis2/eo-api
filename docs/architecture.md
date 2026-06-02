@@ -16,8 +16,7 @@ A template defines:
 
 - the dataset identifier and display metadata
 - the variable name, units, and period type
-- how to ingest the data (`ingestion.function` today, `ingestion.plugin` for the
-  new streaming path)
+- how to ingest the data (`ingestion.plugin` — a dotted path to a streaming plugin class)
 - what transforms to apply (`transforms`)
 - what sync strategy to use (`sync.kind`, `sync.execution`)
 
@@ -25,30 +24,9 @@ Templates are config, not code. If a template needs custom logic, the logic goes
 
 ### Streaming ingest
 
-The platform is currently in a transition between two ingestion strategies:
+Datasets are ingested via a per-period streaming contract. The plugin probes the source grid, enumerates periods, and fetches one period at a time as an `xarray.Dataset`. The framework handles resume, concurrency, store commits, artifact persistence, and publication.
 
-- the legacy download-and-rebuild path based on `ingestion.function`
-- the new per-period streaming path based on `ingestion.plugin`
-
-The new path is implemented internally in `open_climate_service.streaming`, while
-`open_climate_service.ingestions` remains the application-facing layer that owns routes,
-artifact records, and publication state.
-
-For the first implementation slice:
-
-- CHIRPS3 initial ingest uses the streaming path
-- CHIRPS3 no longer depends on `ingestion.function`
-- data is written directly into flat Icechunk-backed Zarr v3 stores with
-  GeoZarr metadata
-- resume is based on committed store state plus an optional job cursor
-- sync is not yet store-based; plugin-backed datasets currently rematerialize on
-  sync rather than using delta append
-- `/zarr/{dataset_id}` serving for Icechunk-backed datasets is not yet exposed
-- rechunking and pyramid behavior are deferred
-
-This split is intentional. It keeps the first streaming implementation
-end-to-end for one source without mixing in the later sync and storage-finality
-work.
+The streaming engine lives in `open_climate_service.streaming`, while `open_climate_service.ingestions` is the application-facing layer that owns routes, artifact records, and publication state.
 
 ### Artifact
 
@@ -86,13 +64,6 @@ Template (YAML)
     │  POST /ingestions  (or  POST /sync)
     ▼
 Ingestion
-    │  legacy path:
-    │    call ingestion function → NetCDF files on disk
-    │    apply transforms
-    │    reproject to instance CRS
-    │    write GeoZarr store
-    │
-    │  streaming path:
     │    probe source grid
     │    enumerate periods
     │    fetch missing periods
@@ -111,32 +82,7 @@ Managed dataset (public API)
     └── /ogcapi/collections/{id} — OGC API access
 ```
 
-The legacy ingestion function is called identically by both `POST /ingestions`
-and `POST /sync` — the framework invokes it the same way regardless of the
-trigger. A correctly written ingestion function works for both without any
-changes.
-
-For the legacy path, the framework is responsible for everything from "write
-zarr" onward. An ingestion function only needs to write NetCDF files to a given
-directory. The framework then:
-
-1. reads and normalises the coordinate names
-2. applies transforms (unit conversion, etc.)
-3. reprojects to the instance CRS
-4. builds the zarr store with auto-computed chunking
-5. writes GeoZarr root attributes (`spatial:bbox`, `proj:code`) so map clients can position tiles
-6. computes artifact coverage (spatial bounds + time range) from the written data
-7. stores the artifact record
-8. publishes the managed dataset through pygeoapi if `publish=true`
-
-This division means that ingestion functions do not need to know about zarr
-conventions, STAC, OGC, or pygeoapi. They write data files; the framework
-handles everything else.
-
-For the streaming path, the division is different: the plugin owns source
-probing, period enumeration, and fetching one period as an `xarray.Dataset`.
-The framework still owns job callbacks, artifact persistence, publication
-metadata, and all public API integration.
+The plugin owns source probing, period enumeration, and fetching one period as an `xarray.Dataset`. The framework owns job callbacks, artifact persistence, publication metadata, and all public API integration. Plugins do not need to know about Zarr conventions, STAC, OGC, or pygeoapi.
 
 ---
 
@@ -213,48 +159,7 @@ Before executing a sync, the engine calls the availability function to clamp the
 
 The platform has three plugin types. Each has a narrow contract — the framework handles everything else automatically.
 
-### Ingestion function
-
-```python
-def download(
-    *,
-    start: str,       # ISO 8601 date or datetime
-    end: str,
-    dirname: Path,    # write output files here
-    prefix: str,      # use as filename prefix, e.g. f"{prefix}_{year}.nc"
-    overwrite: bool,
-    bbox: list[float],  # optional — only if the source needs a spatial filter
-    **kwargs,           # default_params from the YAML template
-) -> None:
-    # Write one or more NetCDF files to dirname.
-```
-
-The function writes NetCDF files. The framework reads them, normalises coordinate names, applies transforms, reprojects to the instance CRS, builds the zarr, writes GeoZarr attributes, computes coverage, and registers the artifact.
-
-The ingestion function is called identically by `POST /ingestions` and `POST /sync`. The caller makes no difference to the function — it always receives the same parameters.
-
-**Reusing ingestion logic across templates**: multiple YAML templates can reference the same Python function and differentiate via `default_params`. This is the intended pattern for sources that have the same fetching logic but expose different variables:
-
-```yaml
-# era5land_temperature_hourly.yaml
-ingestion:
-  function: dhis2eo.data.era5_land.download
-  default_params:
-    variable: 2m_temperature
-
-# era5land_precipitation_hourly.yaml
-ingestion:
-  function: dhis2eo.data.era5_land.download
-  default_params:
-    variable: total_precipitation
-```
-
-No framework changes are needed to support a new variable from the same source.
-
 ### Streaming plugin
-
-The new streaming path replaces the download-function contract with a narrower
-three-method plugin:
 
 ```python
 class MyStreamingPlugin:
@@ -271,14 +176,23 @@ class MyStreamingPlugin:
         ...
 ```
 
-Responsibilities are intentionally split:
+Responsibilities are split: the plugin knows the source; the orchestrator owns resume, concurrency, and store commits; `open_climate_service.ingestions` owns artifacts, publication, and API responses.
 
-- the plugin knows the source
-- the orchestrator knows resume, concurrency, and store commits
-- `open_climate_service.ingestions` knows artifacts, publication, and API responses
+Multiple YAML templates can reference the same plugin class and differentiate via `ingestion.default_params`. This is the intended pattern for sources that expose multiple variables:
 
-Ticket 1 only uses this contract for direct CHIRPS3 ingest. Sync reuse and
-broader source migration are follow-up work.
+```yaml
+# era5land_temperature_hourly.yaml
+ingestion:
+  plugin: dhis2eo.streaming.era5_land.ERA5LandPlugin
+  default_params:
+    variable: 2m_temperature
+
+# era5land_precipitation_hourly.yaml
+ingestion:
+  plugin: dhis2eo.streaming.era5_land.ERA5LandPlugin
+  default_params:
+    variable: total_precipitation
+```
 
 ### Transform function
 
@@ -310,12 +224,11 @@ Functions decorated with `@process` and placed in `plugins_dir/processes/` are r
 
 Transforms are applied at a consistent point in the ingestion lifecycle:
 
-1. ingestion function writes raw NetCDF files to disk
-2. framework reads and normalises the data into an xarray Dataset
-3. `_run_transforms(ds, dataset)` applies each declared transform in order
-4. result is reprojected to instance CRS
-5. zarr store is written with auto-computed chunking
-6. framework writes GeoZarr root attributes
+1. streaming plugin fetches a period as an `xarray.Dataset`
+2. `_run_transforms(ds, dataset)` applies each declared transform in order
+3. result is reprojected to instance CRS
+4. period is appended to the Icechunk-backed Zarr store
+5. framework writes GeoZarr root attributes
 7. framework computes coverage from the zarr
 
 Transforms see post-download, pre-reproject data. They should only modify data values and variable-level attributes. The framework writes dataset-level attributes (GeoZarr) after the transform pipeline completes.

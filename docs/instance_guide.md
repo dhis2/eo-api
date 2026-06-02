@@ -29,9 +29,9 @@ my-climate-service/
 ├── .gitignore
 ├── plugins/
 │   ├── datasets/           # custom dataset template YAMLs
-│   ├── <source>/           # custom download / ingestion functions
+│   ├── <source>/           # custom streaming plugin classes
 │   │   ├── __init__.py
-│   │   └── daily.py
+│   │   └── plugin.py
 │   ├── transforms/         # custom transform functions
 │   │   ├── __init__.py
 │   │   └── my_transform.py
@@ -160,7 +160,7 @@ Visit `http://localhost:8000` to confirm the API is running. The `/extent` endpo
 
 ## Adding plugins
 
-Plugins extend the instance with custom datasets, download functions, transforms, and processes. They live in `plugins_dir` and are loaded automatically at startup. The `plugins_dir` is added to `sys.path`, so Python modules placed directly inside it are importable.
+Plugins extend the instance with custom datasets, processes, and workflows. They live in `plugins_dir` and are loaded automatically. The `plugins_dir` is added to `sys.path`, so Python modules placed directly inside it are importable.
 
 ```
 plugins/
@@ -168,7 +168,7 @@ plugins/
 │   └── enacts_rainfall.yaml    # custom dataset template
 ├── enacts/
 │   ├── __init__.py
-│   └── daily.py                # download function referenced in the YAML
+│   └── plugin.py               # streaming plugin class referenced in the YAML
 ├── transforms/
 │   ├── __init__.py
 │   └── enacts.py               # transform function
@@ -177,7 +177,7 @@ plugins/
     └── spatial_stats.py
 ```
 
-See [Extensibility](extensibility.md) for the full specification of each extension point, and [Adding custom datasets](adding_custom_datasets.md) for the dataset template field reference and download function contract.
+See [Extensibility](extensibility.md) for the three plugin types, and [Adding custom datasets](adding_custom_datasets.md) for the dataset template field reference and streaming plugin contract.
 
 ---
 

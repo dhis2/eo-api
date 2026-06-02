@@ -42,7 +42,7 @@ transforms:
 
 Plugin modules can live in any importable package or directly under `plugins_dir`, which is automatically added to `sys.path`.
 
-See [Adding custom datasets](adding_custom_datasets.md) for the full template field reference, download function contract, plugin class interface, and transform function signature.
+See [Adding custom datasets](adding_custom_datasets.md) for the full template field reference, streaming plugin contract and transform function signature.
 
 ---
 
