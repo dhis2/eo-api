@@ -1,16 +1,54 @@
 """Climate extreme indices via xclim."""
 
+from typing import Any
+
 import xarray as xr
 import xclim.indicators.atmos as xclim_atmos
 import xclim.indices
+from xclim.core.indicator import InputKind
 
 from open_climate_service.process import process
+
+_VARIABLE_SCHEMA: dict[str, str] = {"type": "object", "subtype": "datacube"}
+
+_KIND_TO_SCHEMA: dict[InputKind, dict[str, str]] = {
+    InputKind.VARIABLE: _VARIABLE_SCHEMA,
+    InputKind.OPTIONAL_VARIABLE: _VARIABLE_SCHEMA,
+}
+
+
+def _xclim_params(indicator: Any, *names: str) -> dict[str, dict[str, Any]]:
+    """Read parameter descriptions and schemas from an xclim indicator.
+
+    VARIABLE-kind parameters (DataArrays) get a datacube schema. All others
+    pick up the description text from xclim; type schema falls back to the
+    Python annotation resolved by the @process decorator.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    for name in names:
+        if name not in indicator.parameters:
+            continue
+        p = indicator.parameters[name]
+        entry: dict[str, Any] = {}
+        if p.description:
+            entry["description"] = p.description
+        schema = _KIND_TO_SCHEMA.get(p.kind)
+        if schema:
+            entry["schema"] = schema
+        result[name] = entry
+    return result
+
+
+_spi_ind = xclim_atmos.standardized_precipitation_index
+_cdd_ind = xclim_atmos.maximum_consecutive_dry_days
+_cwd_ind = xclim_atmos.maximum_consecutive_wet_days
+_tx_ind = xclim_atmos.tx_days_above
 
 
 @process(
     summary="Standardized Precipitation Index (SPI)",
     parameters={
-        "pr": {"description": "Daily precipitation (kg m-2 s-1 or mm/day)."},
+        **_xclim_params(_spi_ind, "pr"),
         "window": {"description": "Accumulation window in months (1 = SPI-1, 3 = SPI-3, 6 = SPI-6)."},
         "cal_start": {"description": "Calibration period start date (YYYY-MM-DD). Defaults to start of record."},
         "cal_end": {"description": "Calibration period end date (YYYY-MM-DD). Defaults to end of record."},
@@ -42,7 +80,7 @@ def spi(
 @process(
     summary="Maximum consecutive dry days (CDD)",
     parameters={
-        "pr": {"description": "Daily precipitation (kg m-2 s-1 or mm/day)."},
+        **_xclim_params(_cdd_ind, "pr"),
         "thresh": {"description": "Precipitation threshold below which a day is considered dry (e.g. '1 mm/day')."},
         "freq": {"description": "Resampling frequency. 'YS' = annual (default), 'MS' = monthly."},
     },
@@ -65,7 +103,7 @@ def cdd(
 @process(
     summary="Maximum consecutive wet days (CWD)",
     parameters={
-        "pr": {"description": "Daily precipitation (kg m-2 s-1 or mm/day)."},
+        **_xclim_params(_cwd_ind, "pr"),
         "thresh": {"description": "Precipitation threshold for a wet day (e.g. '1 mm/day')."},
         "freq": {"description": "Resampling frequency. 'YS' = annual (default), 'MS' = monthly."},
     },
@@ -88,7 +126,7 @@ def cwd(
 @process(
     summary="Number of days with maximum temperature above threshold (TX days above)",
     parameters={
-        "tasmax": {"description": "Daily maximum temperature (degC or K)."},
+        **_xclim_params(_tx_ind, "tasmax"),
         "thresh": {"description": "Temperature threshold (e.g. '25 degC', '30 degC')."},
         "freq": {"description": "Resampling frequency. 'YS' = annual (default), 'MS' = monthly."},
     },
