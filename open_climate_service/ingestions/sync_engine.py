@@ -527,4 +527,3 @@ def _provider_latest_available_end(
             f"Latest availability function '{function_path}' returned invalid period "
             f"'{result}' for dataset period_type '{source_dataset.get('period_type')}'"
         ) from exc
-

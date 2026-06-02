@@ -369,7 +369,6 @@ def _validate_spatial_coverage(dataset: dict[str, Any], bbox: list[float] | None
         )
 
 
-
 def _resolve_bbox(*, bbox: list[float] | None) -> list[float]:
     """Resolve bbox from request or environment."""
     if bbox is not None:

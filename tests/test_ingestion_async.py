@@ -47,9 +47,7 @@ def test_post_ingestion_respond_async_returns_202_with_location(
     assert response.json()["ingestion_id"] == "abc-123"
 
 
-def test_post_sync_respond_async_returns_202_with_location(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_post_sync_respond_async_returns_202_with_location(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     job = _make_job("sync-456")
     monkeypatch.setattr("open_climate_service.jobs.service.JobService.submit_callable_job", lambda self, **kw: job)
     monkeypatch.setattr(
@@ -90,9 +88,7 @@ def test_get_ingestion_job_returns_404_for_unknown(client: TestClient, monkeypat
     assert response.status_code == 404
 
 
-def test_post_ingestion_without_prefer_does_not_return_202(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_post_ingestion_without_prefer_does_not_return_202(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """Without Prefer: respond-async the response is never 202 Accepted."""
     monkeypatch.setattr(
         "open_climate_service.ingestions.routes._get_dataset_or_404",
