@@ -128,7 +128,7 @@ def test_post_ingestion_without_prefer_does_not_return_202(client: TestClient, m
         lambda _: {"id": "chirps3_precipitation_daily"},
     )
 
-    def raise_no_extent() -> dict[str, object]:
+    def raise_no_extent() -> NoReturn:
         raise HTTPException(status_code=422, detail="no extent")
 
     monkeypatch.setattr("open_climate_service.ingestions.routes.get_extent_or_404", raise_no_extent)
