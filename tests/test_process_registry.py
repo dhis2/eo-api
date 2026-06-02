@@ -43,13 +43,11 @@ def test_process_registry_rejects_missing_title(monkeypatch: pytest.MonkeyPatch,
         process_registry.list_processes()
 
 
-def test_builtin_processes_include_ingestion_and_sync(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_builtin_processes_returns_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(process_registry, "CONFIGS_DIR", None)
     monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
 
-    ids = {p["id"] for p in process_registry.list_processes()}
-    assert "ingestion" in ids
-    assert "sync" in ids
+    assert process_registry.list_processes() == []
 
 
 def test_process_registry_rejects_legacy_name_without_title(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

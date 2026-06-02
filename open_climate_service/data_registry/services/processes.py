@@ -1,7 +1,6 @@
 """Process registry backed by YAML config files."""
 
 import importlib
-import importlib.resources
 import logging
 from pathlib import Path
 from typing import Any
@@ -38,16 +37,17 @@ def _normalize_process_definition(process: dict[str, Any]) -> dict[str, Any]:
 def list_processes() -> list[dict[str, Any]]:
     """Load all process definitions and return a flat list.
 
-    Built-in definitions from open_climate_service/data/processes/ are always loaded.
-    plugins_dir/processes/ is reserved for UDFs (.py files) and is not loaded here.
+    There are no built-in YAML-backed processes. Ingestion and sync are
+    handled by their own dedicated routes, not the openEO process registry.
+    plugins_dir/processes/ is reserved for UDFs (.py files).
 
-    CONFIGS_DIR (test override via monkeypatch) bypasses this and loads only
-    from the given directory.
+    CONFIGS_DIR (test override via monkeypatch) loads only from the given
+    directory; used in tests that need a controlled set of processes.
     """
     if CONFIGS_DIR is not None:
         return _load_from_dir(CONFIGS_DIR)
 
-    return list({p["id"]: p for p in _load_builtin_processes()}.values())
+    return []
 
 
 def get_process(process_id: str) -> dict[str, Any] | None:
@@ -61,27 +61,6 @@ def get_process_function(process_id: str) -> Any:
     if process is None:
         raise ValueError(f"Unknown process '{process_id}'")
     return _get_dynamic_function(process["execution"]["function"])
-
-
-def _load_builtin_processes() -> list[dict[str, Any]]:
-    """Load built-in process definitions from package data via importlib.resources."""
-    pkg = importlib.resources.files("open_climate_service") / "data" / "processes"
-    processes: list[dict[str, Any]] = []
-    for resource in pkg.iterdir():
-        if not resource.name.endswith((".yaml", ".yml")):
-            continue
-        try:
-            content = resource.read_text(encoding="utf-8")
-            file_processes = yaml.safe_load(content)
-            if not isinstance(file_processes, list):
-                raise ValueError(f"{resource.name} must contain a list of process definitions")
-            for process in file_processes:
-                _validate_process(process, source=resource.name)
-                processes.append(_normalize_process_definition(process))
-        except Exception:
-            logger.exception("Error loading %s", resource.name)
-            raise
-    return processes
 
 
 def _load_from_dir(folder: Path) -> list[dict[str, Any]]:
