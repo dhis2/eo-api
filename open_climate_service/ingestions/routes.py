@@ -84,7 +84,7 @@ def create_ingestion(
             job_href_base=INGESTION_JOB_HREF_BASE,
         )
         response.status_code = 202
-        response.headers["Location"] = f"/ingestions/jobs/{job.job_id}"
+        response.headers["Location"] = f"{INGESTION_JOB_HREF_BASE}/{job.job_id}"
         return IngestionResponse(ingestion_id=job.job_id, status=job.status, dataset=None)
     dataset = _get_dataset_or_404(request.dataset_id)
     extent = get_extent_or_404()
@@ -182,7 +182,7 @@ def sync_dataset(
             job_href_base=INGESTION_JOB_HREF_BASE,
         )
         response.status_code = 202
-        response.headers["Location"] = f"/ingestions/jobs/{job.job_id}"
+        response.headers["Location"] = f"{INGESTION_JOB_HREF_BASE}/{job.job_id}"
         return SyncResponse(sync_id=None, status=job.status, message="Sync queued", dataset=None, sync_detail=None)
 
     return services.sync_dataset(

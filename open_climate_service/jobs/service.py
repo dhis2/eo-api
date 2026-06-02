@@ -36,6 +36,8 @@ def _retry_delay_seconds(attempt: int) -> int:
 
 def _job_links(job_id: str, href_base: str = "/jobs") -> list[JobLink]:
     base = href_base.rstrip("/")
+    if not base:
+        base = "/jobs"
     return [JobLink(href=f"{base}/{job_id}", rel="self", title="Job detail")]
 
 
