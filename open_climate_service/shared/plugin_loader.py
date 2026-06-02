@@ -20,4 +20,5 @@ def instantiate_plugin(plugin_path: str, default_params: dict[str, Any]) -> Inge
     sig = inspect.signature(PluginClass)
     accepts_var_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
     kwargs = default_params if accepts_var_kwargs else {k: v for k, v in default_params.items() if k in sig.parameters}
-    return PluginClass(**kwargs)  # type: ignore[return-value]
+    plugin: IngestionPlugin = PluginClass(**kwargs)
+    return plugin
