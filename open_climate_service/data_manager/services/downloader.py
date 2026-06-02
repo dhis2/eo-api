@@ -65,7 +65,7 @@ def download_dataset(
     eo_download_func = get_dynamic_function(eo_download_func_path)
     before_files = {path.resolve(): path.stat().st_mtime_ns for path in get_cache_files(dataset)}
 
-    params = dict(ingestion.get("default_params", {}))
+    params = dict(ingestion.get("params", {}))
     params.update(
         {
             "start": start,

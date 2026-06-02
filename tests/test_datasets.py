@@ -420,7 +420,7 @@ def test_create_artifact_uses_streaming_plugin_for_direct_ingest(
         "period_type": "daily",
         "ingestion": {
             "plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin",
-            "default_params": {"stage": "final"},
+            "params": {"stage": "final"},
         },
     }
     store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
@@ -511,7 +511,7 @@ def test_create_artifact_uses_streaming_plugin_for_store_based_sync(
         "period_type": "daily",
         "ingestion": {
             "plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin",
-            "default_params": {"stage": "final"},
+            "params": {"stage": "final"},
         },
     }
     store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
@@ -578,7 +578,7 @@ def test_create_artifact_forwards_country_code_to_streaming_plugin(
         "period_type": "yearly",
         "ingestion": {
             "plugin": "open_climate_service.plugins.datasets.worldpop.WorldPopYearlyPlugin",
-            "default_params": {"version": "global2"},
+            "params": {"version": "global2"},
         },
     }
     plugin = object()

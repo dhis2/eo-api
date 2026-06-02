@@ -54,7 +54,7 @@ class ENACTSRainfallPlugin:
 
 **`fetch_period`** — fetches exactly one period and returns it as an `xarray.Dataset`. The framework appends it directly to the Icechunk-backed Zarr store. The function should not write to disk.
 
-`**params` in both `probe` and `fetch_period` receives the `default_params` dict from the YAML template, making it possible to reuse the same class for multiple variables.
+`**params` in both `probe` and `fetch_period` receives the `params` dict from the YAML template, making it possible to reuse the same class for multiple variables.
 
 ## Step 2: Create a dataset template YAML
 
@@ -102,21 +102,21 @@ class ENACTSRainfallPlugin:
 | Field | Required | Description |
 | ----- | -------- | ----------- |
 | `ingestion.plugin` | Yes | Dotted path to the streaming plugin class |
-| `ingestion.default_params` | No | Extra keyword arguments forwarded to `probe` and `fetch_period` as `**params`, and to the plugin constructor |
+| `ingestion.params` | No | Extra keyword arguments forwarded to `probe` and `fetch_period` as `**params`, and to the plugin constructor |
 
-Multiple templates can share the same plugin class and differ only in `default_params`:
+Multiple templates can share the same plugin class and differ only in `params`:
 
 ```yaml
 - id: era5land_temperature_hourly
   ingestion:
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandHourlySingleBandPlugin
-    default_params:
+    params:
       variable: 2m_temperature
 
 - id: era5land_precipitation_hourly
   ingestion:
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandPrecipitationPlugin
-    default_params:
+    params:
       variable: total_precipitation
 ```
 

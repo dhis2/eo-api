@@ -27,6 +27,9 @@ cp climate-service.yaml.example climate-service.yaml
 ```
 
 ```yaml
+id: rwanda-climate-service
+name: Rwanda Climate Service
+
 extent:
   name: Rwanda
   bbox: [28.8, -2.9, 30.9, -1.0]
@@ -39,7 +42,9 @@ Field reference:
 
 | Field          | Required | Description |
 | -------------- | -------- | ----------- |
-| `name`         | No  | Human-readable name shown in API responses |
+| `id`           | No  | Unique instance identifier used as the STAC catalog id. Lowercase, hyphen-separated. Defaults to `open-climate-service` |
+| `name`         | No  | Display name shown in the web UI. Defaults to `Open Climate Service` |
+| `extent.name`  | No  | Human-readable label shown in API responses |
 | `bbox`         | Yes | Bounding box as `[xmin, ymin, xmax, ymax]` in WGS84 decimal degrees |
 | `country_code` | No  | ISO 3166-1 alpha-3 code — required for WorldPop downloads |
 

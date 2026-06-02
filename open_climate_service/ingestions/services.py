@@ -287,13 +287,13 @@ def _create_streaming_artifact(
         return existing
 
     ingestion = dataset.get("ingestion")
-    raw_params = ingestion.get("default_params") if isinstance(ingestion, dict) else None
+    raw_params = ingestion.get("params") if isinstance(ingestion, dict) else None
     if raw_params is None:
         params: dict[str, object] = {}
     elif isinstance(raw_params, dict):
         params = dict(raw_params)
     else:
-        raise HTTPException(status_code=500, detail="ingestion.default_params must be an object")
+        raise HTTPException(status_code=500, detail="ingestion.params must be an object")
     if country_code is not None:
         params["country_code"] = country_code
 
@@ -383,9 +383,18 @@ def _create_streaming_artifact(
 
 
 def _load_streaming_plugin(plugin_path: str, *, params: dict[str, object]) -> IngestionPlugin:
-    """Load and instantiate one streaming plugin class from a dotted import path."""
+    """Load and instantiate one streaming plugin class from a dotted import path.
+
+    Template-defined `ingestion.params` are treated as plugin
+    configuration and passed to the constructor here. The same params are also
+    forwarded later to `probe(...)` and `fetch_period(...)` so plugins may keep
+    configuration in constructor state, per-call kwargs, or both.
+    """
     from open_climate_service.shared.plugin_loader import instantiate_plugin
 
+    module_path, _, attr_name = plugin_path.rpartition(".")
+    if not module_path or not attr_name:
+        raise HTTPException(status_code=500, detail=f"Invalid ingestion.plugin path '{plugin_path}'")
     try:
         plugin = instantiate_plugin(plugin_path, dict(params))
     except HTTPException:

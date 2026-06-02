@@ -100,23 +100,26 @@ run: ## Start the API with uvicorn
 Create `climate-service.yaml`:
 
 ```yaml
+id: rwanda-climate-service             # unique identifier for this instance
+name: Rwanda Climate Service           # display name shown in the web UI
+
 extent:
-  name: My Region
+  name: Rwanda
   bbox: [28.8, -2.9, 30.9, -1.0]    # [xmin, ymin, xmax, ymax] in WGS84
   country_code: RWA                   # ISO 3166-1 alpha-3, required for WorldPop
 
 data_dir: ./data
-crs: EPSG:4326                         # target CRS for Zarr outputs (optional, defaults to EPSG:4326)
 plugins_dir: ./plugins/
 ```
 
 | Field | Required | Description |
 | ----- | -------- | ----------- |
+| `id` | No | Unique instance identifier used as the STAC catalog id. Lowercase, hyphen-separated (e.g. `rwanda-climate-service`). Defaults to `open-climate-service` |
+| `name` | No | Display name shown in the web UI. Defaults to `Open Climate Service` |
 | `extent.bbox` | Yes | Bounding box in WGS84 decimal degrees |
 | `extent.name` | No | Human-readable label shown in API responses |
 | `extent.country_code` | No | ISO 3166-1 alpha-3 — required for WorldPop downloads |
 | `data_dir` | Yes | Directory for downloaded files and Zarr stores, resolved relative to the config file |
-| `crs` | No | EPSG code for the output Zarr CRS. Defaults to `EPSG:4326` |
 | `plugins_dir` | No | Directory containing `datasets/`, `processes/`, and `workflows/` plugin subdirectories |
 
 To find the bounding box for a region, [bboxfinder.com](http://bboxfinder.com) is a useful tool.

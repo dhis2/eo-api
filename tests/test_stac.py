@@ -534,6 +534,8 @@ def test_build_collection_with_xstac_normalizes_pystac_collection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class DummyDataset:
+        attrs: dict[str, object] = {}
+
         def close(self) -> None:
             pass
 
@@ -566,6 +568,8 @@ def test_collection_reuses_cached_xstac_payload(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class DummyDataset:
+        attrs: dict[str, object] = {}
+
         def close(self) -> None:
             pass
 
@@ -631,6 +635,8 @@ def test_collection_preserves_template_links_when_xstac_mutates_template(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class DummyDataset:
+        attrs: dict[str, object] = {}
+
         def close(self) -> None:
             pass
 
