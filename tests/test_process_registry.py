@@ -43,49 +43,13 @@ def test_process_registry_rejects_missing_title(monkeypatch: pytest.MonkeyPatch,
         process_registry.list_processes()
 
 
-def test_plugins_dir_processes_subdir_adds_to_builtin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    processes_subdir = tmp_path / "plugins" / "processes"
-    processes_subdir.mkdir(parents=True)
-    (processes_subdir / "custom.yaml").write_text(
-        """
-- id: custom_process
-  title: Custom process
-  execution:
-    function: mypackage.custom.execute
-""",
-        encoding="utf-8",
-    )
-    config_file = tmp_path / "climate-service.yaml"
-    config_file.write_text(f"plugins_dir: {tmp_path / 'plugins'}\n", encoding="utf-8")
-
+def test_builtin_processes_include_ingestion_and_sync(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(process_registry, "CONFIGS_DIR", None)
-    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
+    monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
 
     ids = {p["id"] for p in process_registry.list_processes()}
-    assert "custom_process" in ids
-
-
-def test_plugins_dir_process_overrides_builtin_by_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    processes_subdir = tmp_path / "plugins" / "processes"
-    processes_subdir.mkdir(parents=True)
-    (processes_subdir / "ingestion.yaml").write_text(
-        """
-- id: ingestion
-  title: Custom ingestion override
-  execution:
-    function: mypackage.ingestion.execute
-""",
-        encoding="utf-8",
-    )
-    config_file = tmp_path / "climate-service.yaml"
-    config_file.write_text(f"plugins_dir: {tmp_path / 'plugins'}\n", encoding="utf-8")
-
-    monkeypatch.setattr(process_registry, "CONFIGS_DIR", None)
-    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
-
-    processes = {p["id"]: p for p in process_registry.list_processes()}
-    assert processes["ingestion"]["title"] == "Custom ingestion override"
-    assert processes["ingestion"]["execution"]["function"] == "mypackage.ingestion.execute"
+    assert "ingestion" in ids
+    assert "sync" in ids
 
 
 def test_process_registry_rejects_legacy_name_without_title(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

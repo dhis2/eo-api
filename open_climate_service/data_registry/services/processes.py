@@ -3,13 +3,10 @@
 import importlib
 import importlib.resources
 import logging
-import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
-
-from open_climate_service import config as api_config
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +38,8 @@ def _normalize_process_definition(process: dict[str, Any]) -> dict[str, Any]:
 def list_processes() -> list[dict[str, Any]]:
     """Load all process definitions and return a flat list.
 
-    Built-in definitions from open_climate_service/plugins/processes/ are always loaded. When
-    plugins_dir is set in CLIMATE_SERVICE_CONFIG, definitions from plugins_dir/processes/
-    are merged on top — a custom definition with the same id overrides the built-in.
+    Built-in definitions from open_climate_service/data/processes/ are always loaded.
+    plugins_dir/processes/ is reserved for UDFs (.py files) and is not loaded here.
 
     CONFIGS_DIR (test override via monkeypatch) bypasses this and loads only
     from the given directory.
@@ -51,29 +47,7 @@ def list_processes() -> list[dict[str, Any]]:
     if CONFIGS_DIR is not None:
         return _load_from_dir(CONFIGS_DIR)
 
-    merged: dict[str, dict[str, Any]] = {p["id"]: p for p in _load_builtin_processes()}
-
-    config = api_config.get_config()
-    config_plugins_dir = config.get("plugins_dir")
-    if config_plugins_dir:
-        if not isinstance(config_plugins_dir, (str, Path)):
-            raise ValueError(
-                f"plugins_dir in CLIMATE_SERVICE_CONFIG must be a path string, got {type(config_plugins_dir).__name__}"
-            )
-        config_path = api_config.get_config_path()
-        base = config_path.parent if config_path else Path()
-        root = (base / config_plugins_dir).resolve()
-        if not root.is_dir():
-            raise ValueError(f"plugins_dir '{root}' does not exist or is not a directory")
-        root_str = str(root)
-        if root_str not in sys.path:
-            sys.path.append(root_str)
-        processes_subdir = root / "processes"
-        if processes_subdir.is_dir():
-            for process in _load_from_dir(processes_subdir):
-                merged[process["id"]] = process
-
-    return list(merged.values())
+    return list({p["id"]: p for p in _load_builtin_processes()}.values())
 
 
 def get_process(process_id: str) -> dict[str, Any] | None:
@@ -91,7 +65,7 @@ def get_process_function(process_id: str) -> Any:
 
 def _load_builtin_processes() -> list[dict[str, Any]]:
     """Load built-in process definitions from package data via importlib.resources."""
-    pkg = importlib.resources.files("open_climate_service") / "plugins" / "processes"
+    pkg = importlib.resources.files("open_climate_service") / "data" / "processes"
     processes: list[dict[str, Any]] = []
     for resource in pkg.iterdir():
         if not resource.name.endswith((".yaml", ".yml")):
