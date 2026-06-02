@@ -168,32 +168,3 @@ def list_openeo_processes() -> list[dict[str, Any]]:
             standard_ids.add(pid)
 
     return result
-
-
-def _native_to_openeo(process: dict[str, Any]) -> dict[str, Any]:
-    """Convert a native process registry entry to openEO process format."""
-    pid = process.get("id", "")
-    raw_inputs = process.get("inputs") or {}
-    parameters = []
-    for name, spec in raw_inputs.items() if isinstance(raw_inputs, dict) else []:
-        if not isinstance(spec, dict):
-            continue
-        param: dict[str, Any] = {"name": name}
-        if spec.get("description"):
-            param["description"] = spec["description"]
-        if spec.get("required") is not True:
-            param["optional"] = True
-            if "default" in spec:
-                param["default"] = spec["default"]
-        schema_type = spec.get("type")
-        param["schema"] = {"type": schema_type} if schema_type else {}
-        parameters.append(param)
-
-    return {
-        "id": pid,
-        "summary": process.get("title", pid),
-        "description": process.get("description", ""),
-        "parameters": parameters,
-        "returns": {"description": "Result", "schema": {}},
-        "links": [{"rel": "self", "href": f"/processes/{pid}"}],
-    }

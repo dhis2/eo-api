@@ -80,9 +80,9 @@ def _augment_with_udps(base_registry: Any) -> Any:
     """
     from openeo_pg_parser_networkx.process_registry import Process
 
-    from open_climate_service.openeo import udps as udp_store
+    from open_climate_service.openeo import workflows as workflow_store
 
-    udp_records = udp_store.list_udps().processes
+    udp_records = workflow_store.list_workflows().processes
     if not udp_records:
         return base_registry
 

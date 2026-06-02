@@ -413,7 +413,14 @@ class JobService:
     def _invoke_process(self, record: JobRecord) -> Any:
         fn_path = record.request.get("__fn_path__")
         if not fn_path or not isinstance(fn_path, str):
-            raise ValueError(f"Job '{record.job_id}' has no __fn_path__ — cannot invoke")
+            logger.warning(
+                "Job '%s' has no __fn_path__ (may be a pre-migration job) — marking failed",
+                record.job_id,
+            )
+            raise ValueError(
+                f"Job '{record.job_id}' has no execution path recorded"
+                " — this job may have been created before the current server version"
+            )
         func = _get_dynamic_function(fn_path)
         context = JobExecutionContext(self, record.job_id)
         kwargs = {k: v for k, v in record.request.items() if k != "__fn_path__"}

@@ -113,23 +113,23 @@ def test_registry_overlay_tuple_key_uses_name() -> None:
 
 
 def test_augment_with_udps_returns_base_when_no_udps(monkeypatch: pytest.MonkeyPatch) -> None:
-    import open_climate_service.openeo.udps as udp_module
+    import open_climate_service.openeo.workflows as workflow_module
 
-    monkeypatch.setattr(udp_module, "list_udps", lambda: MagicMock(processes=[]))
+    monkeypatch.setattr(workflow_module, "list_workflows", lambda: MagicMock(processes=[]))
     base = object()
     result = _augment_with_udps(base)
     assert result is base
 
 
 def test_augment_with_udps_registers_udp(monkeypatch: pytest.MonkeyPatch) -> None:
-    import open_climate_service.openeo.udps as udp_module
+    import open_climate_service.openeo.workflows as workflow_module
 
     udp = MagicMock()
     udp.id = "my_udp"
     udp.process_graph = {
         "result": {"process_id": "save_result", "arguments": {"data": 42, "format": "Zarr"}, "result": True}
     }
-    monkeypatch.setattr(udp_module, "list_udps", lambda: MagicMock(processes=[udp]))
+    monkeypatch.setattr(workflow_module, "list_workflows", lambda: MagicMock(processes=[udp]))
 
     from openeo_pg_parser_networkx.process_registry import Process, ProcessRegistry
 

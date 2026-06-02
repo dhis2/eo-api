@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from open_climate_service.openeo import collections as collections_service
 from open_climate_service.openeo import processes as processes_service
-from open_climate_service.openeo import udps as udp_store
+from open_climate_service.openeo import workflows as workflow_store
 from open_climate_service.openeo.capabilities import build_capabilities
 from open_climate_service.openeo.jobs import get_openeo_job_service
 from open_climate_service.openeo.schemas import (
@@ -19,8 +19,8 @@ from open_climate_service.openeo.schemas import (
     OpenEOJobRecord,
     OpenEOJobResults,
     OpenEOJobUpdate,
-    UDPListResponse,
-    UDPRecord,
+    WorkflowListResponse,
+    WorkflowRecord,
 )
 
 capabilities_router = APIRouter(tags=["openEO"])
@@ -431,40 +431,40 @@ def _coord_summary(coord: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# User-defined processes  /process_graphs
+# Workflows (user-defined processes)  /process_graphs
 # ---------------------------------------------------------------------------
 
 
-@udp_router.get("", response_model=UDPListResponse)
-def list_udps() -> UDPListResponse:
-    """Return all stored user-defined processes."""
-    return udp_store.list_udps()
+@udp_router.get("", response_model=WorkflowListResponse)
+def list_workflows() -> WorkflowListResponse:
+    """Return all stored workflows (user-defined processes)."""
+    return workflow_store.list_workflows()
 
 
-@udp_router.get("/{process_graph_id}", response_model=UDPRecord)
-def get_udp(process_graph_id: str) -> UDPRecord:
-    """Return one user-defined process."""
-    record = udp_store.get_udp(process_graph_id)
+@udp_router.get("/{process_graph_id}", response_model=WorkflowRecord)
+def get_workflow(process_graph_id: str) -> WorkflowRecord:
+    """Return one workflow (user-defined process)."""
+    record = workflow_store.get_workflow(process_graph_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"Process graph '{process_graph_id}' not found")
     return record
 
 
 @udp_router.put("/{process_graph_id}", status_code=200)
-def put_udp(process_graph_id: str, body: dict[str, Any] = Body(...)) -> UDPRecord:
-    """Store or replace a user-defined process."""
+def put_workflow(process_graph_id: str, body: dict[str, Any] = Body(...)) -> WorkflowRecord:
+    """Store or replace a workflow (user-defined process)."""
     if process_graph_id in _reserved_process_ids():
         raise HTTPException(
             status_code=400,
             detail=f"Process graph id '{process_graph_id}' conflicts with a predefined process",
         )
-    return udp_store.put_udp(process_graph_id, body)
+    return workflow_store.put_workflow(process_graph_id, body)
 
 
 @udp_router.delete("/{process_graph_id}", status_code=204)
-def delete_udp(process_graph_id: str) -> Response:
-    """Delete a user-defined process."""
-    found = udp_store.delete_udp(process_graph_id)
+def delete_workflow(process_graph_id: str) -> Response:
+    """Delete a workflow (user-defined process)."""
+    found = workflow_store.delete_workflow(process_graph_id)
     if not found:
         raise HTTPException(status_code=404, detail=f"Process graph '{process_graph_id}' not found")
     return Response(status_code=204)
@@ -483,5 +483,5 @@ def _abs_base(request: Request) -> str:
 
 
 def _reserved_process_ids() -> set[str]:
-    """Return process ids that must not be replaced by a UDP."""
+    """Return process ids that must not be replaced by a workflow."""
     return {proc["id"] for proc in processes_service.list_openeo_processes() if isinstance(proc.get("id"), str)}

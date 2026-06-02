@@ -1,9 +1,10 @@
-"""File-based storage for openEO user-defined processes (UDPs)."""
+"""File-based storage for openEO workflows (user-defined processes)."""
 
 from __future__ import annotations
 
 import importlib.resources
 import json
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
@@ -11,12 +12,14 @@ from typing import TypeVar
 import portalocker
 
 from open_climate_service import config as api_config
-from open_climate_service.openeo.schemas import UDPListResponse, UDPRecord
+from open_climate_service.openeo.schemas import WorkflowListResponse, WorkflowRecord
 
 _T = TypeVar("_T")
 
+logger = logging.getLogger(__name__)
 
-def _resolve_udp_dir() -> Path:
+
+def _resolve_workflow_dir() -> Path:
     data_dir = api_config.get_data_dir()
     if data_dir is not None:
         return data_dir / "process_graphs"
@@ -26,58 +29,63 @@ def _resolve_udp_dir() -> Path:
     return xdg_data / "climate-service" / "process_graphs"
 
 
-UDP_DIR = _resolve_udp_dir()
-UDP_INDEX_PATH = UDP_DIR / "process_graphs.json"
+WORKFLOW_DIR = _resolve_workflow_dir()
+WORKFLOW_INDEX_PATH = WORKFLOW_DIR / "process_graphs.json"
 
 
 def _ensure_store() -> None:
-    UDP_DIR.mkdir(parents=True, exist_ok=True)
-    if not UDP_INDEX_PATH.exists():
-        UDP_INDEX_PATH.write_text("[]\n", encoding="utf-8")
+    WORKFLOW_DIR.mkdir(parents=True, exist_ok=True)
+    if not WORKFLOW_INDEX_PATH.exists():
+        WORKFLOW_INDEX_PATH.write_text("[]\n", encoding="utf-8")
 
 
-def list_udps() -> UDPListResponse:
-    """Return all UDPs: built-ins, plugin, and runtime-registered.
+def list_workflows() -> WorkflowListResponse:
+    """Return all workflows: built-ins, plugin, and runtime-registered.
 
-    Plugin UDPs override built-ins with the same id; runtime-registered
-    UDPs override both.
+    Plugin workflows override built-ins with the same id; runtime-registered
+    workflows override both.
     """
     merged: dict[str, dict[str, object]] = {}
-    for raw in _load_builtin_udps():
+    for raw in _load_builtin_workflows():
         merged[str(raw.get("id", ""))] = raw
-    for raw in _load_plugin_udps():
+    for raw in _load_plugin_workflows():
         merged[str(raw.get("id", ""))] = raw
     for raw in _load_records():
         merged[str(raw.get("id", ""))] = raw
-    records = [UDPRecord.model_validate(raw) for raw in merged.values()]
-    return UDPListResponse(
+    records = []
+    for raw in merged.values():
+        try:
+            records.append(WorkflowRecord.model_validate(raw))
+        except Exception:
+            logger.warning("Skipping invalid workflow record: %s", raw.get("id", "<unknown>"))
+    return WorkflowListResponse(
         processes=records,
         links=[{"rel": "self", "href": "/process_graphs", "type": "application/json"}],
     )
 
 
-def get_udp(process_graph_id: str) -> UDPRecord | None:
-    """Return one UDP by id, or None if not found.
+def get_workflow(process_graph_id: str) -> WorkflowRecord | None:
+    """Return one workflow by id, or None if not found.
 
     Checks runtime-registered first, then plugin, then built-in.
     """
     for raw in _load_records():
         if raw.get("id") == process_graph_id:
-            return UDPRecord.model_validate(raw)
-    for raw in _load_plugin_udps():
+            return WorkflowRecord.model_validate(raw)
+    for raw in _load_plugin_workflows():
         if raw.get("id") == process_graph_id:
-            return UDPRecord.model_validate(raw)
-    for raw in _load_builtin_udps():
+            return WorkflowRecord.model_validate(raw)
+    for raw in _load_builtin_workflows():
         if raw.get("id") == process_graph_id:
-            return UDPRecord.model_validate(raw)
+            return WorkflowRecord.model_validate(raw)
     return None
 
 
-def put_udp(process_graph_id: str, body: dict[str, object]) -> UDPRecord:
-    """Store (create or replace) a user-defined process."""
-    record = UDPRecord.model_validate({**body, "id": process_graph_id})
+def put_workflow(process_graph_id: str, body: dict[str, object]) -> WorkflowRecord:
+    """Store (create or replace) a workflow."""
+    record = WorkflowRecord.model_validate({**body, "id": process_graph_id})
 
-    def _mutation(records: list[dict[str, object]]) -> UDPRecord:
+    def _mutation(records: list[dict[str, object]]) -> WorkflowRecord:
         payload = record.model_dump(mode="json")
         for index, existing in enumerate(records):
             if existing.get("id") == process_graph_id:
@@ -89,8 +97,13 @@ def put_udp(process_graph_id: str, body: dict[str, object]) -> UDPRecord:
     return _mutate_records(_mutation)
 
 
-def delete_udp(process_graph_id: str) -> bool:
-    """Delete a UDP; returns True if it existed."""
+def delete_workflow(process_graph_id: str) -> bool:
+    """Delete a workflow from the runtime index; returns True if it existed.
+
+    Note: plugin-backed workflows (loaded from plugins_dir/workflows/) cannot be
+    deleted via the API — they are re-loaded from disk on each request.  To remove
+    a plugin-backed workflow, delete or rename the corresponding JSON file on disk.
+    """
 
     def _mutation(records: list[dict[str, object]]) -> bool:
         for index, existing in enumerate(records):
@@ -108,7 +121,7 @@ def _load_records() -> list[dict[str, object]]:
 
 
 def _read_records_from_disk() -> list[dict[str, object]]:
-    with open(UDP_INDEX_PATH, encoding="utf-8") as handle:
+    with open(WORKFLOW_INDEX_PATH, encoding="utf-8") as handle:
         portalocker.lock(handle, portalocker.LOCK_SH)
         try:
             payload = json.load(handle)
@@ -119,21 +132,21 @@ def _read_records_from_disk() -> list[dict[str, object]]:
     return payload
 
 
-def _load_builtin_udps() -> list[dict[str, object]]:
-    """Load built-in UDPs from open_climate_service/plugins/workflows/."""
+def _load_builtin_workflows() -> list[dict[str, object]]:
+    """Load built-in workflows from open_climate_service/plugins/workflows/."""
     pkg = importlib.resources.files("open_climate_service") / "plugins" / "workflows"
-    udps: list[dict[str, object]] = []
+    workflows: list[dict[str, object]] = []
     try:
         for resource in pkg.iterdir():
             if resource.name.endswith(".json"):
-                udps.append(json.loads(resource.read_text(encoding="utf-8")))
+                workflows.append(json.loads(resource.read_text(encoding="utf-8")))
     except (FileNotFoundError, NotADirectoryError):
         pass
-    return udps
+    return workflows
 
 
-def _load_plugin_udps() -> list[dict[str, object]]:
-    """Load UDPs from plugins_dir/workflows/ if configured."""
+def _load_plugin_workflows() -> list[dict[str, object]]:
+    """Load workflows from plugins_dir/workflows/ if configured."""
     config = api_config.get_config()
     plugins_dir = config.get("plugins_dir") if config else None
     if not plugins_dir:
@@ -143,18 +156,18 @@ def _load_plugin_udps() -> list[dict[str, object]]:
     workflows_dir = (base / plugins_dir).resolve() / "workflows"
     if not workflows_dir.is_dir():
         return []
-    udps: list[dict[str, object]] = []
+    workflows: list[dict[str, object]] = []
     for path in sorted(workflows_dir.glob("*.json")):
         try:
-            udps.append(json.loads(path.read_text(encoding="utf-8")))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return udps
+            workflows.append(json.loads(path.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Skipping workflow file %s: %s", path, exc)
+    return workflows
 
 
 def _mutate_records(mutation: Callable[[list[dict[str, object]]], _T]) -> _T:
     _ensure_store()
-    with open(UDP_INDEX_PATH, "r+", encoding="utf-8") as handle:
+    with open(WORKFLOW_INDEX_PATH, "r+", encoding="utf-8") as handle:
         portalocker.lock(handle, portalocker.LOCK_EX)
         try:
             payload = json.load(handle)

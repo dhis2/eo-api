@@ -127,12 +127,12 @@ class OpenEOJobResults(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# openEO user-defined processes (UDPs)
+# openEO workflows (user-defined processes)
 # ---------------------------------------------------------------------------
 
 
-class UDPRecord(BaseModel):
-    """Persisted user-defined process."""
+class WorkflowRecord(BaseModel):
+    """Persisted workflow (user-defined process)."""
 
     id: str
     summary: str | None = None
@@ -143,8 +143,8 @@ class UDPRecord(BaseModel):
     links: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class UDPListResponse(BaseModel):
+class WorkflowListResponse(BaseModel):
     """Envelope for GET /process_graphs."""
 
-    processes: list[UDPRecord]
+    processes: list[WorkflowRecord]
     links: list[dict[str, Any]] = Field(default_factory=list)
