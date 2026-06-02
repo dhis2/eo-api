@@ -44,8 +44,7 @@ def process(
             summary="Maximum consecutive dry days",
             parameters={"thresh": {"description": "Precipitation threshold"}},
         )
-        def consecutive_dry_days(pr: xr.DataArray, thresh: str = "1mm/day") -> xr.DataArray:
-            ...
+        def consecutive_dry_days(pr: xr.DataArray, thresh: str = "1mm/day") -> xr.DataArray: ...
     """
 
     def decorator(fn: F) -> F:
