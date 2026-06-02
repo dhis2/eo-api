@@ -86,39 +86,6 @@ The plugin owns source probing, period enumeration, and fetching one period as a
 
 ---
 
-## Processes and jobs
-
-### openEO process catalog
-
-`GET /processes` serves the openEO process catalog — standard processes from `openeo-processes-dask` plus any `@process`-decorated plugin functions loaded from `plugins_dir/processes/`. Processes are executed via openEO process graphs submitted to `POST /jobs` (async batch) or `POST /result` (synchronous).
-
-### Ingestion and sync
-
-Ingestion and sync are domain operations with their own dedicated routes — they are not exposed as openEO processes.
-
-```text
-POST /ingestions                  → synchronous, or
-POST /ingestions + Prefer: respond-async → 202 + Location: /ingestions/jobs/{id}
-
-POST /sync/{dataset_id}           → synchronous, or
-POST /sync/{dataset_id} + Prefer: respond-async → 202 + Location: /ingestions/jobs/{id}
-```
-
-### Job
-
-A job is the operational state of one async execution. The same job runtime is shared between async ingestion, async sync, and openEO batch jobs (the latter tracked at `/jobs/{id}`; native ingestion/sync jobs tracked at `/ingestions/jobs/{id}`).
-
-Jobs provide:
-
-- status tracking
-- progress reporting
-- cursor/checkpoint persistence
-- cancellation
-- retry and recovery after restart
-- a durable result or error record
-
----
-
 ## Sync kinds
 
 The `sync.kind` field in a template determines how a managed dataset is kept current.
@@ -152,6 +119,39 @@ sync:
 ```
 
 Before executing a sync, the engine calls the availability function to clamp the target end date. This prevents requesting data that has not yet been published, which would leave temporal gaps.
+
+---
+
+## Processes and jobs
+
+### openEO process catalog
+
+`GET /processes` serves the openEO process catalog — standard processes from `openeo-processes-dask` plus any `@process`-decorated plugin functions loaded from `plugins_dir/processes/`. Processes are executed via openEO process graphs submitted to `POST /jobs` (async batch) or `POST /result` (synchronous).
+
+### Ingestion and sync
+
+Ingestion and sync are domain operations with their own dedicated routes — they are not exposed as openEO processes.
+
+```text
+POST /ingestions                  → synchronous, or
+POST /ingestions + Prefer: respond-async → 202 + Location: /ingestions/jobs/{id}
+
+POST /sync/{dataset_id}           → synchronous, or
+POST /sync/{dataset_id} + Prefer: respond-async → 202 + Location: /ingestions/jobs/{id}
+```
+
+### Job
+
+A job is the operational state of one async execution. The same job runtime is shared between async ingestion, async sync, and openEO batch jobs (the latter tracked at `/jobs/{id}`; native ingestion/sync jobs tracked at `/ingestions/jobs/{id}`).
+
+Jobs provide:
+
+- status tracking
+- progress reporting
+- cursor/checkpoint persistence
+- cancellation
+- retry and recovery after restart
+- a durable result or error record
 
 ---
 
@@ -194,17 +194,6 @@ ingestion:
     variable: total_precipitation
 ```
 
-### Transform function
-
-```python
-def my_transform(ds: xr.Dataset, dataset: dict) -> xr.Dataset:
-    # Receive the dataset after download, return a modified dataset.
-    # Modify ds[dataset["variable"]] values and variable attributes.
-    # Do not modify dataset-level ds.attrs — the framework manages those.
-```
-
-Transforms are applied in order after the ingestion function returns, before the zarr is written. They receive the full xarray Dataset and the template dict. They return a modified Dataset. They do not write to disk.
-
 ### Named openEO process (`@process`)
 
 ```python
@@ -220,21 +209,6 @@ Functions decorated with `@process` and placed in `plugins_dir/processes/` are r
 
 ---
 
-## The transform pipeline
-
-Transforms are applied at a consistent point in the ingestion lifecycle:
-
-1. streaming plugin fetches a period as an `xarray.Dataset`
-2. `_run_transforms(ds, dataset)` applies each declared transform in order
-3. result is reprojected to instance CRS
-4. period is appended to the Icechunk-backed Zarr store
-5. framework writes GeoZarr root attributes
-7. framework computes coverage from the zarr
-
-Transforms see post-download, pre-reproject data. They should only modify data values and variable-level attributes. The framework writes dataset-level attributes (GeoZarr) after the transform pipeline completes.
-
----
-
 ## GeoZarr root attributes
 
 Every zarr artifact must have GeoZarr root attributes for map rendering to work correctly. These are written into `zarr.json` at the store root:
@@ -245,7 +219,7 @@ Every zarr artifact must have GeoZarr root attributes for map rendering to work 
 
 The map viewer reads `spatial:bbox` and `proj:code` to determine where to position tiles on the map.
 
-**The framework writes these attributes — plugins do not.** They are written in `build_dataset_zarr` after transforms and reprojection, using the actual coordinate bounds of the final written data and the instance CRS.
+**The framework writes these attributes — plugins do not.** They are written after reprojection, using the actual coordinate bounds of the final written data and the instance CRS.
 
 ---
 
@@ -296,7 +270,7 @@ Plugin code (streaming plugins, `@process` functions) can rely on the following 
 | pygeoapi publication                                  | `publish_artifact_record` if `publish=true` |
 | STAC collection generation                            | Dynamic from artifact record                |
 
-Plugin code only needs to produce data files. Everything else is the framework's responsibility.
+Plugin code only needs to produce data. Everything else is the framework's responsibility.
 
 ---
 
@@ -313,7 +287,3 @@ The sync engine validates that new data connects to the end of the existing arti
 ### The append execution mode avoids re-downloading history
 
 `append` downloads only the missing range and rebuilds the full zarr from all cached files. This means the local cache (NetCDF files in `data/downloads/`) is the source of truth for the full time series; the zarr is a derived view. If the cache is deleted, a rematerialize is required to recover.
-
-### Transforms run after download, before reproject
-
-Transforms see raw downloaded values in the source CRS and source units. The order is: download → transform → reproject → write zarr.
