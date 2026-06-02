@@ -64,7 +64,10 @@ class ERA5LandHourlySingleBandPlugin:
         module = import_module("dhis2eo.data.destine.era5_land.hourly")
         open_zarr = cast(Callable[[list[str]], xr.Dataset], getattr(module, "open_zarr"))
         ds = open_zarr([self.variable])
-        return str(np.datetime64(ds.valid_time.values[-1], "h"))
+        try:
+            return str(np.datetime64(ds.valid_time.isel(valid_time=-1).values, "h"))
+        finally:
+            ds.close()
 
     async def fetch_period(self, period_id: str, bbox: list[float], **params: Any) -> xr.Dataset:
         _ = params

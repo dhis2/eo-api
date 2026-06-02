@@ -103,7 +103,7 @@ class CHIRPS3DailyPlugin:
         cutoff reflects actual CDN state rather than a hardcoded lag assumption.
         Falls back to 3 months back if the CDN probe fails.
         """
-        import requests
+        import httpx
 
         today = datetime.now(UTC).date()
         y, m = today.year, today.month
@@ -114,10 +114,10 @@ class CHIRPS3DailyPlugin:
             last_day = calendar.monthrange(y, m)[1]
             candidate = date(y, m, last_day)
             try:
-                resp = requests.head(self._url_for_day(candidate), timeout=10, allow_redirects=True)
+                resp = httpx.head(self._url_for_day(candidate), timeout=10, follow_redirects=True)
                 if resp.status_code == 200:
                     return candidate
-            except Exception:
+            except httpx.HTTPError:
                 continue
         # Fallback: 3 months back (safe)
         y, m = today.year, today.month
