@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import xarray as xr
-import xclim.indices
 import xclim.indicators.atmos as xclim_atmos
+import xclim.indices
 
 from open_climate_service.process import process
 
@@ -68,7 +68,7 @@ def cdd(
     summary="Maximum consecutive wet days (CWD)",
     parameters={
         "pr": {"description": "Daily precipitation (kg m-2 s-1 or mm/day)."},
-        "thresh": {"description": "Precipitation threshold at or above which a day is considered wet (e.g. '1 mm/day')."},
+        "thresh": {"description": "Precipitation threshold for a wet day (e.g. '1 mm/day')."},
         "freq": {"description": "Resampling frequency. 'YS' = annual (default), 'MS' = monthly."},
     },
 )
