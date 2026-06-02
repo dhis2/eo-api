@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from open_climate_service.data_registry.services import processes as process_registry
+from open_climate_service.ingestions.sync_engine import _get_dynamic_function
 from open_climate_service.jobs import store
 from open_climate_service.jobs.models import (
     JobCancelledError,
@@ -160,21 +160,6 @@ class JobService:
             request=safe_request,
             max_attempts=max_attempts,
         )
-
-    def submit_process_job(
-        self,
-        *,
-        process_id: str,
-        request: dict[str, Any],
-        max_attempts: int = 1,
-    ) -> JobRecord:
-        """Submit a YAML-registered process as a background job."""
-        process = process_registry.get_process(process_id)
-        if process is None or not process["expose"]:
-            raise HTTPException(status_code=404, detail=f"Unknown process '{process_id}'")
-        # Strip the reserved key so a caller-supplied __fn_path__ cannot hijack execution.
-        safe_request = {k: v for k, v in request.items() if k != "__fn_path__"}
-        return self._create_and_enqueue(process_id=process_id, request=safe_request, max_attempts=max_attempts)
 
     def _create_and_enqueue(
         self,
@@ -427,13 +412,9 @@ class JobService:
 
     def _invoke_process(self, record: JobRecord) -> Any:
         fn_path = record.request.get("__fn_path__")
-        if fn_path and isinstance(fn_path, str):
-            func = process_registry._get_dynamic_function(fn_path)
-        else:
-            process = process_registry.get_process(record.process_id)
-            if process is None or not process["expose"]:
-                raise ValueError(f"Unknown process '{record.process_id}'")
-            func = process_registry.get_process_function(record.process_id)
+        if not fn_path or not isinstance(fn_path, str):
+            raise ValueError(f"Job '{record.job_id}' has no __fn_path__ — cannot invoke")
+        func = _get_dynamic_function(fn_path)
         context = JobExecutionContext(self, record.job_id)
         kwargs = {k: v for k, v in record.request.items() if k != "__fn_path__"}
         if _supports_argument(func, "on_progress"):

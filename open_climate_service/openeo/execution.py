@@ -51,37 +51,8 @@ def _build_process_registry() -> Any:
     registry["load_collection"] = Process(spec={}, implementation=_load_collection_impl)
     registry["save_result"] = Process(spec={}, implementation=_save_result_impl)
 
-    # Native YAML-configured processing plugins.
-    # Plugins with the same id as a standard process shadow the built-in.
-    _register_native_plugins(registry)
-
     _registry = registry
     return registry
-
-
-def _register_native_plugins(registry: Any) -> None:
-    """Register all native processing plugins into the openEO process registry.
-
-    All plugins with an execution.function are registered regardless of the
-    expose flag — expose only controls visibility in GET /processes/{id}
-    (OGC-style endpoint), not callability from openEO process graphs.
-    """
-    from openeo_pg_parser_networkx.process_registry import Process
-
-    from open_climate_service.data_registry.services import processes as process_registry_svc
-
-    for p in process_registry_svc.list_processes():
-        execution = p.get("execution") or {}
-        fn_path = execution.get("function") if isinstance(execution, dict) else None
-        if not fn_path:
-            continue
-        try:
-            func = process_registry_svc.get_process_function(p["id"])
-            registry[p["id"]] = Process(spec={}, implementation=func)
-        except ImportError:
-            logger.debug("Native plugin '%s' skipped: module not found", p["id"])
-        except Exception:
-            logger.warning("Could not register native plugin '%s' in process registry", p["id"])
 
 
 class _RegistryOverlay:

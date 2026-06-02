@@ -12,11 +12,9 @@ import open_climate_service.startup  # noqa: F401  # pyright: ignore[reportUnuse
 from open_climate_service.data_registry import routes as dataset_template_routes
 from open_climate_service.extents import routes as extent_routes
 from open_climate_service.ingestions import routes as ingestion_routes
-from open_climate_service.jobs import routes as job_routes
 from open_climate_service.jobs.service import get_job_service
 from open_climate_service.openeo import routes as openeo_routes
 from open_climate_service.openeo.jobs import get_openeo_job_service
-from open_climate_service.processing import routes as processing_routes
 from open_climate_service.pygeoapi_app import mount_pygeoapi
 from open_climate_service.stac import routes as stac_routes
 from open_climate_service.system import routes as system_routes
@@ -149,9 +147,6 @@ def create_app() -> FastAPI:
     _app.include_router(ingestion_routes.zarr_router, prefix="/zarr", tags=["Zarr"])
     _app.include_router(ingestion_routes.sync_router, prefix="/sync", tags=["Sync"])
     _app.include_router(openeo_routes.processes_router, prefix="/processes", tags=["openEO"])
-    _app.include_router(processing_routes.router, prefix="/processes", tags=["Processes"])
-    # Internal job tracker for native /processes execution (separate from the openEO jobs API at /jobs).
-    _app.include_router(job_routes.router, prefix="/internal/jobs", tags=["Internal"])
 
     mount_pygeoapi(_app)
 

@@ -6,8 +6,6 @@ import inspect
 import logging
 from typing import Any
 
-from open_climate_service.data_registry.services import processes as process_registry
-
 logger = logging.getLogger(__name__)
 
 _BACKEND_PROCESSES: list[dict[str, Any]] = [
@@ -147,11 +145,6 @@ def get_openeo_process(process_id: str) -> dict[str, Any] | None:
     except Exception:
         pass
 
-    # Native plugin (only exposed processes are visible in the openEO catalog)
-    for process in process_registry.list_processes():
-        if process.get("id") == process_id and process.get("expose", True):
-            return _native_to_openeo(process)
-
     return None
 
 
@@ -173,15 +166,6 @@ def list_openeo_processes() -> list[dict[str, Any]]:
         if pid and pid not in backend_ids:
             result.append(p)
             standard_ids.add(pid)
-
-    # Append native plugin processes not already in the standard list
-    for process in process_registry.list_processes():
-        pid = process.get("id")
-        if pid in standard_ids or pid in backend_ids:
-            continue
-        if not process.get("expose", True):
-            continue
-        result.append(_native_to_openeo(process))
 
     return result
 
