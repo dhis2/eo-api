@@ -237,26 +237,67 @@
       }
 
       .sync-form {
-        display: inline;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.6rem;
       }
       .sync-btn {
-        background: none;
-        border: 1px solid #cbd5e1;
-        border-radius: 4px;
-        padding: 0.2rem 0.6rem;
-        font-size: 0.78rem;
+        background: #1a2332;
+        color: #fff;
+        border: none;
+        border-radius: 5px;
+        padding: 0.5rem 1.25rem;
+        font-size: 0.875rem;
         font-weight: 500;
-        color: #475569;
         cursor: pointer;
         font-family: inherit;
       }
       .sync-btn:hover {
-        background: #f1f5f9;
-        border-color: #94a3b8;
+        background: #263547;
       }
       .sync-btn:disabled {
         opacity: 0.55;
         cursor: not-allowed;
+      }
+      .secondary-btn {
+        background: #fff;
+        color: #475569;
+        border: 1px solid #cbd5e1;
+        border-radius: 5px;
+        padding: 0.45rem 1rem;
+        font-size: 0.82rem;
+        font-weight: 500;
+        cursor: pointer;
+        font-family: inherit;
+      }
+      .secondary-btn:hover {
+        background: #f8fafc;
+        border-color: #94a3b8;
+      }
+      .secondary-btn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .sync-panel {
+        display: none;
+        min-width: 260px;
+        padding: 0.85rem 1rem;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+      }
+      .sync-panel.open {
+        display: block;
+      }
+      .sync-panel .field {
+        gap: 0.35rem;
+      }
+      .sync-panel-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        margin-top: 0.85rem;
       }
 
       .divider {
@@ -441,7 +482,30 @@
                       onsubmit="runJob(event, this, 'btn-sync-{{ ds.dataset_id }}', 'sync-progress-{{ ds.dataset_id }}')">
                   <input type="hidden" name="dataset_id" value="{{ ds.dataset_id }}" />
                   <input type="hidden" name="publish" value="on" />
-                  <button type="submit" id="btn-sync-{{ ds.dataset_id }}" class="sync-btn">Sync</button>
+                  <button
+                    type="button"
+                    id="btn-sync-{{ ds.dataset_id }}"
+                    class="sync-btn"
+                    onclick="openSyncPanel('{{ ds.dataset_id }}')"
+                  >
+                    Sync
+                  </button>
+                  <div id="sync-panel-{{ ds.dataset_id }}" class="sync-panel">
+                    <div class="field">
+                      <label for="sync-end-{{ ds.dataset_id }}">Cutoff end <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+                      <input
+                        type="text"
+                        id="sync-end-{{ ds.dataset_id }}"
+                        name="end"
+                        placeholder="YYYY-MM-DD"
+                      />
+                      <span class="hint">Leave blank to sync through the latest available period.</span>
+                    </div>
+                    <div class="sync-panel-actions">
+                      <button type="submit" class="sync-btn">Start sync</button>
+                      <button type="button" class="secondary-btn" onclick="closeSyncPanel('{{ ds.dataset_id }}')">Cancel</button>
+                    </div>
+                  </div>
                   <div id="sync-progress-{{ ds.dataset_id }}" class="progress-area" style="display:none">
                     <div class="progress-bar-track">
                       <div class="progress-bar-fill indeterminate"></div>
@@ -467,22 +531,43 @@
     </footer>
 
     <script>
+      function openSyncPanel(datasetId) {
+        const panel = document.getElementById(`sync-panel-${datasetId}`);
+        const input = document.getElementById(`sync-end-${datasetId}`);
+        if (!panel) return;
+        panel.classList.add('open');
+        if (input) input.focus();
+      }
+
+      function closeSyncPanel(datasetId) {
+        const panel = document.getElementById(`sync-panel-${datasetId}`);
+        const input = document.getElementById(`sync-end-${datasetId}`);
+        if (!panel) return;
+        panel.classList.remove('open');
+        if (input) input.value = '';
+      }
+
       async function runJob(event, form, btnId, progressId) {
         event.preventDefault();
         const btn = document.getElementById(btnId);
         const area = document.getElementById(progressId);
         const fill = area.querySelector('.progress-bar-fill');
         const label = area.querySelector('.progress-label');
+        const formData = new FormData(form);
+        const controls = form.querySelectorAll('button, input:not([type="hidden"]), select, textarea');
 
-        btn.disabled = true;
+        controls.forEach(control => {
+          control.disabled = true;
+        });
         area.style.display = 'block';
         fill.className = 'progress-bar-fill indeterminate';
+        fill.style.width = '0%';
         label.textContent = 'Starting…';
 
         try {
           const resp = await fetch(form.action, {
             method: 'POST',
-            body: new FormData(form),
+            body: formData,
           });
 
           if (!resp.ok || !resp.body) {
@@ -519,7 +604,9 @@
           }
         } catch (err) {
           label.textContent = 'Error: ' + err.message;
-          btn.disabled = false;
+          controls.forEach(control => {
+            control.disabled = false;
+          });
         }
       }
     </script>

@@ -168,6 +168,7 @@ async def manage_sync(request: Request) -> Response:
     try:
         form = await request.form()
         dataset_id = str(form.get("dataset_id", ""))
+        end = str(form.get("end", "")).strip() or None
         publish = "publish" in form
     except HTTPException as exc:
         msg = urllib.parse.quote(str(exc.detail))
@@ -188,7 +189,7 @@ async def manage_sync(request: Request) -> Response:
     async def run() -> None:
         try:
             await asyncio.to_thread(
-                lambda: sync_dataset(dataset_id=dataset_id, end=None, publish=publish, on_progress=on_progress)
+                lambda: sync_dataset(dataset_id=dataset_id, end=end, publish=publish, on_progress=on_progress)
             )
             loop.call_soon_threadsafe(
                 queue.put_nowait,
