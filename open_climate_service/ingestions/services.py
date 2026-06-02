@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import mimetypes
@@ -12,7 +11,6 @@ import shutil
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
-from importlib import import_module
 from pathlib import Path
 from typing import Any, Protocol, cast
 from uuid import uuid4
@@ -385,29 +383,11 @@ def _create_streaming_artifact(
 
 
 def _load_streaming_plugin(plugin_path: str, *, params: dict[str, object]) -> IngestionPlugin:
-    """Load and instantiate one streaming plugin class from a dotted import path.
+    """Load and instantiate one streaming plugin class from a dotted import path."""
+    from open_climate_service.shared.plugin_loader import instantiate_plugin
 
-    Template-defined `ingestion.default_params` are treated as plugin
-    configuration and passed to the constructor here. The same params are also
-    forwarded later to `probe(...)` and `fetch_period(...)` so plugins may keep
-    configuration in constructor state, per-call kwargs, or both.
-    """
-    module_path, _, attr_name = plugin_path.rpartition(".")
-    if not module_path or not attr_name:
-        raise HTTPException(status_code=500, detail=f"Invalid ingestion.plugin path '{plugin_path}'")
     try:
-        module = import_module(module_path)
-        plugin_cls = getattr(module, attr_name)
-        if not callable(plugin_cls):
-            raise TypeError(f"{plugin_path} is not callable")
-        constructor_kwargs = dict(params)
-        signature = inspect.signature(plugin_cls)
-        accepts_var_kwargs = any(
-            parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()
-        )
-        if not accepts_var_kwargs:
-            constructor_kwargs = {name: value for name, value in params.items() if name in signature.parameters}
-        plugin = plugin_cls(**constructor_kwargs)
+        plugin = instantiate_plugin(plugin_path, dict(params))
         if not isinstance(plugin, IngestionPlugin):
             raise TypeError(
                 f"{plugin_path} does not implement the required streaming plugin contract "

@@ -114,7 +114,10 @@ def plan_sync(
         # The full list is stored on the SyncDetail so the orchestrator can reuse it
         # without a second probe at execution time.
         available_periods = _probe_available_periods(source_dataset, next_period_start, target_end)
-        if available_periods is not None and not available_periods:
+        # available_periods is None  → no plugin, use target_end as-is
+        # available_periods is []    → plugin exists but nothing available → NO_OP
+        # available_periods is [...]  → clamp target_end to the last available period
+        if available_periods == []:
             return SyncDetail(
                 source_dataset_id=latest_artifact.dataset_id,
                 sync_kind=sync_kind,
@@ -131,6 +134,10 @@ def plan_sync(
             target_end_source = "plugin_availability"
         action = SyncAction.APPEND if _supports_append(source_dataset, latest_artifact) else SyncAction.REMATERIALIZE
         reason = "new_periods_available_for_append" if action == SyncAction.APPEND else "new_periods_available"
+        # Only pass pre_computed_periods for APPEND — it covers [next_period_start, target_end].
+        # For REMATERIALIZE the orchestrator must probe the full [current_start, target_end]
+        # range so we pass None and let it call plugin.periods() with the correct bounds.
+        periods_for_orchestrator = available_periods if action == SyncAction.APPEND else None
         return SyncDetail(
             source_dataset_id=latest_artifact.dataset_id,
             sync_kind=sync_kind,
@@ -149,7 +156,7 @@ def plan_sync(
             target_end_source=target_end_source,
             delta_start=next_period_start,
             delta_end=target_end,
-            pre_computed_periods=available_periods,
+            pre_computed_periods=periods_for_orchestrator,
         )
 
     if current_end >= target_end:
@@ -318,23 +325,23 @@ def _probe_available_periods(
 ) -> list[str] | None:
     """Ask the plugin which periods are actually available.
 
-    Returns the full period list so the result can be reused at execution time,
-    avoiding a second probe in the orchestrator.
+    Returns the full period list (possibly empty) so the result can be reused
+    at execution time, avoiding a second probe in the orchestrator.
 
-    Returns None if no periods are available (nothing to sync).
-    Returns None if the dataset has no plugin (non-streaming) — caller falls
-    back to the requested target_end.
+    Returns None only when the dataset has no plugin (non-streaming) — the
+    caller falls back to the requested target_end without clamping.
+
+    Returns [] when the plugin exists but has no periods for the requested
+    range — the caller should treat this as NO_OP.
     """
-    from open_climate_service.shared.dynamic_import import get_dynamic_function
+    from open_climate_service.shared.plugin_loader import instantiate_plugin
 
     plugin_path = source_dataset.get("ingestion", {}).get("plugin")
     if not plugin_path:
         return None
     default_params: dict[str, Any] = source_dataset.get("ingestion", {}).get("default_params") or {}
-    PluginClass = get_dynamic_function(plugin_path)
-    plugin = PluginClass(**default_params)
-    available = asyncio.run(plugin.periods(start, target_end))
-    return available if available else None
+    plugin = instantiate_plugin(plugin_path, default_params)
+    return asyncio.run(plugin.periods(start, target_end))
 
 
 def _next_period_start(latest_period_end: str, *, period_type: str) -> str:
