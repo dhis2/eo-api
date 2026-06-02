@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from climate_api.ingestions import services as ingestion_services
-from climate_api.ingestions.schemas import (
+from open_climate_service.ingestions import services as ingestion_services
+from open_climate_service.ingestions.schemas import (
     ArtifactCoverage,
     ArtifactFormat,
     ArtifactPublication,
@@ -17,7 +17,7 @@ from climate_api.ingestions.schemas import (
     CoverageTemporal,
     PublicationStatus,
 )
-from climate_api.processing import resample
+from open_climate_service.processing import resample
 
 
 @pytest.fixture(autouse=True)

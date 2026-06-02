@@ -5,8 +5,8 @@ import icechunk
 import pytest
 import xarray as xr
 
-from climate_api.ingestions import services
-from climate_api.ingestions.schemas import (
+from open_climate_service.ingestions import services
+from open_climate_service.ingestions.schemas import (
     ArtifactCoverage,
     ArtifactFormat,
     ArtifactPublication,
@@ -18,7 +18,8 @@ from climate_api.ingestions.schemas import (
     DatasetPublication,
     PublicationStatus,
 )
-from climate_api.publications.services import managed_dataset_id_for
+from open_climate_service.publications.services import managed_dataset_id_for
+from open_climate_service.streaming.plugins.chirps3 import CHIRPS3DailyPlugin
 
 
 @pytest.fixture(autouse=True)
@@ -418,7 +419,7 @@ def test_create_artifact_uses_streaming_plugin_for_direct_ingest(
         "variable": "precip",
         "period_type": "daily",
         "ingestion": {
-            "plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
+            "plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
             "default_params": {"stage": "final"},
         },
     }
@@ -474,7 +475,7 @@ def test_create_artifact_uses_streaming_plugin_for_direct_ingest(
         publish=False,
     )
 
-    assert captured["plugin_path"] == "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"
+    assert captured["plugin_path"] == "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"
     assert captured["params"] == {"stage": "final"}
     assert captured["dataset_id"] == "chirps3_precipitation_daily"
     assert captured["zarr_path"] is None
@@ -508,7 +509,7 @@ def test_create_artifact_uses_streaming_plugin_for_store_based_sync(
         "variable": "precip",
         "period_type": "daily",
         "ingestion": {
-            "plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
+            "plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
             "default_params": {"stage": "final"},
         },
     }
@@ -575,7 +576,7 @@ def test_create_artifact_forwards_country_code_to_streaming_plugin(
         "variable": "pop_total",
         "period_type": "yearly",
         "ingestion": {
-            "plugin": "climate_api.streaming.plugins.worldpop.WorldPopYearlyPlugin",
+            "plugin": "open_climate_service.streaming.plugins.worldpop.WorldPopYearlyPlugin",
             "default_params": {"version": "global2"},
         },
     }
@@ -618,7 +619,7 @@ def test_create_artifact_forwards_country_code_to_streaming_plugin(
         publish=False,
     )
 
-    assert captured["plugin_path"] == "climate_api.streaming.plugins.worldpop.WorldPopYearlyPlugin"
+    assert captured["plugin_path"] == "open_climate_service.streaming.plugins.worldpop.WorldPopYearlyPlugin"
     assert captured["params"] == {"version": "global2", "country_code": "SLE"}
     run_kwargs = captured["run"]
     assert isinstance(run_kwargs, dict)
@@ -629,10 +630,10 @@ def test_create_artifact_forwards_country_code_to_streaming_plugin(
 def test_load_streaming_plugin_rejects_non_callable_symbol() -> None:
     with pytest.raises(
         services.HTTPException,
-        match="Failed to load ingestion.plugin 'climate_api.ingestions.services.logger'",
+        match="Failed to load ingestion.plugin 'open_climate_service.ingestions.services.logger'",
     ):
         services._load_streaming_plugin(
-            "climate_api.ingestions.services.logger",
+            "open_climate_service.ingestions.services.logger",
             params={},
         )
 
@@ -646,12 +647,23 @@ def test_load_streaming_plugin_rejects_symbol_outside_plugin_protocol(monkeypatc
 
     with pytest.raises(
         services.HTTPException,
-        match="Failed to load ingestion.plugin 'climate_api.ingestions.services._NotAPlugin'",
+        match="Failed to load ingestion.plugin 'open_climate_service.ingestions.services._NotAPlugin'",
     ):
         services._load_streaming_plugin(
-            "climate_api.ingestions.services._NotAPlugin",
+            "open_climate_service.ingestions.services._NotAPlugin",
             params={"stage": "final"},
         )
+
+
+def test_load_streaming_plugin_filters_runtime_only_params_for_constructor() -> None:
+    plugin = services._load_streaming_plugin(
+        "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
+        params={"stage": "final", "country_code": "SLE"},
+    )
+
+    assert isinstance(plugin, CHIRPS3DailyPlugin)
+    assert plugin.stage == "final"
+    assert plugin.flavor == "rnl"
 
 
 def test_create_artifact_allows_streaming_coverage_clamped_to_source_availability(
@@ -664,7 +676,7 @@ def test_create_artifact_allows_streaming_coverage_clamped_to_source_availabilit
         "variable": "precip",
         "period_type": "daily",
         "ingestion": {
-            "plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
+            "plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
         },
     }
     store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
@@ -726,7 +738,7 @@ def test_create_artifact_rejects_streaming_coverage_with_late_start(
         "variable": "precip",
         "period_type": "daily",
         "ingestion": {
-            "plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
+            "plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
         },
     }
     store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
@@ -774,7 +786,7 @@ def test_create_artifact_returns_409_when_streaming_plugin_has_no_periods(
         "variable": "precip",
         "period_type": "daily",
         "ingestion": {
-            "plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
+            "plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
         },
     }
     store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
@@ -810,7 +822,7 @@ def test_create_artifact_overwrite_resets_existing_icechunk_store(
         "variable": "precip",
         "period_type": "daily",
         "ingestion": {
-            "plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
+            "plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin",
         },
     }
     store_path = tmp_path / "chirps3_precipitation_daily.icechunk"

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from climate_api.streaming.plugins.era5_land import ERA5LandHourlySingleBandPlugin, ERA5LandPrecipitationPlugin
+from open_climate_service.streaming.plugins.era5_land import ERA5LandHourlySingleBandPlugin, ERA5LandPrecipitationPlugin
 
 
 def test_era5_land_periods_enumerate_hours() -> None:
@@ -107,7 +107,7 @@ def test_era5_land_cached_region_closes_previous_dataset_when_bbox_changes(
         opened.append(region)
         return region
 
-    monkeypatch.setattr("climate_api.streaming.plugins.era5_land._open_era5_land_region", fake_open_region)
+    monkeypatch.setattr("open_climate_service.streaming.plugins.era5_land._open_era5_land_region", fake_open_region)
 
     first = plugin._region_for_bbox([1.0, 2.0, 3.0, 4.0])
     second = plugin._region_for_bbox([2.0, 3.0, 4.0, 5.0])
@@ -130,7 +130,7 @@ def test_era5_land_plugin_close_releases_cached_region(monkeypatch: pytest.Monke
 
     region = FakeRegion()
     monkeypatch.setattr(
-        "climate_api.streaming.plugins.era5_land._open_era5_land_region",
+        "open_climate_service.streaming.plugins.era5_land._open_era5_land_region",
         lambda variable, bbox: region,
     )
 

@@ -6,7 +6,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: dhis2/climate-api
+  IMAGE_NAME: dhis2/open-climate-service
 
 jobs:
   build-and-push:

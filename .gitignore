@@ -3,7 +3,7 @@
 __pycache__/
 .venv/
 .env
-climate-api.yaml
+climate-service.yaml
 eo_api.egg-info/
 data/
 docs/internal/

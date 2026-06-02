@@ -12,39 +12,43 @@ from fastapi import HTTPException
 from topozarr.pyramid import Pyramid
 from xarray import DataTree
 
-from climate_api.data_accessor.services.accessor import _coverage_from_dataset, open_icechunk_dataset, open_zarr_dataset
-from climate_api.data_manager.services import downloader
-from climate_api.ingestions import services as ingestion_services
+from open_climate_service.data_accessor.services.accessor import (
+    _coverage_from_dataset,
+    open_icechunk_dataset,
+    open_zarr_dataset,
+)
+from open_climate_service.data_manager.services import downloader
+from open_climate_service.ingestions import services as ingestion_services
 
 
 def test_resolve_download_dir_uses_data_dir_from_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    config_file = tmp_path / "climate-api.yaml"
+    config_file = tmp_path / "climate-service.yaml"
     config_file.write_text("data_dir: ./data\nextent:\n  id: test\n", encoding="utf-8")
-    monkeypatch.setenv("CLIMATE_API_CONFIG", str(config_file))
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     assert downloader._resolve_download_dir() == tmp_path / "data" / "downloads"
 
 
 def test_resolve_download_dir_uses_xdg_when_no_config(monkeypatch: pytest.MonkeyPatch) -> None:
     with tempfile.TemporaryDirectory() as xdg:
-        monkeypatch.delenv("CLIMATE_API_CONFIG", raising=False)
+        monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
         monkeypatch.setenv("XDG_DATA_HOME", xdg)
-        assert downloader._resolve_download_dir() == Path(xdg) / "climate-api" / "downloads"
+        assert downloader._resolve_download_dir() == Path(xdg) / "climate-service" / "downloads"
 
 
 def test_resolve_artifacts_dir_uses_data_dir_from_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    config_file = tmp_path / "climate-api.yaml"
+    config_file = tmp_path / "climate-service.yaml"
     config_file.write_text("data_dir: ./data\nextent:\n  id: test\n", encoding="utf-8")
-    monkeypatch.setenv("CLIMATE_API_CONFIG", str(config_file))
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     assert ingestion_services._resolve_artifacts_dir() == tmp_path / "data" / "artifacts"
 
 
 def test_resolve_artifacts_dir_uses_xdg_when_no_config(monkeypatch: pytest.MonkeyPatch) -> None:
     with tempfile.TemporaryDirectory() as xdg:
-        monkeypatch.delenv("CLIMATE_API_CONFIG", raising=False)
+        monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
         monkeypatch.setenv("XDG_DATA_HOME", xdg)
-        assert ingestion_services._resolve_artifacts_dir() == Path(xdg) / "climate-api" / "artifacts"
+        assert ingestion_services._resolve_artifacts_dir() == Path(xdg) / "climate-service" / "artifacts"
 
 
 def test_download_dataset_returns_400_when_country_code_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -270,7 +274,7 @@ def test_download_dataset_returns_400_when_bbox_outside_dataset_extents(
 def test_download_dataset_returns_409_for_plugin_only_templates() -> None:
     dataset: dict[str, Any] = {
         "id": "chirps3_precipitation_daily",
-        "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+        "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
     }
 
     with pytest.raises(HTTPException) as exc_info:

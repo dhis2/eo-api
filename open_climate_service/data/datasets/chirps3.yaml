@@ -1,0 +1,26 @@
+- id: chirps3_precipitation_daily
+  name: Total precipitation (CHIRPS3)
+  short_name: Total precipitation
+  variable: precip
+  period_type: daily
+  sync:
+    kind: temporal
+    execution: append
+    availability:
+      latest_available_function: open_climate_service.providers.availability.chirps3_daily_latest_available
+  extents:
+    spatial:
+      bbox: [-180, -50, 180, 50]
+    temporal:
+      begin: "1981-01-01"
+      resolution: P1D
+  ingestion:
+    plugin: open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin
+  units: mm
+  resolution: 5 km x 5 km
+  source: CHIRPS v3
+  source_url: https://www.chc.ucsb.edu/data/chirps3
+  display:
+    colormap: blues
+    range: [0.0, 20.0]
+    nodata: -9999.0

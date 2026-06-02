@@ -18,7 +18,7 @@ Transforms are declared in the dataset YAML as a list of dotted Python paths:
 
 ```yaml
 transforms:
-  - climate_api.transforms.kelvin_to_celsius
+  - open_climate_service.transforms.kelvin_to_celsius
   - mypackage.transforms.clip_to_valid_range
 ```
 
@@ -26,7 +26,7 @@ transforms:
 
 ## Built-in transforms
 
-### `climate_api.transforms.kelvin_to_celsius`
+### `open_climate_service.transforms.kelvin_to_celsius`
 
 Converts the dataset's primary variable from Kelvin to degrees Celsius.
 
@@ -36,7 +36,7 @@ Converts the dataset's primary variable from Kelvin to degrees Celsius.
 
 Used by: ERA5-Land 2 m temperature (`era5land_temperature_hourly`).
 
-### `climate_api.transforms.metres_to_mm`
+### `open_climate_service.transforms.metres_to_mm`
 
 Converts the dataset's primary variable from metres to millimetres.
 

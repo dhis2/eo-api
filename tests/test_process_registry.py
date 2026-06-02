@@ -2,12 +2,12 @@ from pathlib import Path
 
 import pytest
 
-from climate_api.data_registry.services import processes as process_registry
+from open_climate_service.data_registry.services import processes as process_registry
 
 
 def test_builtin_processes_include_resample(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(process_registry, "CONFIGS_DIR", None)
-    monkeypatch.delenv("CLIMATE_API_CONFIG", raising=False)
+    monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
 
     ids = {p["id"] for p in process_registry.list_processes()}
     assert "resample" in ids
@@ -15,18 +15,18 @@ def test_builtin_processes_include_resample(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_builtin_resample_has_execution_function(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(process_registry, "CONFIGS_DIR", None)
-    monkeypatch.delenv("CLIMATE_API_CONFIG", raising=False)
+    monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
 
     resample = process_registry.get_process("resample")
     assert resample is not None
     assert resample["title"] == "Temporal resampling"
-    assert resample["execution"]["function"] == "climate_api.processing.services.execute_resample"
+    assert resample["execution"]["function"] == "open_climate_service.processing.services.execute_resample"
     assert resample["jobControlOptions"] == ["sync-execute", "async-execute"]
 
 
 def test_get_process_returns_none_for_unknown_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(process_registry, "CONFIGS_DIR", None)
-    monkeypatch.delenv("CLIMATE_API_CONFIG", raising=False)
+    monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
 
     assert process_registry.get_process("does_not_exist") is None
 
@@ -74,11 +74,11 @@ def test_plugins_dir_processes_subdir_adds_to_builtin(monkeypatch: pytest.Monkey
 """,
         encoding="utf-8",
     )
-    config_file = tmp_path / "climate-api.yaml"
+    config_file = tmp_path / "climate-service.yaml"
     config_file.write_text(f"plugins_dir: {tmp_path / 'plugins'}\n", encoding="utf-8")
 
     monkeypatch.setattr(process_registry, "CONFIGS_DIR", None)
-    monkeypatch.setenv("CLIMATE_API_CONFIG", str(config_file))
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
 
     ids = {p["id"] for p in process_registry.list_processes()}
     assert "custom_process" in ids
@@ -97,11 +97,11 @@ def test_plugins_dir_process_overrides_builtin_by_id(monkeypatch: pytest.MonkeyP
 """,
         encoding="utf-8",
     )
-    config_file = tmp_path / "climate-api.yaml"
+    config_file = tmp_path / "climate-service.yaml"
     config_file.write_text(f"plugins_dir: {tmp_path / 'plugins'}\n", encoding="utf-8")
 
     monkeypatch.setattr(process_registry, "CONFIGS_DIR", None)
-    monkeypatch.setenv("CLIMATE_API_CONFIG", str(config_file))
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
 
     processes = {p["id"]: p for p in process_registry.list_processes()}
     assert processes["resample"]["title"] == "Custom resample override"

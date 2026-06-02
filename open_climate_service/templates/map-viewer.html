@@ -1,0 +1,575 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Map viewer — {{ name }}</title>
+    <link href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 15px;
+        color: #1a2332;
+      }
+
+      .layout {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+      }
+
+      header {
+        background: #1a2332;
+        color: #fff;
+        padding: 0.85rem 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-shrink: 0;
+        z-index: 10;
+      }
+      header h1 {
+        font-size: 1rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+      header h1 a {
+        color: inherit;
+        text-decoration: none;
+      }
+      header h1 a:hover {
+        text-decoration: underline;
+      }
+      header .subtitle {
+        font-size: 0.825rem;
+        color: #8fa3b8;
+      }
+      .map-container {
+        position: relative;
+        flex: 1;
+      }
+
+      #map {
+        position: absolute;
+        inset: 0;
+      }
+
+      .panel {
+        position: absolute;
+        top: 1rem;
+        left: 1rem;
+        width: 272px;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        z-index: 5;
+        display: flex;
+        flex-direction: column;
+        gap: 0.9rem;
+      }
+
+      .panel-section label {
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+        color: #64748b;
+        display: block;
+        margin-bottom: 0.4rem;
+      }
+
+      select {
+        width: 100%;
+        padding: 0.4rem 0.6rem;
+        border: 1px solid #cbd5e1;
+        border-radius: 5px;
+        font-size: 0.875rem;
+        background: #fff;
+        color: #1a2332;
+        cursor: pointer;
+      }
+      select:focus {
+        outline: 2px solid #0066cc;
+        outline-offset: 1px;
+      }
+
+      .time-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 0.4rem;
+      }
+      .time-value {
+        font-size: 0.825rem;
+        font-family: ui-monospace, "Cascadia Code", monospace;
+        color: #1a2332;
+      }
+      .time-count {
+        font-size: 0.75rem;
+        color: #94a3b8;
+        font-family: ui-monospace, "Cascadia Code", monospace;
+      }
+
+      input[type="range"] {
+        width: 100%;
+        accent-color: #0066cc;
+        cursor: pointer;
+      }
+
+      .meta-grid {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        column-gap: 0.75rem;
+        row-gap: 0.2rem;
+        font-size: 0.8rem;
+        border-top: 1px solid #f1f5f9;
+        padding-top: 0.75rem;
+      }
+      .meta-grid dt {
+        color: #64748b;
+      }
+      .meta-grid dd {
+        color: #1a2332;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .status {
+        font-size: 0.8rem;
+        color: #64748b;
+        font-style: italic;
+      }
+      .status.error {
+        color: #b91c1c;
+        font-style: normal;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .legend-bar {
+        height: 10px;
+        border-radius: 3px;
+        margin-bottom: 0.3rem;
+      }
+      .legend-labels {
+        display: flex;
+        justify-content: space-between;
+        font-size: 0.75rem;
+        font-family: ui-monospace, "Cascadia Code", monospace;
+        color: #475569;
+      }
+      .legend-units {
+        font-size: 0.72rem;
+        color: #94a3b8;
+        text-align: center;
+        margin-top: 0.2rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <header>
+        <h1><a href="{{ base }}/">{{ name }}</a></h1>
+        <span class="subtitle">Map viewer</span>
+      </header>
+
+      <div class="map-container">
+        <div id="map"></div>
+
+        <div class="panel">
+          <div class="panel-section">
+            <label for="dataset-select">Dataset</label>
+            <select id="dataset-select">
+              <option value="">Select dataset...</option>
+            </select>
+          </div>
+
+          <div id="time-section" class="panel-section hidden">
+            <div class="time-header">
+              <label style="margin-bottom:0">Time step</label>
+              <span id="time-count" class="time-count"></span>
+            </div>
+            <div style="margin-bottom:0.4rem">
+              <span id="time-value" class="time-value">—</span>
+            </div>
+            <input type="range" id="time-slider" min="0" step="1" value="0" />
+          </div>
+
+          <dl id="dataset-meta" class="meta-grid hidden">
+            <dt>Source</dt>
+            <dd id="meta-source">—</dd>
+            <dt>Units</dt>
+            <dd id="meta-units">—</dd>
+          </dl>
+
+          <div id="legend" class="panel-section hidden">
+            <label>Legend</label>
+            <div id="legend-bar" class="legend-bar"></div>
+            <div class="legend-labels">
+              <span id="legend-min"></span>
+              <span id="legend-max"></span>
+            </div>
+            <div id="legend-units" class="legend-units"></div>
+          </div>
+
+          <div id="status" class="status">Loading datasets...</div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import { ZarrLayer } from "https://esm.sh/@carbonplan/zarr-layer";
+      import chroma from "https://esm.sh/chroma-js";
+
+      // Suffix _r means the scale is reversed (matplotlib convention).
+      // chroma-js resolves ColorBrewer/D3 scale names case-insensitively.
+      function buildColormap(name = "viridis") {
+        const reversed = name.endsWith("_r");
+        const scaleName = reversed ? name.slice(0, -2) : name;
+        try {
+          const colors = chroma.scale(scaleName).colors(256);
+          return reversed ? colors.reverse() : colors;
+        } catch {
+          return chroma.scale("viridis").colors(256);
+        }
+      }
+
+      // Resolve the temporal dimension key and step list from cube:dimensions.
+      function getTimeDimKey(dimensions) {
+        for (const [key, val] of Object.entries(dimensions ?? {})) {
+          if (val.type === "temporal") return key;
+        }
+        return "time";
+      }
+
+      function buildTimeSteps(dimensions) {
+        if (!dimensions) return [];
+        const timeDim = Object.values(dimensions).find(
+          (d) => d.type === "temporal"
+        );
+        if (!timeDim) return [];
+        if (Array.isArray(timeDim.values)) return timeDim.values;
+        const [start, end] = timeDim.extent ?? [];
+        const step = timeDim.step;
+        if (!start) return [];
+        if (!step || !end) return [start];
+        return generateDateRange(start, end, step);
+      }
+
+      function generateDateRange(start, end, step) {
+        const inc = parseDuration(step);
+        if (!inc) return [start];
+        const startMs = new Date(start).getTime();
+        const endMs = new Date(end).getTime();
+        if (isNaN(startMs) || isNaN(endMs)) return [start];
+        const count = Math.max(1, Math.floor((endMs - startMs) / inc) + 1);
+        return { lazy: true, start, inc, count };
+      }
+
+      function timeStepCount() {
+        return Array.isArray(timeSteps) ? timeSteps.length : timeSteps.count;
+      }
+
+      function timeStepAt(i) {
+        if (Array.isArray(timeSteps)) return timeSteps[i];
+        return new Date(new Date(timeSteps.start).getTime() + i * timeSteps.inc)
+          .toISOString()
+          .slice(0, 10);
+      }
+
+      // Minimal ISO 8601 duration parser for common climate period types.
+      function parseDuration(iso) {
+        const m = iso.match(/^P(?:T(\d+)H|(\d+)D|(\d+)M|(\d+)Y)$/);
+        if (!m) return null;
+        if (m[1]) return parseInt(m[1]) * 3_600_000; // PT#H
+        if (m[2]) return parseInt(m[2]) * 86_400_000; // P#D
+        if (m[3]) return parseInt(m[3]) * 30 * 86_400_000; // P#M (approximation)
+        if (m[4]) return parseInt(m[4]) * 365 * 86_400_000; // P#Y (approximation)
+        return null;
+      }
+
+      const MAP_UNAVAILABLE_MESSAGE =
+        "Map rendering is unavailable in this browser session because WebGL could not be initialized. Dataset discovery still works.";
+
+      let map = null;
+      let mapUnavailable = false;
+      let activeLayer = null;
+      let timeSteps = [];
+      let timeDimKey = "time";
+
+      const selectEl = document.getElementById("dataset-select");
+      const timeSection = document.getElementById("time-section");
+      const timeSlider = document.getElementById("time-slider");
+      const timeValueEl = document.getElementById("time-value");
+      const timeCountEl = document.getElementById("time-count");
+      const datasetMeta = document.getElementById("dataset-meta");
+      const metaSource = document.getElementById("meta-source");
+      const metaUnits = document.getElementById("meta-units");
+      const legendEl = document.getElementById("legend");
+      const legendBar = document.getElementById("legend-bar");
+      const legendMin = document.getElementById("legend-min");
+      const legendMax = document.getElementById("legend-max");
+      const legendUnits = document.getElementById("legend-units");
+      const statusEl = document.getElementById("status");
+
+      function updateLegend(cm, clim, units) {
+        const stops = Array.from(
+          { length: 32 },
+          (_, i) => cm[Math.round((i * (cm.length - 1)) / 31)]
+        );
+        legendBar.style.background = `linear-gradient(to right, ${stops.join(", ")})`;
+        legendMin.textContent = clim[0];
+        legendMax.textContent = clim[1];
+        legendUnits.textContent = units ? `(${units})` : "";
+        legendEl.classList.remove("hidden");
+      }
+
+      function setStatus(msg, isError = false) {
+        statusEl.textContent = msg;
+        statusEl.className = isError ? "status error" : "status";
+      }
+
+      function initMap() {
+        try {
+          map = new maplibregl.Map({
+            container: "map",
+            style: "https://tiles.openfreemap.org/styles/positron",
+            center: [20, 20],
+            zoom: 1.5,
+            projection: { type: "globe" },
+            fitBoundsOptions: { padding: 40 },
+            attributionControl: { compact: true },
+          });
+        } catch (err) {
+          mapUnavailable = true;
+          setStatus(MAP_UNAVAILABLE_MESSAGE, true);
+          return;
+        }
+
+        map.on("load", () => {
+          map.setProjection({ type: "globe" });
+          fitToExtent();
+        });
+
+        map.on("error", (event) => {
+          const message = event?.error?.message ?? "";
+          if (message.toLowerCase().includes("webgl")) {
+            mapUnavailable = true;
+            setStatus(MAP_UNAVAILABLE_MESSAGE, true);
+          }
+        });
+      }
+
+      async function fitToExtent() {
+        if (!map || mapUnavailable) return;
+        try {
+          const res = await fetch("{{ base }}/extent");
+          if (!res.ok) return;
+          const extent = await res.json();
+          const [xmin, ymin, xmax, ymax] = extent.bbox;
+          map.fitBounds([[xmin, ymin], [xmax, ymax]], { padding: 40, maxZoom: 10 });
+        } catch {}
+      }
+
+      async function loadCatalog() {
+        try {
+          const res = await fetch("{{ base }}/collections");
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const body = await res.json();
+          const collections = body.collections ?? [];
+          if (collections.length === 0) {
+            setStatus(
+              "No published datasets found. Ingest and publish a dataset first."
+            );
+            return;
+          }
+          for (const col of collections) {
+            const href = `{{ base }}/collections/${col.id}`;
+            const opt = document.createElement("option");
+            opt.value = href;
+            opt.textContent = col.title ?? col.id;
+            selectEl.appendChild(opt);
+          }
+          setStatus(
+            mapUnavailable
+              ? MAP_UNAVAILABLE_MESSAGE
+              : "Select a dataset to visualise it on the map.",
+            mapUnavailable
+          );
+        } catch (err) {
+          setStatus(`Failed to load catalog: ${err.message}`, true);
+        }
+      }
+
+      async function loadDataset(href) {
+        if (!map || mapUnavailable) {
+          setStatus(MAP_UNAVAILABLE_MESSAGE, true);
+          return;
+        }
+        setStatus("Loading...");
+        clearTimeout(_selectorDebounce);
+        if (activeLayer) {
+          try {
+            map.removeLayer("zarr-layer");
+          } catch {}
+          activeLayer = null;
+        }
+        timeSection.classList.add("hidden");
+        datasetMeta.classList.add("hidden");
+        legendEl.classList.add("hidden");
+
+        let collection;
+        try {
+          const res = await fetch(href);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          collection = await res.json();
+        } catch (err) {
+          setStatus(`Failed to load collection: ${err.message}`, true);
+          return;
+        }
+
+        const renders = collection.renders?.default ?? {};
+        const zarr = collection.assets?.zarr;
+        if (!zarr?.href) {
+          setStatus("No Zarr asset found in this collection.");
+          return;
+        }
+
+        const clim = renders.rescale?.[0] ?? [0, 100];
+        const colormapName = renders.colormap_name ?? "viridis";
+        const fillValue = renders.nodata ?? null;
+        const variable =
+          renders["open_climate_service:variable"] ??
+          Object.keys(collection["cube:variables"] ?? {})[0] ??
+          "data";
+
+        const dimensions = collection["cube:dimensions"] ?? {};
+        timeDimKey = getTimeDimKey(dimensions);
+        timeSteps = buildTimeSteps(dimensions);
+
+        // For projected-CRS stores, pass crs + proj4 string so ZarrLayer
+        // reprojects natively instead of treating coordinates as WGS84 degrees.
+        const nativeCrs = collection["proj:code"] ?? "EPSG:4326";
+        const WGS84 = new Set(["EPSG:4326", "OGC:CRS84", "CRS84"]);
+        const isWgs84 = WGS84.has(nativeCrs.toUpperCase());
+        let proj4String = null;
+        if (!isWgs84) {
+          try {
+            const match = nativeCrs.match(/(\d+)$/);
+            const epsgId = match?.[1];
+            if (epsgId) {
+              const p4res = await fetch(`https://epsg.io/${epsgId}.proj4`);
+              if (p4res.ok) proj4String = (await p4res.text()).trim();
+              else console.warn(`[map] Could not fetch proj4 for ${nativeCrs} (HTTP ${p4res.status})`);
+            } else {
+              console.warn(`[map] Cannot extract EPSG id from CRS "${nativeCrs}" — rendering may be incorrect`);
+            }
+          } catch (err) {
+            console.warn(`[map] Failed to fetch proj4 string for "${nativeCrs}":`, err);
+          }
+        }
+
+        let cm;
+        try {
+          cm = buildColormap(colormapName);
+          const zarrVersion = zarr["zarr:zarr_format"] ?? null;
+          const selector =
+            timeStepCount() > 0 ? { [timeDimKey]: 0 } : {};
+          activeLayer = new ZarrLayer({
+            id: "zarr-layer",
+            source: zarr.href,
+            variable,
+            clim,
+            colormap: cm,
+            opacity: 1,
+            selector,
+            ...(zarrVersion !== null && { zarrVersion }),
+            ...(fillValue !== null && { fillValue }),
+            ...(!isWgs84 && { crs: nativeCrs }),
+            ...(proj4String !== null && { proj4: proj4String }),
+          });
+          map.addLayer(activeLayer);
+          for (const layer of map.getStyle().layers) {
+            if ((layer.type === "line" && layer.id.startsWith("boundary")) || layer.type === "symbol") {
+              map.moveLayer(layer.id);
+            }
+          }
+        } catch (err) {
+          setStatus(`Failed to create layer: ${err.message}`, true);
+          return;
+        }
+
+
+        // Time slider.
+        if (timeStepCount() > 1) {
+          timeSlider.max = timeStepCount() - 1;
+          timeSlider.value = 0;
+          timeValueEl.textContent = timeStepAt(0);
+          timeCountEl.textContent = `1 / ${timeStepCount()}`;
+          timeSection.classList.remove("hidden");
+        }
+
+        // Metadata strip.
+        const source = collection.keywords?.find(
+          (k) =>
+            k !== "zarr" &&
+            k !== "stac" &&
+            k !== variable &&
+            k !== collection.id
+        );
+        const units =
+          renders["open_climate_service:units"] ??
+          collection["cube:variables"]?.[variable]?.unit ??
+          "";
+        metaSource.textContent = source ?? "—";
+        metaUnits.textContent = units || "—";
+        datasetMeta.classList.remove("hidden");
+
+        updateLegend(cm, clim, units);
+
+        setStatus("");
+      }
+
+      selectEl.addEventListener("change", (e) => {
+        if (e.target.value) loadDataset(e.target.value);
+      });
+
+      let _selectorDebounce = null;
+      timeSlider.addEventListener("input", (e) => {
+        const i = parseInt(e.target.value, 10);
+        timeValueEl.textContent = timeStepAt(i) ?? "—";
+        timeCountEl.textContent = `${i + 1} / ${timeStepCount()}`;
+        const layer = activeLayer;
+        const dimKey = timeDimKey;
+        clearTimeout(_selectorDebounce);
+        _selectorDebounce = setTimeout(() => {
+          layer?.setSelector({ [dimKey]: i });
+        }, 150);
+      });
+
+      initMap();
+      loadCatalog();
+    </script>
+  </body>
+</html>

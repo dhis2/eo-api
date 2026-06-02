@@ -1,10 +1,10 @@
-# DHIS2 Climate API
+# Open Climate Service
 
-Agent context for the `climate-api` repository. Provider-agnostic — intended to be readable by any AI coding assistant.
+Agent context for the `open-climate-service` repository. Provider-agnostic — intended to be readable by any AI coding assistant.
 
 ## Project overview
 
-The DHIS2 Climate API is a FastAPI-based REST API that downloads, processes, and serves climate and Earth Observation data as GeoZarr stores.
+The Open Climate Service is a FastAPI-based REST API that downloads, processes, and serves climate and Earth Observation data as GeoZarr stores.
 
 Key concepts:
 
@@ -16,7 +16,7 @@ Key concepts:
 ## Repository layout
 
 ```
-climate_api/
+open_climate_service/
   data_manager/     # download and zarr build (downloader.py)
   data_accessor/    # open zarr / netcdf for read (accessor.py)
   data_registry/    # dataset template YAML loading

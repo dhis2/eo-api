@@ -1,6 +1,10 @@
 import pytest
 
-from climate_api.shared.time import datetime_to_period_string, normalize_period_string, parse_period_string_to_datetime
+from open_climate_service.shared.time import (
+    datetime_to_period_string,
+    normalize_period_string,
+    parse_period_string_to_datetime,
+)
 
 
 def test_normalize_period_string_raises_targeted_monthly_error() -> None:

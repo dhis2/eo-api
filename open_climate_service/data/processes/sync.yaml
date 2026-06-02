@@ -1,0 +1,41 @@
+- id: sync
+  title: Dataset sync
+  description: Sync one managed dataset forward using the dataset template's declared sync policy.
+  version: "0.1.0"
+  expose: true
+  keywords:
+    - climate
+    - sync
+    - datasets
+  jobControlOptions:
+    - sync-execute
+    - async-execute
+  inputs:
+    dataset_id:
+      type: string
+      required: true
+      description: Stable managed dataset id to sync.
+    end:
+      type: string
+      required: false
+      description: Optional target end period. Defaults to today's UTC period for the dataset.
+    publish:
+      type: boolean
+      required: false
+      default: true
+      description: Publish the resulting synced artifact after execution.
+  outputs:
+    sync_id:
+      type: string
+      description: Identifier of the sync execution when a new artifact is materialized.
+    status:
+      type: string
+      description: Execution status for the synchronous response.
+    dataset:
+      type: object
+      description: Managed dataset summary after the sync operation.
+    sync_detail:
+      type: object
+      description: Sync planning and execution summary.
+  execution:
+    function: open_climate_service.ingestions.processes.execute_sync

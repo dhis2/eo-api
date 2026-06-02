@@ -1,0 +1,16 @@
+# Open Climate Service instance configuration.
+# Replace the values below with your country before deploying.
+# See docs/setup_guide.md for field descriptions.
+
+id: sierra-leone-climate-service   # unique identifier for this instance — used as the STAC catalog id
+name: Sierra Leone Climate Service   # human-readable name shown in the web UI (optional, defaults to "Open Climate Service")
+
+extent:
+  name: Sierra Leone
+  bbox: [-13.5, 6.9, -10.1, 10.0]
+  country_code: SLE
+
+data_dir: ./data   # required — directory for downloaded NetCDF files and Zarr stores
+
+# plugins_dir: ./plugins/   # optional — plugin root: YAML templates in plugins/datasets/, Python modules importable by dotted path
+# crs: EPSG:4326             # optional — CRS for stored GeoZarr files (default: EPSG:4326); use e.g. EPSG:25833 for UTM33

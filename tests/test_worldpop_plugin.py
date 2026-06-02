@@ -3,7 +3,7 @@ import asyncio
 import pytest
 import xarray as xr
 
-from climate_api.streaming.plugins.worldpop import WorldPopYearlyPlugin, _resolve_variant
+from open_climate_service.streaming.plugins.worldpop import WorldPopYearlyPlugin, _resolve_variant
 
 
 def test_worldpop_plugin_periods_enumerates_years() -> None:

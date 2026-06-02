@@ -1,0 +1,59 @@
+- id: resample
+  title: Temporal resampling
+  description: Aggregate a source dataset to a coarser temporal resolution using pandas frequency aliases (e.g. 1D, W-MON, MS).
+  version: "0.1.0"
+  expose: true
+  keywords:
+    - climate
+    - derived-data
+    - resampling
+  jobControlOptions:
+    - sync-execute
+    - async-execute
+  inputs:
+    source_dataset_id:
+      type: string
+      required: true
+      description: Source managed dataset id to resample.
+    frequency:
+      type: string
+      required: true
+      description: Target temporal frequency alias such as 1D, W-MON, or MS.
+    method:
+      type: string
+      required: true
+      description: Aggregation method to apply during resampling.
+      enum:
+        - mean
+        - sum
+        - min
+        - max
+    start:
+      type: string
+      required: true
+      description: Start of the requested period range.
+    end:
+      type: string
+      required: false
+      description: End of the requested period range. Defaults to today's UTC date.
+    overwrite:
+      type: boolean
+      required: false
+      description: Rebuild an existing matching derived artifact instead of reusing it.
+    publish:
+      type: boolean
+      required: false
+      default: true
+      description: Publish the resulting artifact after materialization.
+  outputs:
+    artifact_id:
+      type: string
+      description: Identifier of the stored derived artifact.
+    status:
+      type: string
+      description: Execution status for the synchronous response.
+    dataset:
+      type: object
+      description: Managed dataset summary for the derived output.
+  execution:
+    function: open_climate_service.processing.services.execute_resample

@@ -9,8 +9,8 @@ import pytest
 import xarray as xr
 from fastapi.testclient import TestClient
 
-from climate_api.ingestions import services as ingestion_services
-from climate_api.ingestions.schemas import (
+from open_climate_service.ingestions import services as ingestion_services
+from open_climate_service.ingestions.schemas import (
     ArtifactCoverage,
     ArtifactFormat,
     ArtifactPublication,
@@ -20,8 +20,8 @@ from climate_api.ingestions.schemas import (
     CoverageTemporal,
     PublicationStatus,
 )
-from climate_api.openeo import collections as openeo_collections
-from climate_api.stac import services as stac_services
+from open_climate_service.openeo import collections as openeo_collections
+from open_climate_service.stac import services as stac_services
 
 
 @pytest.fixture(autouse=True)
@@ -271,7 +271,7 @@ def test_collections_logs_skipped_dataset_failures(client: TestClient, monkeypat
 
 
 def test_collection_uses_configured_base_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CLIMATE_API_BASE_URL", "https://climate.example.org")
+    monkeypatch.setenv("CLIMATE_SERVICE_BASE_URL", "https://climate.example.org")
     monkeypatch.setattr(
         ingestion_services,
         "list_artifacts",

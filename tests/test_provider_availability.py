@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from climate_api.providers import availability
+from open_climate_service.providers import availability
 
 
 def test_chirps3_daily_latest_available_uses_previous_complete_month_after_threshold(

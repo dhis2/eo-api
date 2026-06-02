@@ -1,6 +1,6 @@
 # Instance guide
 
-An **instance repository** packages the configuration and plugins for a specific operational context — a country, a region, or an organisation — and references climate-api as a versioned dependency rather than including it directly.
+An **instance repository** packages the configuration and plugins for a specific operational context — a country, a region, or an organisation — and references open-climate-service as a versioned dependency rather than including it directly.
 
 This keeps the core service separate from context-specific concerns, and means your configuration lives in its own repository that can be versioned, shared, and deployed independently.
 
@@ -8,12 +8,12 @@ This keeps the core service separate from context-specific concerns, and means y
 
 Use an instance repository when you:
 
-- Want to add custom datasets not included in climate-api (e.g. national meteorological data)
-- Want to track your configuration in version control separately from the climate-api codebase
-- Want to pin your service to a specific version of climate-api and upgrade deliberately
+- Want to add custom datasets not included in open-climate-service (e.g. national meteorological data)
+- Want to track your configuration in version control separately from the open-climate-service codebase
+- Want to pin your service to a specific version of open-climate-service and upgrade deliberately
 - Want to share your configuration with others, or deploy across multiple environments
 
-If you only need to run climate-api with built-in datasets and no custom plugins, the [setup guide](setup_guide.md) (cloning climate-api directly) is simpler.
+If you only need to run climate-service with built-in datasets and no custom plugins, the [setup guide](setup_guide.md) (cloning open-climate-service directly) is simpler.
 
 ---
 
@@ -21,10 +21,10 @@ If you only need to run climate-api with built-in datasets and no custom plugins
 
 ```
 my-climate-service/
-├── pyproject.toml          # declares climate-api as a dependency
+├── pyproject.toml          # declares open-climate-service as a dependency
 ├── uv.lock                 # locked dependency tree for reproducible installs
 ├── Makefile                # install / run shortcuts
-├── climate-api.yaml        # instance config: extent, CRS, data_dir, plugins_dir
+├── climate-service.yaml        # instance config: extent, CRS, data_dir, plugins_dir
 ├── .env.example            # committed template for environment variables
 ├── .gitignore
 ├── plugins/
@@ -51,7 +51,7 @@ cd my-climate-service
 git init
 ```
 
-## Step 2: Declare climate-api as a dependency
+## Step 2: Declare open-climate-service as a dependency
 
 Create `pyproject.toml`:
 
@@ -62,17 +62,17 @@ version = "0.1.0"
 requires-python = ">=3.13"
 description = "Open Climate Service instance for [context]"
 dependencies = [
-    "climate-api @ git+https://github.com/dhis2/climate-api.git",
+    "open-climate-service @ git+https://github.com/dhis2/open-climate-service.git",
 ]
 
 [tool.uv]
 package = false
 
 [tool.uv.sources]
-climate-api = { git = "https://github.com/dhis2/climate-api.git", branch = "main" }
+open-climate-service = { git = "https://github.com/dhis2/open-climate-service.git", branch = "main" }
 ```
 
-The `package = false` setting tells uv that this repository is not itself a Python package — it only declares dependencies. The `[tool.uv.sources]` block pins climate-api to the `main` branch on GitHub. To pin to a specific release tag instead, use `rev = "v0.2.0"` (once releases are published on PyPI the `git+` source can be replaced with a plain version constraint).
+The `package = false` setting tells uv that this repository is not itself a Python package — it only declares dependencies. The `[tool.uv.sources]` block pins open-climate-service to the `main` branch on GitHub. To pin to a specific tag or commit instead, use `rev = "v0.2.0"`. Installing directly from git is the intended path for now — the package name is reserved on PyPI but no stable releases have been published there yet.
 
 Install dependencies:
 
@@ -95,12 +95,12 @@ install: ## Install dependencies with uv
 
 run: ## Start the API with uvicorn
 	set -a && . ./.env && set +a && \
-		uv run uvicorn climate_api.main:app --reload --reload-include "*.yaml" --reload-include "*.yml" --port 8000
+		uv run uvicorn open_climate_service.main:app --reload --reload-include "*.yaml" --reload-include "*.yml" --port 8000
 ```
 
 ## Step 4: Configure the instance
 
-Create `climate-api.yaml`:
+Create `climate-service.yaml`:
 
 ```yaml
 extent:
@@ -127,13 +127,13 @@ To find the bounding box for a region, [bboxfinder.com](http://bboxfinder.com) i
 Create `.env`:
 
 ```bash
-CLIMATE_API_CONFIG=/absolute/path/to/my-climate-service/climate-api.yaml
+CLIMATE_SERVICE_CONFIG=/absolute/path/to/my-climate-service/climate-service.yaml
 ```
 
 And a committed `.env.example` as a template:
 
 ```bash
-CLIMATE_API_CONFIG=/path/to/my-climate-service/climate-api.yaml
+CLIMATE_SERVICE_CONFIG=/path/to/my-climate-service/climate-service.yaml
 ```
 
 ## Step 5: Add a .gitignore
@@ -181,12 +181,12 @@ See [Extensibility](extensibility.md) for the full specification of each extensi
 
 ---
 
-## Keeping climate-api up to date
+## Keeping open-climate-service up to date
 
 To pull the latest changes from the `main` branch:
 
 ```bash
-uv lock --upgrade-package climate-api
+uv lock --upgrade-package open-climate-service
 uv sync
 ```
 
@@ -196,7 +196,7 @@ To pin to a specific commit for a more controlled upgrade:
 
 ```toml
 [tool.uv.sources]
-climate-api = { git = "https://github.com/dhis2/climate-api.git", rev = "abc1234" }
+open-climate-service = { git = "https://github.com/dhis2/open-climate-service.git", rev = "abc1234" }
 ```
 
 ---

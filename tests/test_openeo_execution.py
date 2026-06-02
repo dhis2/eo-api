@@ -11,16 +11,16 @@ import pytest
 import xarray as xr
 from fastapi.testclient import TestClient
 
-from climate_api.openeo.execution import (
+from open_climate_service.openeo.execution import (
     _augment_with_udps,
     _bbox_to_dict,
     _RegistryOverlay,
     _temporal_to_list,
     run_process_graph,
 )
-from climate_api.openeo.jobs import OpenEOJobService, _result_assets
-from climate_api.openeo.schemas import OpenEOJobCreate, OpenEOJobRecord, OpenEOJobStatus
-from climate_api.shared.time import utc_now
+from open_climate_service.openeo.jobs import OpenEOJobService, _result_assets
+from open_climate_service.openeo.schemas import OpenEOJobCreate, OpenEOJobRecord, OpenEOJobStatus
+from open_climate_service.shared.time import utc_now
 
 # ---------------------------------------------------------------------------
 # _bbox_to_dict
@@ -113,7 +113,7 @@ def test_registry_overlay_tuple_key_uses_name() -> None:
 
 
 def test_augment_with_udps_returns_base_when_no_udps(monkeypatch: pytest.MonkeyPatch) -> None:
-    import climate_api.openeo.udps as udp_module
+    import open_climate_service.openeo.udps as udp_module
 
     monkeypatch.setattr(udp_module, "list_udps", lambda: MagicMock(processes=[]))
     base = object()
@@ -122,7 +122,7 @@ def test_augment_with_udps_returns_base_when_no_udps(monkeypatch: pytest.MonkeyP
 
 
 def test_augment_with_udps_registers_udp(monkeypatch: pytest.MonkeyPatch) -> None:
-    import climate_api.openeo.udps as udp_module
+    import open_climate_service.openeo.udps as udp_module
 
     udp = MagicMock()
     udp.id = "my_udp"
@@ -148,7 +148,7 @@ def test_augment_with_udps_registers_udp(monkeypatch: pytest.MonkeyPatch) -> Non
 
 @pytest.fixture()
 def job_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> OpenEOJobService:
-    monkeypatch.setattr("climate_api.openeo.jobs._JOBS_DIR", tmp_path)
+    monkeypatch.setattr("open_climate_service.openeo.jobs._JOBS_DIR", tmp_path)
     return OpenEOJobService(max_workers=1)
 
 
@@ -199,7 +199,7 @@ def test_openeo_job_service_create_execute_and_get_results(
     job_service: OpenEOJobService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "climate_api.openeo.execution.run_process_graph",
+        "open_climate_service.openeo.execution.run_process_graph",
         lambda process: {"ignored": True},
     )
     monkeypatch.setattr(
@@ -319,7 +319,7 @@ def test_run_process_graph_keeps_runtime_failures_as_500(monkeypatch: pytest.Mon
 
 def test_result_route_rejects_synchronous_zarr_datacube(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "climate_api.openeo.execution.run_process_graph",
+        "open_climate_service.openeo.execution.run_process_graph",
         lambda process, request=None: xr.Dataset(
             {"temperature": xr.DataArray(np.ones((2, 2), dtype=np.float32), dims=["y", "x"])}
         ),

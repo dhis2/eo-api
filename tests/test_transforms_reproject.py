@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from climate_api.transforms.reproject import reproject_to_instance_crs
+from open_climate_service.transforms.reproject import reproject_to_instance_crs
 
 _DATASET: dict[str, Any] = {"id": "test", "variable": "value"}
 
@@ -27,7 +27,7 @@ def _make_wgs84_dataset() -> xr.Dataset:
 
 def test_noop_when_instance_crs_matches_source(monkeypatch: pytest.MonkeyPatch) -> None:
     """No reprojection when the instance CRS equals the source CRS."""
-    monkeypatch.delenv("CLIMATE_API_CONFIG", raising=False)
+    monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
     ds = _make_wgs84_dataset()
     result = reproject_to_instance_crs(ds, _DATASET, source_crs="EPSG:4326")
     # Dataset returned unchanged — same object, no reprojection called
@@ -36,7 +36,7 @@ def test_noop_when_instance_crs_matches_source(monkeypatch: pytest.MonkeyPatch) 
 
 def test_noop_returns_dataset_with_original_coords(monkeypatch: pytest.MonkeyPatch) -> None:
     """Coordinates remain in degrees when no reprojection is needed."""
-    monkeypatch.delenv("CLIMATE_API_CONFIG", raising=False)
+    monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
     ds = _make_wgs84_dataset()
     result = reproject_to_instance_crs(ds, _DATASET, source_crs="EPSG:4326")
     assert float(result.x.max()) == pytest.approx(13.0)
@@ -45,9 +45,9 @@ def test_noop_returns_dataset_with_original_coords(monkeypatch: pytest.MonkeyPat
 
 def test_calls_reproject_with_target_crs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """When instance CRS differs from source, rio.reproject is called with the target CRS."""
-    config_file = tmp_path / "climate-api.yaml"
+    config_file = tmp_path / "climate-service.yaml"
     config_file.write_text("data_dir: ./data\ncrs: EPSG:25833\n", encoding="utf-8")
-    monkeypatch.setenv("CLIMATE_API_CONFIG", str(config_file))
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
 
     ds = _make_wgs84_dataset()
     reprojected_ds = _make_wgs84_dataset()
@@ -68,9 +68,9 @@ def test_calls_reproject_with_target_crs(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
 def test_skips_reproject_when_source_equals_target(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """When source_crs is already the instance CRS, reproject is never called."""
-    config_file = tmp_path / "climate-api.yaml"
+    config_file = tmp_path / "climate-service.yaml"
     config_file.write_text("data_dir: ./data\ncrs: EPSG:25833\n", encoding="utf-8")
-    monkeypatch.setenv("CLIMATE_API_CONFIG", str(config_file))
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
 
     ds = _make_wgs84_dataset()
     result = reproject_to_instance_crs(ds, _DATASET, source_crs="EPSG:25833")

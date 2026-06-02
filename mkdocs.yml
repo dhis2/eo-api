@@ -1,8 +1,8 @@
 site_name: Open Climate Service
 site_description: Climate data tailored for your country, ready for climate-smart decisions
-site_url: https://dhis2.github.io/climate-api/
-repo_url: https://github.com/dhis2/climate-api
-repo_name: dhis2/climate-api
+site_url: https://dhis2.github.io/climate-service/
+repo_url: https://github.com/dhis2/open-climate-service
+repo_name: dhis2/open-climate-service
 docs_dir: docs
 edit_uri: edit/main/docs/
 

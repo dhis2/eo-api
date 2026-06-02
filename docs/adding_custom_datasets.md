@@ -1,8 +1,8 @@
 # Adding custom datasets
 
-This guide explains how to add a new dataset source to your Climate API instance — for example a national meteorological service, a regional satellite product, or a custom model output.
+This guide explains how to add a new dataset source to your Open Climate Service instance — for example a national meteorological service, a regional satellite product, or a custom model output.
 
-The built-in dataset templates (CHIRPS3, ERA5-Land, WorldPop) ship as package data. Custom datasets are layered on top by pointing `plugins_dir` in your `climate-api.yaml` at a plugins directory. That directory serves two purposes: YAML dataset templates go in its `datasets/` subfolder, and Python modules placed directly under it are importable by their dotted path (e.g. `mypackage.sources.download`) without installing them as a package.
+The built-in dataset templates (CHIRPS3, ERA5-Land, WorldPop) ship as package data. Custom datasets are layered on top by pointing `plugins_dir` in your `climate-service.yaml` at a plugins directory. That directory serves two purposes: YAML dataset templates go in its `datasets/` subfolder, and Python modules placed directly under it are importable by their dotted path (e.g. `mypackage.sources.download`) without installing them as a package.
 
 ## Overview
 
@@ -54,7 +54,7 @@ Any extra keyword arguments from `ingestion.default_params` in the YAML template
 
 The API normalises coordinate names at write time: `valid_time` → `time`, `lat`/`latitude` → `y`, `lon`/`longitude` → `x`. Using the canonical names in your output avoids any ambiguity, but upstream names are handled automatically.
 
-Install your package in the same environment as the Climate API:
+Install your package in the same environment as the Open Climate Service:
 
 ```bash
 pip install ./mypackage
@@ -111,13 +111,13 @@ sync:
   kind: temporal
   execution: append
   availability:
-    latest_available_function: climate_api.providers.availability.lagged_latest_available
+    latest_available_function: open_climate_service.providers.availability.lagged_latest_available
     lag_hours: 48
 ```
 
 | Field | Description |
 | ----- | ----------- |
-| `latest_available_function` | Dotted path to a built-in availability function in `climate_api.providers.availability` |
+| `latest_available_function` | Dotted path to a built-in availability function in `open_climate_service.providers.availability` |
 | `lag_hours` / `lag_days` | Data is delayed by this many hours or days |
 | `allow_future` | Allow requesting future dates (e.g. forecasts or projections). Default: `false` |
 
@@ -167,7 +167,7 @@ append. Rechunking, pyramid behavior, and full migration away from
 
 ```yaml
 transforms:
-  - climate_api.transforms.kelvin_to_celsius
+  - open_climate_service.transforms.kelvin_to_celsius
   - mypackage.transforms.my_custom_transform
 ```
 
@@ -203,7 +203,7 @@ If an ingest request's bounding box has no overlap with `extents.spatial.bbox`, 
 
 ## Step 3: Point the instance at your plugins directory
 
-Add `plugins_dir` to your `climate-api.yaml` and place your YAML file in the `datasets/` subfolder:
+Add `plugins_dir` to your `climate-service.yaml` and place your YAML file in the `datasets/` subfolder:
 
 ```
 plugins/
@@ -224,7 +224,7 @@ All `*.yaml` files in `plugins_dir/datasets/` are loaded and merged with the bui
 
 ## Step 4: Ingest and publish
 
-Once the API is running with `CLIMATE_API_CONFIG` pointing to your updated config, ingest as usual:
+Once the API is running with `CLIMATE_SERVICE_CONFIG` pointing to your updated config, ingest as usual:
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/ingestions \

@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from climate_api.ingestions import services, sync_engine
-from climate_api.ingestions.schemas import (
+from open_climate_service.ingestions import services, sync_engine
+from open_climate_service.ingestions.schemas import (
     ArtifactCoverage,
     ArtifactFormat,
     ArtifactPublication,
@@ -236,7 +236,7 @@ def test_sync_dataset_append_policy_uses_store_based_append_for_plugin_backed_da
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
     )
 
@@ -285,7 +285,7 @@ def test_plan_sync_for_plugin_backed_icechunk_uses_committed_store_state(
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -356,7 +356,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_without
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -396,7 +396,7 @@ def test_plan_sync_for_plugin_backed_icechunk_skips_non_local_store_path(
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -441,7 +441,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_for_win
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -487,7 +487,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_for_fil
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -528,7 +528,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_when_st
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -558,7 +558,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_when_co
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -592,7 +592,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_for_unt
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -626,7 +626,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_for_rel
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -662,7 +662,7 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_when_co
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
         latest_artifact=latest,
         requested_end="2026-01-31",
@@ -692,7 +692,7 @@ def test_sync_dataset_append_policy_falls_back_for_plugin_backed_non_icechunk_ar
             "id": "chirps3_precipitation_daily",
             "period_type": "daily",
             "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
     )
 
@@ -1091,7 +1091,9 @@ def test_plan_sync_marks_request_target_clamped_by_availability(monkeypatch: pyt
                 "kind": "temporal",
                 "execution": "append",
                 "availability": {
-                    "latest_available_function": "climate_api.providers.availability.chirps3_daily_latest_available"
+                    "latest_available_function": (
+                        "open_climate_service.providers.availability.chirps3_daily_latest_available"
+                    )
                 },
             },
             "ingestion": {},

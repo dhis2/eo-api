@@ -1,7 +1,7 @@
 import numpy as np
 import xarray as xr
 
-from climate_api.transforms import kelvin_to_celsius, metres_to_mm
+from open_climate_service.transforms import kelvin_to_celsius, metres_to_mm
 
 
 def _ds(varname: str, values: list[float], time_steps: int = 1) -> xr.Dataset:
@@ -45,23 +45,23 @@ class TestRunTransformsPipeline:
         ds = _ds("t2m", [273.15])
         dataset = {
             "variable": "t2m",
-            "transforms": ["climate_api.transforms.kelvin_to_celsius"],
+            "transforms": ["open_climate_service.transforms.kelvin_to_celsius"],
         }
-        from climate_api.data_manager.services.downloader import _run_transforms
+        from open_climate_service.data_manager.services.downloader import _run_transforms
 
         result = _run_transforms(ds, dataset)
         np.testing.assert_allclose(result["t2m"].values, [0.0])
 
     def test_empty_transforms_is_noop(self):
         ds = _ds("x", [1.0, 2.0])
-        from climate_api.data_manager.services.downloader import _run_transforms
+        from open_climate_service.data_manager.services.downloader import _run_transforms
 
         result = _run_transforms(ds, {"variable": "x", "transforms": []})
         np.testing.assert_array_equal(result["x"].values, ds["x"].values)
 
     def test_no_transforms_key_is_noop(self):
         ds = _ds("x", [1.0])
-        from climate_api.data_manager.services.downloader import _run_transforms
+        from open_climate_service.data_manager.services.downloader import _run_transforms
 
         result = _run_transforms(ds, {"variable": "x"})
         np.testing.assert_array_equal(result["x"].values, ds["x"].values)
@@ -70,9 +70,9 @@ class TestRunTransformsPipeline:
         ds = _ds("t2m", [273.15])
         dataset = {
             "variable": "t2m",
-            "transforms": [{"function": "climate_api.transforms.kelvin_to_celsius"}],
+            "transforms": [{"function": "open_climate_service.transforms.kelvin_to_celsius"}],
         }
-        from climate_api.data_manager.services.downloader import _run_transforms
+        from open_climate_service.data_manager.services.downloader import _run_transforms
 
         result = _run_transforms(ds, dataset)
         np.testing.assert_allclose(result["t2m"].values, [0.0])

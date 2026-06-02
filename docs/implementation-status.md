@@ -15,8 +15,8 @@ It is intended to answer:
 
 The main branch now centers on one narrow vertical slice:
 
-1. define dataset templates in the Climate API registry
-2. define configured extents for the Climate API instance
+1. define dataset templates in the Open Climate Service registry
+2. define configured extents for the Open Climate Service instance
 3. ingest data into a managed dataset for one dataset template plus one extent
 4. publish that managed dataset through `pygeoapi` under `/ogcapi`
 5. expose native metadata under `/datasets`, STAC discovery under `/stac`, and raw Zarr access under `/zarr`
@@ -34,26 +34,26 @@ The public surface is intentionally small:
 
 ## Main Code References
 
-- [src/climate_api/main.py](../src/climate_api/main.py)
+- [open_climate_service/main.py](../open_climate_service/main.py)
   - app assembly and router mounting
-- [src/climate_api/ingestions/routes.py](../src/climate_api/ingestions/routes.py)
+- [open_climate_service/ingestions/routes.py](../open_climate_service/ingestions/routes.py)
   - ingestion, dataset, zarr, and sync routes
-- [src/climate_api/ingestions/services.py](../src/climate_api/ingestions/services.py)
+- [open_climate_service/ingestions/services.py](../open_climate_service/ingestions/services.py)
   - internal artifact persistence, dataset grouping, sync service wiring, Zarr browsing
-- [src/climate_api/ingestions/sync_engine.py](../src/climate_api/ingestions/sync_engine.py)
+- [open_climate_service/ingestions/sync_engine.py](../open_climate_service/ingestions/sync_engine.py)
   - sync planning and execution engine
-- [src/climate_api/ingestions/schemas.py](../src/climate_api/ingestions/schemas.py)
+- [open_climate_service/ingestions/schemas.py](../open_climate_service/ingestions/schemas.py)
   - public ingestion, dataset, and sync contracts
-- [src/climate_api/providers/availability.py](../src/climate_api/providers/availability.py)
+- [open_climate_service/providers/availability.py](../open_climate_service/providers/availability.py)
   - provider-specific sync availability policies
-- [src/climate_api/extents/routes.py](../src/climate_api/extents/routes.py)
+- [open_climate_service/extents/routes.py](../open_climate_service/extents/routes.py)
   - extent discovery endpoint
-- [src/climate_api/extents/services.py](../src/climate_api/extents/services.py)
-  - extent registry backed by CLIMATE_API_CONFIG
-- [src/climate_api/publications/services.py](../src/climate_api/publications/services.py)
+- [open_climate_service/extents/services.py](../open_climate_service/extents/services.py)
+  - extent registry backed by CLIMATE_SERVICE_CONFIG
+- [open_climate_service/publications/services.py](../open_climate_service/publications/services.py)
   - pygeoapi publication and stable managed dataset id logic
-- `extent:` block in `climate-api.yaml` (CLIMATE_API_CONFIG)
-  - configured spatial extent for this Climate API instance
+- `extent:` block in `climate-service.yaml` (CLIMATE_SERVICE_CONFIG)
+  - configured spatial extent for this Open Climate Service instance
 
 ## What Was Achieved
 
@@ -71,7 +71,7 @@ The public surface is intentionally small:
 
 Raw `bbox` and `country_code` are no longer part of the public ingestion payload.
 
-The route resolves `extent_id` inside Climate API and then calls the downloader with concrete spatial inputs.
+The route resolves `extent_id` inside Open Climate Service and then calls the downloader with concrete spatial inputs.
 
 ### 2. Public ingestion responses now return datasets, not artifacts
 
@@ -149,7 +149,7 @@ The branch exposes a dedicated STAC surface under:
 
 Published Zarr-backed managed datasets appear there as one STAC Collection per dataset. The `zarr` asset points to the canonical native `/zarr/{dataset_id}` route.
 
-`xstac` derives Datacube metadata from the opened Zarr-backed dataset, while the Climate API service layer remains responsible for publication filtering, link construction, and Zarr asset metadata.
+`xstac` derives Datacube metadata from the opened Zarr-backed dataset, while the Open Climate Service service layer remains responsible for publication filtering, link construction, and Zarr asset metadata.
 
 Current STAC details:
 
@@ -210,14 +210,14 @@ Implemented sync behavior:
 ### Ingestion
 
 1. client submits `dataset_id`, `start`, optional `end`, and optional `extent_id`
-2. Climate API resolves the dataset template from the registry
-3. Climate API resolves `extent_id` to a concrete bbox or other configured spatial input
-4. Climate API checks for an existing matching internal artifact
-5. if needed, Climate API downloads the source data
-6. Climate API prefers Zarr materialization and falls back to NetCDF when needed
-7. Climate API computes realized coverage metadata
-8. Climate API stores an internal artifact record
-9. if `publish=true`, Climate API publishes the dataset through pygeoapi
+2. Open Climate Service resolves the dataset template from the registry
+3. Open Climate Service resolves `extent_id` to a concrete bbox or other configured spatial input
+4. Open Climate Service checks for an existing matching internal artifact
+5. if needed, Open Climate Service downloads the source data
+6. Open Climate Service prefers Zarr materialization and falls back to NetCDF when needed
+7. Open Climate Service computes realized coverage metadata
+8. Open Climate Service stores an internal artifact record
+9. if `publish=true`, Open Climate Service publishes the dataset through pygeoapi
 10. the route returns the public managed dataset view
 
 ### Dataset publication

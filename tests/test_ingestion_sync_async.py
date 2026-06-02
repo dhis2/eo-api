@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from climate_api.ingestions.schemas import IngestionResponse, SyncResponse
+from open_climate_service.ingestions.schemas import IngestionResponse, SyncResponse
 from tests.helpers import dataset_record
 
 
@@ -15,25 +15,25 @@ def test_post_ingestion_respond_async_returns_202_with_location(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "climate_api.ingestions.processes.registry_datasets.get_dataset",
+        "open_climate_service.ingestions.processes.registry_datasets.get_dataset",
         lambda dataset_id: {
             "id": dataset_id,
             "name": "CHIRPS3 precipitation",
             "variable": "precip",
             "period_type": "daily",
-            "ingestion": {"plugin": "climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
         },
     )
     monkeypatch.setattr(
-        "climate_api.ingestions.processes.get_extent_or_404",
+        "open_climate_service.ingestions.processes.get_extent_or_404",
         lambda: {"bbox": [1.0, 2.0, 3.0, 4.0], "country_code": "SLE"},
     )
     monkeypatch.setattr(
-        "climate_api.ingestions.processes.services.create_artifact",
+        "open_climate_service.ingestions.processes.services.create_artifact",
         lambda **kwargs: type("Artifact", (), {"artifact_id": "artifact-123"})(),
     )
     monkeypatch.setattr(
-        "climate_api.ingestions.processes.services.get_ingestion_or_404",
+        "open_climate_service.ingestions.processes.services.get_ingestion_or_404",
         lambda artifact_id: IngestionResponse(
             ingestion_id=artifact_id,
             status="completed",
@@ -65,19 +65,19 @@ def test_post_ingestion_without_prefer_header_returns_synchronous_response(
 ) -> None:
 
     monkeypatch.setattr(
-        "climate_api.ingestions.routes._get_dataset_or_404",
+        "open_climate_service.ingestions.routes._get_dataset_or_404",
         lambda dataset_id: {"id": dataset_id},
     )
     monkeypatch.setattr(
-        "climate_api.ingestions.routes.get_extent_or_404",
+        "open_climate_service.ingestions.routes.get_extent_or_404",
         lambda: {"bbox": [1.0, 2.0, 3.0, 4.0]},
     )
     monkeypatch.setattr(
-        "climate_api.ingestions.routes.services.create_artifact",
+        "open_climate_service.ingestions.routes.services.create_artifact",
         lambda **kwargs: type("Artifact", (), {"artifact_id": "artifact-sync"})(),
     )
     monkeypatch.setattr(
-        "climate_api.ingestions.routes.services.get_dataset_summary_for_artifact_or_404",
+        "open_climate_service.ingestions.routes.services.get_dataset_summary_for_artifact_or_404",
         lambda artifact_id: dataset_record("chirps3_precipitation_daily"),
     )
 
@@ -95,7 +95,7 @@ def test_post_ingestion_respond_async_rejects_unknown_dataset_immediately(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "climate_api.ingestions.routes._get_dataset_or_404",
+        "open_climate_service.ingestions.routes._get_dataset_or_404",
         lambda _dataset_id: (_ for _ in ()).throw(HTTPException(status_code=404, detail="Dataset not found")),
     )
 
@@ -114,7 +114,7 @@ def test_post_sync_respond_async_returns_202_with_location(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "climate_api.ingestions.routes.services.plan_sync_dataset",
+        "open_climate_service.ingestions.routes.services.plan_sync_dataset",
         lambda **_kwargs: {
             "source_dataset_id": "chirps3_precipitation_daily",
             "sync_kind": "temporal",
@@ -130,7 +130,7 @@ def test_post_sync_respond_async_returns_202_with_location(
         },
     )
     monkeypatch.setattr(
-        "climate_api.ingestions.processes.services.sync_dataset",
+        "open_climate_service.ingestions.processes.services.sync_dataset",
         lambda **kwargs: {
             "sync_id": "artifact-123",
             "status": "completed",
@@ -173,7 +173,7 @@ def test_post_sync_respond_async_rejects_unplannable_request_immediately(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "climate_api.ingestions.routes.services.plan_sync_dataset",
+        "open_climate_service.ingestions.routes.services.plan_sync_dataset",
         lambda **_kwargs: (_ for _ in ()).throw(HTTPException(status_code=400, detail="invalid end period")),
     )
 
@@ -192,7 +192,7 @@ def test_post_sync_without_prefer_header_returns_synchronous_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "climate_api.ingestions.routes.services.sync_dataset",
+        "open_climate_service.ingestions.routes.services.sync_dataset",
         lambda **kwargs: SyncResponse(
             sync_id=None,
             status="up_to_date",

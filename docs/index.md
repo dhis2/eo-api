@@ -1,6 +1,6 @@
 ---
 template: home.html
-title: Climate API
+title: Open Climate Service
 hide:
   - navigation
   - toc

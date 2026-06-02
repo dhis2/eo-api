@@ -20,7 +20,7 @@ All standards share a common core: JSON/HTML responses, OpenAPI-described endpoi
 
 [pygeoapi](https://pygeoapi.io) is a Python server that implements the OGC API standards listed above. It is the OGC Reference Implementation for OGC API - Features.
 
-In this project pygeoapi is mounted as a sub-application at `/ogcapi`. The integration is minimal -- a single re-export in `src/climate_api/routers/ogcapi.py`:
+In this project pygeoapi is mounted as a sub-application at `/ogcapi`. The integration is minimal -- a single re-export in `src/open_climate_service/routers/ogcapi.py`:
 
 ```python
 from pygeoapi.starlette_app import APP as pygeoapi_app
@@ -75,11 +75,11 @@ Service-level identification, contact details, and license. Supports multilingua
 metadata:
   identification:
     title:
-      en: DHIS2 Climate API
+      en: Open Climate Service
     description:
       en: OGC API compliant geospatial data API
   provider:
-    name: DHIS2 Climate API
+    name: Open Climate Service
     url: https://dhis2.org
   contact:
     name: DHIS2 Climate Team
@@ -118,7 +118,7 @@ The `type` field on a provider determines which OGC API standard the collection 
 | `feature`     | Features         | Vector data (points, lines, polygons). Backends include CSV, GeoJSON, PostGIS, Elasticsearch, and others. |
 | `coverage`    | Coverages        | Gridded / raster data. Backends include rasterio, xarray, and S3-hosted COGs.                             |
 | `map`         | Maps             | Rendered map images, typically proxied from an upstream WMS via `WMSFacade`.                              |
-| `process`     | Processes        | Server-side processing tasks. In Climate API, the native `/processes` surface is authoritative; pygeoapi process support is not the primary process runtime. |
+| `process`     | Processes        | Server-side processing tasks. In Open Climate Service, the native `/processes` surface is authoritative; pygeoapi process support is not the primary process runtime. |
 
 A single collection can have multiple providers (e.g. both `feature` and `tile` on the same resource).
 
@@ -199,7 +199,7 @@ NULL check combined with comparison:
 
 OGC API - Processes exposes server-side processing tasks. Each process defines typed inputs and outputs and can be executed synchronously or asynchronously via `POST`.
 
-For Climate API, the canonical process surface is now the native [`/processes`](processes.md) API. The `/ogcapi/processes` paths below describe the older pygeoapi-centered process surface and should not be treated as the primary entrypoint for current native process work.
+For Open Climate Service, the canonical process surface is now the native [`/processes`](processes.md) API. The `/ogcapi/processes` paths below describe the older pygeoapi-centered process surface and should not be treated as the primary entrypoint for current native process work.
 
 ### Available processes
 
@@ -502,7 +502,7 @@ In the YAML config the `name` field on a provider or processor identifies the pl
 
 ### Plugin directory layout
 
-Custom plugins live under `src/climate_api/routers/ogcapi/plugins/`, organized by type:
+Custom plugins live under `src/open_climate_service/routers/ogcapi/plugins/`, organized by type:
 
 ```
 plugins/
@@ -544,7 +544,7 @@ Reference it in the config by dotted path:
 ```yaml
 providers:
   - type: feature
-    name: climate_api.routers.ogcapi.plugins.providers.my_provider.MyProvider
+    name: open_climate_service.routers.ogcapi.plugins.providers.my_provider.MyProvider
     data: /path/to/data
 ```
 
@@ -581,7 +581,7 @@ resources:
   my-process:
     type: process
     processor:
-      name: climate_api.routers.ogcapi.plugins.processes.my_process.MyProcessor
+      name: open_climate_service.routers.ogcapi.plugins.processes.my_process.MyProcessor
 ```
 
 ## References

@@ -4,14 +4,14 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from climate_api.ingestions.schemas import DatasetRecord
-from climate_api.processing import services as processing_services
+from open_climate_service.ingestions.schemas import DatasetRecord
+from open_climate_service.processing import services as processing_services
 from tests.helpers import dataset_record
 
 
 def test_get_processes_omits_internal_only_processes(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "climate_api.processing.routes.process_registry.list_processes",
+        "open_climate_service.processing.routes.process_registry.list_processes",
         lambda: [
             {
                 "id": "public_process",
@@ -78,7 +78,7 @@ def test_get_unknown_process_detail_returns_404(client: TestClient) -> None:
 
 def test_get_internal_process_detail_returns_404(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "climate_api.processing.routes.process_registry.get_process",
+        "open_climate_service.processing.routes.process_registry.get_process",
         lambda process_id: {
             "id": process_id,
             "title": "Internal process",
@@ -110,7 +110,7 @@ def test_expose_false_yaml_fixture_is_hidden_from_catalog_and_routes(
 """,
         encoding="utf-8",
     )
-    monkeypatch.setattr("climate_api.data_registry.services.processes.CONFIGS_DIR", processes_subdir)
+    monkeypatch.setattr("open_climate_service.data_registry.services.processes.CONFIGS_DIR", processes_subdir)
 
     catalog_response = client.get("/processes")
     assert catalog_response.status_code == 200
@@ -189,7 +189,7 @@ def test_post_process_execution_rejects_async_when_process_is_sync_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "climate_api.processing.routes.process_registry.get_process",
+        "open_climate_service.processing.routes.process_registry.get_process",
         lambda process_id: {
             "id": process_id,
             "title": "Sync only process",
@@ -211,7 +211,7 @@ def test_post_process_execution_rejects_async_when_process_is_sync_only(
 
 def test_post_internal_process_execution_returns_404(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "climate_api.processing.routes.process_registry.get_process",
+        "open_climate_service.processing.routes.process_registry.get_process",
         lambda process_id: {
             "id": process_id,
             "title": "Internal process",
@@ -321,7 +321,7 @@ def test_post_process_execution_returns_500_for_invalid_execution_function(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "climate_api.processing.routes.process_registry.get_process",
+        "open_climate_service.processing.routes.process_registry.get_process",
         lambda process_id: {
             "id": process_id,
             "title": "Broken process",
@@ -334,7 +334,9 @@ def test_post_process_execution_returns_500_for_invalid_execution_function(
     def _raise_import_error(full_path: str) -> object:
         raise ModuleNotFoundError(f"No module named for {full_path}")
 
-    monkeypatch.setattr("climate_api.processing.routes.process_registry._get_dynamic_function", _raise_import_error)
+    monkeypatch.setattr(
+        "open_climate_service.processing.routes.process_registry._get_dynamic_function", _raise_import_error
+    )
 
     response = client.post("/processes/broken_process/execution", json={})
 
@@ -347,7 +349,7 @@ def test_post_process_execution_returns_400_for_execution_value_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "climate_api.processing.routes.process_registry.get_process",
+        "open_climate_service.processing.routes.process_registry.get_process",
         lambda process_id: {
             "id": process_id,
             "title": "Broken process",
@@ -363,7 +365,9 @@ def test_post_process_execution_returns_400_for_execution_value_error(
 
         return _func
 
-    monkeypatch.setattr("climate_api.processing.routes.process_registry._get_dynamic_function", _raise_value_error)
+    monkeypatch.setattr(
+        "open_climate_service.processing.routes.process_registry._get_dynamic_function", _raise_value_error
+    )
 
     response = client.post("/processes/broken_process/execution", json={})
 

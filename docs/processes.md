@@ -1,6 +1,6 @@
 # Processes
 
-The Climate API exposes two complementary processing interfaces:
+The Open Climate Service exposes two complementary processing interfaces:
 
 - **openEO process graphs** — the primary interface for data analysis. Submit a DAG of composable operations via `POST /result` (synchronous) or `POST /jobs` (batch). 120+ standard processes are available out of the box. See the [openEO guide](openeo.md).
 - **Native processes** — custom plugin functions registered via YAML, callable synchronously at `POST /processes/{id}/execution` and from openEO process graphs. Shaped to align progressively with [OGC API Processes](https://ogcapi.ogc.org/processes/).
@@ -129,7 +129,7 @@ This means the realized time range of the derived artifact may be shorter than t
 Once materialized, the derived dataset can be opened like any other managed dataset:
 
 ```python
-from climate_api.client import Client
+from open_climate_service.client import Client
 
 api = Client("http://127.0.0.1:8000")
 ds = api.open("era5land_temperature_hourly_1d_mean")

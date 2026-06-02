@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from climate_api.ingestions.schemas import (
+from open_climate_service.ingestions.schemas import (
     ArtifactCoverage,
     CoverageSpatial,
     CoverageTemporal,

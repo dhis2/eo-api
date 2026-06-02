@@ -5,7 +5,7 @@ using rename_labels to attach DHIS2 org unit IDs so they survive into the output
 
 Requires:
   pip install openeo requests
-  A running Climate API with chirps3_precipitation_daily ingested.
+  A running Open Climate Service with chirps3_precipitation_daily ingested.
   examples/data/sle-districts.geojson (included in this repo)
 
 Adjust BASE_URL if the API is not on the default local address.

@@ -1,6 +1,6 @@
 services:
   api:
-    image: ghcr.io/dhis2/eo-api:latest
+    image: ghcr.io/dhis2/open-climate-service:latest
     env_file: .env
     ports:
       - "${PORT:-8000}:${PORT:-8000}"

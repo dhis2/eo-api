@@ -1,6 +1,6 @@
-# Climate API Managed Data Guide
+# Open Climate Service Managed Data Guide
 
-This guide describes the current native FastAPI surface for Climate API and how it relates to the standards-facing `pygeoapi` publication layer.
+This guide describes the current native FastAPI surface for Open Climate Service and how it relates to the standards-facing `pygeoapi` publication layer.
 
 The current public story is:
 
@@ -40,7 +40,7 @@ Operational note:
 
 ## 1. Discover the configured extent
 
-The configured extent is setup-time Climate API configuration. It is read-only at runtime.
+The configured extent is setup-time Open Climate Service configuration. It is read-only at runtime.
 
 Example:
 
@@ -384,9 +384,9 @@ Current sync constraints:
 
 Configured availability policies:
 
-- CHIRPS3 daily uses `climate_api.providers.availability.chirps3_daily_latest_available`; this clamps sync targets to the latest complete released source month
-- ERA5-Land hourly uses `climate_api.providers.availability.lagged_latest_available` with a YAML-declared `lag_hours`
-- WorldPop yearly uses `climate_api.providers.availability.worldpop_release_latest_available`; this can allow configured future projection years
+- CHIRPS3 daily uses `open_climate_service.providers.availability.chirps3_daily_latest_available`; this clamps sync targets to the latest complete released source month
+- ERA5-Land hourly uses `open_climate_service.providers.availability.lagged_latest_available` with a YAML-declared `lag_hours`
+- WorldPop yearly uses `open_climate_service.providers.availability.worldpop_release_latest_available`; this can allow configured future projection years
 
 Example dry-run plan:
 
@@ -462,7 +462,7 @@ Expected planning response:
 - `delta_start` is `2024-02-01`
 - `delta_end` is `2024-02-10`
 
-`append` here means Climate API downloads only the missing period range and then
+`append` here means Open Climate Service downloads only the missing period range and then
 rebuilds the canonical artifact from local cache. It is not in-place Zarr mutation.
 
 Where these timestamps come from:
@@ -617,4 +617,4 @@ The public contract is now:
 - access raw native data with `/zarr/{dataset_id}`
 - access standards-facing publication with `/ogcapi`
 
-Artifacts remain internal because Climate API still needs storage and provenance records behind ingestion and publication, but those internals are no longer exposed as first-class public resources.
+Artifacts remain internal because Open Climate Service still needs storage and provenance records behind ingestion and publication, but those internals are no longer exposed as first-class public resources.

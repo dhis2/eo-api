@@ -1,6 +1,6 @@
 # Architecture
 
-This document explains how the Climate API is structured, why it is structured that way, and what the consequences are of each design decision. It is written for developers who will maintain or extend the platform over time.
+This document explains how the Open Climate Service is structured, why it is structured that way, and what the consequences are of each design decision. It is written for developers who will maintain or extend the platform over time.
 
 ---
 
@@ -10,7 +10,7 @@ The platform has four first-class concepts. Understanding the distinction betwee
 
 ### Dataset template
 
-A **template** is a YAML blueprint that describes a data source. Built-ins live in `climate_api/data/datasets/` inside the package (loaded via `importlib.resources`). Custom templates live in `{plugins_dir}/datasets/` where `plugins_dir` is set in `climate-api.yaml`. It has no state — it describes what _could_ be ingested, not what _has been_ ingested.
+A **template** is a YAML blueprint that describes a data source. Built-ins live in `open_climate_service/data/datasets/` inside the package (loaded via `importlib.resources`). Custom templates live in `{plugins_dir}/datasets/` where `plugins_dir` is set in `climate-service.yaml`. It has no state — it describes what _could_ be ingested, not what _has been_ ingested.
 
 A template defines:
 
@@ -30,8 +30,8 @@ The platform is currently in a transition between two ingestion strategies:
 - the legacy download-and-rebuild path based on `ingestion.function`
 - the new per-period streaming path based on `ingestion.plugin`
 
-The new path is implemented internally in `climate_api.streaming`, while
-`climate_api.ingestions` remains the application-facing layer that owns routes,
+The new path is implemented internally in `open_climate_service.streaming`, while
+`open_climate_service.ingestions` remains the application-facing layer that owns routes,
 artifact records, and publication state.
 
 For the first implementation slice:
@@ -62,7 +62,7 @@ An **artifact** is the internal record of a completed data ingestion. It is the 
 
 Multiple artifacts can exist for the same dataset template if data was ingested at different times (they form the version history). The most recent artifact for a given `dataset_id` is what the public API serves.
 
-Artifacts are stored in `{data_dir}/artifacts/records.json`, where `data_dir` is the path configured in `climate-api.yaml`. This is an internal implementation detail — consumers should never depend on artifact IDs or artifact paths directly.
+Artifacts are stored in `{data_dir}/artifacts/records.json`, where `data_dir` is the path configured in `climate-service.yaml`. This is an internal implementation detail — consumers should never depend on artifact IDs or artifact paths directly.
 
 ### Managed dataset
 
@@ -72,7 +72,7 @@ The relationship is: one template → many artifacts over time → one managed d
 
 ### Extent
 
-The **extent** is the spatial bounding box configured for this Climate API instance. It is set once in `climate-api.yaml` and does not change at runtime. Every ingestion is automatically scoped to this extent — operators do not specify it per-request.
+The **extent** is the spatial bounding box configured for this Open Climate Service instance. It is set once in `climate-service.yaml` and does not change at runtime. Every ingestion is automatically scoped to this extent — operators do not specify it per-request.
 
 This is a deliberate design constraint: each instance serves one place. A Sierra Leone instance serves Sierra Leone. Multi-country coverage requires multiple instances.
 
@@ -157,9 +157,9 @@ The hierarchy is:
   |                    |
   |                    +-- calls the ingestion execution function
   |                           |
-  |                           +-- climate_api.ingestions.services
+  |                           +-- open_climate_service.ingestions.services
   |                                  |
-  |                                  +-- climate_api.streaming      (new path)
+  |                                  +-- open_climate_service.streaming      (new path)
   |                                  +-- legacy download path       (old path)
   |
   +-- /processes/resample
@@ -170,8 +170,8 @@ The hierarchy is:
                        |
                        +-- calls the resample execution function
                               |
-                              +-- climate_api.processing.services
-                              +-- climate_api.ingestions.services
+                              +-- open_climate_service.processing.services
+                              +-- open_climate_service.ingestions.services
 ```
 
 The important distinction is:
@@ -287,7 +287,7 @@ sync:
   kind: temporal
   execution: append
   availability:
-    latest_available_function: climate_api.providers.availability.lagged_latest_available
+    latest_available_function: open_climate_service.providers.availability.lagged_latest_available
     lag_hours: 120
 ```
 
@@ -361,7 +361,7 @@ Responsibilities are intentionally split:
 
 - the plugin knows the source
 - the orchestrator knows resume, concurrency, and store commits
-- `climate_api.ingestions` knows artifacts, publication, and API responses
+- `open_climate_service.ingestions` knows artifacts, publication, and API responses
 
 Ticket 1 only uses this contract for direct CHIRPS3 ingest. Sync reuse and
 broader source migration are follow-up work.
@@ -421,7 +421,7 @@ The map viewer reads `spatial:bbox` and `proj:code` to determine where to positi
 
 ## CRS handling
 
-The instance CRS is configured in `climate-api.yaml`:
+The instance CRS is configured in `climate-service.yaml`:
 
 ```yaml
 extent:

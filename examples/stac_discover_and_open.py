@@ -1,12 +1,12 @@
 """Discover published datasets via the STAC catalog and open one with xarray.
 
-Requires a running Climate API instance and at least one published dataset.
+Requires a running Open Climate Service instance and at least one published dataset.
 Adjust BASE_URL if the API is not running on the default local address.
 """
 
 import json
 
-from climate_api.client import Client
+from open_climate_service.client import Client
 
 BASE_URL = "http://127.0.0.1:8000"
 

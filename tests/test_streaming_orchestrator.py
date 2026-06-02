@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 import xarray as xr
 
-import climate_api.streaming.orchestrator as streaming_orchestrator
-import climate_api.transforms.pipeline as transform_pipeline
-from climate_api.streaming.orchestrator import run_streaming_ingest_sync
-from climate_api.streaming.protocol import GridSpec
+import open_climate_service.streaming.orchestrator as streaming_orchestrator
+import open_climate_service.transforms.pipeline as transform_pipeline
+from open_climate_service.streaming.orchestrator import run_streaming_ingest_sync
+from open_climate_service.streaming.protocol import GridSpec
 
 
 class _FakePlugin:
@@ -354,7 +354,7 @@ def test_orchestrator_applies_dataset_transforms_before_write(tmp_path: Path) ->
     dataset = {
         "id": "era5land_precipitation_hourly",
         "variable": "precip",
-        "transforms": ["climate_api.transforms.metres_to_mm"],
+        "transforms": ["open_climate_service.transforms.metres_to_mm"],
     }
 
     result = run_streaming_ingest_sync(
@@ -383,11 +383,11 @@ def test_orchestrator_applies_dataset_transforms_before_write(tmp_path: Path) ->
 
 def test_transform_pipeline_raises_clear_error_for_missing_attribute() -> None:
     with pytest.raises(ValueError, match="does not exist"):
-        transform_pipeline._get_dynamic_function("climate_api.transforms.missing_function")
+        transform_pipeline._get_dynamic_function("open_climate_service.transforms.missing_function")
 
 
 def test_transform_pipeline_raises_clear_error_for_non_callable_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(transform_pipeline, "logger", object())
 
     with pytest.raises(ValueError, match="is not callable"):
-        transform_pipeline._get_dynamic_function("climate_api.transforms.pipeline.logger")
+        transform_pipeline._get_dynamic_function("open_climate_service.transforms.pipeline.logger")

@@ -1,6 +1,6 @@
 # Zarr and GeoZarr
 
-This document explains why the Climate API uses Zarr as its primary storage format, how Zarr stores are structured and served, and how GeoZarr root attributes enable map rendering.
+This document explains why the Open Climate Service uses Zarr as its primary storage format, how Zarr stores are structured and served, and how GeoZarr root attributes enable map rendering.
 
 ---
 
@@ -31,7 +31,7 @@ Climate datasets are large, multi-dimensional arrays: a daily precipitation data
 
 ## ARCO: Analysis-Ready, Cloud-Optimized
 
-The stores produced by the Climate API are an instance of the **ARCO** pattern — a term from the climate science community describing datasets that are simultaneously ready for analysis and optimised for cloud access.
+The stores produced by the Open Climate Service are an instance of the **ARCO** pattern — a term from the climate science community describing datasets that are simultaneously ready for analysis and optimised for cloud access.
 
 The two halves of the term map directly onto the choices described in this document:
 
@@ -43,7 +43,7 @@ The two halves of the term map directly onto the choices described in this docum
 
 **Cloud-optimized** means the data can be accessed efficiently over HTTP without downloading the whole file. The Zarr and GeoZarr formats provide all the necessary properties — chunk-level access, HTTP-native serving, multiscale pyramids, and cloud compatibility.
 
-The Climate API targets the same access pattern at country scale for arbitrary source datasets.
+The Open Climate Service targets the same access pattern at country scale for arbitrary source datasets.
 
 ---
 
@@ -112,7 +112,7 @@ These attributes are computed from the actual coordinate bounds of the written d
 
 ## CRS handling
 
-The instance CRS is configured in `climate-api.yaml`:
+The instance CRS is configured in `climate-service.yaml`:
 
 ```yaml
 extent:

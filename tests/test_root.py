@@ -1,8 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from climate_api.ingestions import services as ingestion_services
-from climate_api.system.schemas import HealthStatus
+from open_climate_service.ingestions import services as ingestion_services
+from open_climate_service.system.schemas import HealthStatus
 
 
 def test_root_returns_html_for_browser_request(client: TestClient) -> None:

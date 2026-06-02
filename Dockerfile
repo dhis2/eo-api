@@ -12,7 +12,7 @@ RUN groupadd --system eo && useradd --system --gid eo --create-home eo
 WORKDIR /app
 
 COPY pyproject.toml uv.lock .python-version ./
-COPY climate_api/ climate_api/
+COPY open_climate_service/ open_climate_service/
 COPY README.md .
 
 RUN uv sync --frozen --no-dev
@@ -31,4 +31,4 @@ USER eo
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
-CMD /app/.venv/bin/uvicorn climate_api.main:app --host 0.0.0.0 --port ${PORT}
+CMD /app/.venv/bin/uvicorn open_climate_service.main:app --host 0.0.0.0 --port ${PORT}

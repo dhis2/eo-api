@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from climate_api.data_registry.services import datasets
+from open_climate_service.data_registry.services import datasets
 
 
 def test_dataset_registry_requires_sync_kind(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -58,7 +58,7 @@ def test_dataset_registry_accepts_supported_sync_kind(
   sync:
     kind: temporal
   ingestion:
-    plugin: climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin
+    plugin: open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin
 """,
         encoding="utf-8",
     )
@@ -81,7 +81,7 @@ def test_dataset_registry_accepts_ingestion_plugin_without_function(
   sync:
     kind: temporal
   ingestion:
-    plugin: climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin
+    plugin: open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin
 """,
         encoding="utf-8",
     )
@@ -152,7 +152,7 @@ def test_dataset_registry_accepts_supported_sync_execution(
     kind: temporal
     execution: append
   ingestion:
-    plugin: climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin
+    plugin: open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin
 """,
         encoding="utf-8",
     )
@@ -177,7 +177,7 @@ def test_dataset_registry_rejects_invalid_sync_availability_function(
     availability:
       latest_available_function: 42
   ingestion:
-    plugin: climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin
+    plugin: open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin
 """,
         encoding="utf-8",
     )
@@ -201,9 +201,9 @@ def test_dataset_registry_accepts_sync_availability_function(
   sync:
     kind: temporal
     availability:
-      latest_available_function: climate_api.providers.availability.lagged_latest_available
+      latest_available_function: open_climate_service.providers.availability.lagged_latest_available
   ingestion:
-    plugin: climate_api.streaming.plugins.chirps3.CHIRPS3DailyPlugin
+    plugin: open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin
 """,
         encoding="utf-8",
     )
