@@ -291,6 +291,10 @@
         return Array.isArray(timeSteps) ? timeSteps.length : timeSteps.count;
       }
 
+      function initialTimeIndex() {
+        return Math.max(0, timeStepCount() - 1);
+      }
+
       function timeStepAt(i) {
         if (Array.isArray(timeSteps)) return timeSteps[i];
         return new Date(new Date(timeSteps.start).getTime() + i * timeSteps.inc)
@@ -495,7 +499,7 @@
           cm = buildColormap(colormapName);
           const zarrVersion = zarr["zarr:zarr_format"] ?? null;
           const selector =
-            timeStepCount() > 0 ? { [timeDimKey]: 0 } : {};
+            timeStepCount() > 0 ? { [timeDimKey]: initialTimeIndex() } : {};
           activeLayer = new ZarrLayer({
             id: "zarr-layer",
             source: zarr.href,
@@ -523,10 +527,11 @@
 
         // Time slider.
         if (timeStepCount() > 1) {
+          const initialIndex = initialTimeIndex();
           timeSlider.max = timeStepCount() - 1;
-          timeSlider.value = 0;
-          timeValueEl.textContent = timeStepAt(0);
-          timeCountEl.textContent = `1 / ${timeStepCount()}`;
+          timeSlider.value = initialIndex;
+          timeValueEl.textContent = timeStepAt(initialIndex);
+          timeCountEl.textContent = `${initialIndex + 1} / ${timeStepCount()}`;
           timeSection.classList.remove("hidden");
         }
 

@@ -235,6 +235,15 @@
         background: #fef9c3;
         color: #854d0e;
       }
+      .badge-sync-idle {
+        background: #e2e8f0;
+        color: #475569;
+        cursor: pointer;
+      }
+      .badge-sync-active {
+        background: #dbeafe;
+        color: #1d4ed8;
+      }
 
       .sync-form {
         display: flex;
@@ -259,6 +268,12 @@
       .sync-btn:disabled {
         opacity: 0.55;
         cursor: not-allowed;
+      }
+      .sync-trigger {
+        border: none;
+        padding: 0;
+        background: transparent;
+        font: inherit;
       }
       .secondary-btn {
         background: #fff;
@@ -458,8 +473,8 @@
               <th>Name</th>
               <th>Period</th>
               <th>Temporal coverage</th>
-              <th>Status</th>
-              <th></th>
+              <th>Publication</th>
+              <th>Sync</th>
             </tr>
           </thead>
           <tbody>
@@ -479,16 +494,16 @@
               </td>
               <td>
                 <form method="post" action="{{ base }}/manage/sync" class="sync-form"
-                      onsubmit="runJob(event, this, 'btn-sync-{{ ds.dataset_id }}', 'sync-progress-{{ ds.dataset_id }}')">
+                      onsubmit="runJob(event, this, 'sync-trigger-{{ ds.dataset_id }}', 'sync-progress-{{ ds.dataset_id }}', 'sync-status-{{ ds.dataset_id }}')">
                   <input type="hidden" name="dataset_id" value="{{ ds.dataset_id }}" />
                   <input type="hidden" name="publish" value="on" />
                   <button
                     type="button"
-                    id="btn-sync-{{ ds.dataset_id }}"
-                    class="sync-btn"
+                    id="sync-trigger-{{ ds.dataset_id }}"
+                    class="sync-trigger"
                     onclick="openSyncPanel('{{ ds.dataset_id }}')"
                   >
-                    Sync
+                    <span id="sync-status-{{ ds.dataset_id }}" class="badge badge-sync-idle">Start sync</span>
                   </button>
                   <div id="sync-panel-{{ ds.dataset_id }}" class="sync-panel">
                     <div class="field">
@@ -547,12 +562,13 @@
         if (input) input.value = '';
       }
 
-      async function runJob(event, form, btnId, progressId) {
+      async function runJob(event, form, btnId, progressId, statusId = null) {
         event.preventDefault();
         const btn = document.getElementById(btnId);
         const area = document.getElementById(progressId);
         const fill = area.querySelector('.progress-bar-fill');
         const label = area.querySelector('.progress-label');
+        const status = statusId ? document.getElementById(statusId) : null;
         const formData = new FormData(form);
         const controls = form.querySelectorAll('button, input:not([type="hidden"]), select, textarea');
 
@@ -563,6 +579,13 @@
         fill.className = 'progress-bar-fill indeterminate';
         fill.style.width = '0%';
         label.textContent = 'Starting…';
+        if (status) {
+          status.className = 'badge badge-sync-active';
+          status.textContent = 'syncing';
+        }
+        if (btn) {
+          btn.disabled = true;
+        }
 
         try {
           const resp = await fetch(form.action, {
@@ -607,6 +630,13 @@
           controls.forEach(control => {
             control.disabled = false;
           });
+          if (status) {
+            status.className = 'badge badge-sync-idle';
+            status.textContent = 'Start sync';
+          }
+          if (btn) {
+            btn.disabled = false;
+          }
         }
       }
     </script>
