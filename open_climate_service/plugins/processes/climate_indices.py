@@ -1,4 +1,9 @@
-"""Climate extreme indices via xclim."""
+"""Curated overrides for xclim climate index processes.
+
+The base layer of xclim processes is auto-registered from the indicator
+modules in plugin_processes._scan_xclim_indicators. This file only needs
+to override indicators where the auto-generated metadata is insufficient.
+"""
 
 from typing import Any
 
@@ -11,19 +16,9 @@ from open_climate_service.process import process
 
 _VARIABLE_SCHEMA: dict[str, str] = {"type": "object", "subtype": "datacube"}
 
-_KIND_TO_SCHEMA: dict[InputKind, dict[str, str]] = {
-    InputKind.VARIABLE: _VARIABLE_SCHEMA,
-    InputKind.OPTIONAL_VARIABLE: _VARIABLE_SCHEMA,
-}
-
 
 def _xclim_params(indicator: Any, *names: str) -> dict[str, dict[str, Any]]:
-    """Read parameter descriptions and schemas from an xclim indicator.
-
-    VARIABLE-kind parameters (DataArrays) get a datacube schema. All others
-    pick up the description text from xclim; type schema falls back to the
-    Python annotation resolved by the @process decorator.
-    """
+    """Read parameter descriptions and schemas from an xclim indicator."""
     result: dict[str, dict[str, Any]] = {}
     for name in names:
         if name not in indicator.parameters:
@@ -32,17 +27,13 @@ def _xclim_params(indicator: Any, *names: str) -> dict[str, dict[str, Any]]:
         entry: dict[str, Any] = {}
         if p.description:
             entry["description"] = p.description
-        schema = _KIND_TO_SCHEMA.get(p.kind)
-        if schema:
-            entry["schema"] = schema
+        if p.kind in (InputKind.VARIABLE, InputKind.OPTIONAL_VARIABLE):
+            entry["schema"] = _VARIABLE_SCHEMA
         result[name] = entry
     return result
 
 
 _spi_ind = xclim_atmos.standardized_precipitation_index
-_cdd_ind = xclim_atmos.maximum_consecutive_dry_days
-_cwd_ind = xclim_atmos.maximum_consecutive_wet_days
-_tx_ind = xclim_atmos.tx_days_above
 
 
 @process(
@@ -71,61 +62,4 @@ def spi(
         window=window,
         cal_start=cal_start,
         cal_end=cal_end,
-    )
-
-
-@process(
-    summary="Maximum consecutive dry days (CDD)",
-    parameters=_xclim_params(_cdd_ind, "pr", "thresh", "freq"),
-)
-def cdd(
-    pr: xr.DataArray,
-    thresh: str = "1 mm/day",
-    freq: str = "YS",
-) -> xr.DataArray:
-    """Maximum number of consecutive dry days per period.
-
-    A dry day is one where precipitation is below the given threshold.
-    CDD is one of the ETCCDI core climate extreme indices.
-    """
-    return xclim_atmos.maximum_consecutive_dry_days(  # type: ignore[no-any-return]
-        pr, thresh=thresh, freq=freq
-    )
-
-
-@process(
-    summary="Maximum consecutive wet days (CWD)",
-    parameters=_xclim_params(_cwd_ind, "pr", "thresh", "freq"),
-)
-def cwd(
-    pr: xr.DataArray,
-    thresh: str = "1 mm/day",
-    freq: str = "YS",
-) -> xr.DataArray:
-    """Maximum number of consecutive wet days per period.
-
-    A wet day is one where precipitation meets or exceeds the given threshold.
-    CWD is one of the ETCCDI core climate extreme indices.
-    """
-    return xclim_atmos.maximum_consecutive_wet_days(  # type: ignore[no-any-return]
-        pr, thresh=thresh, freq=freq
-    )
-
-
-@process(
-    summary="Number of days with maximum temperature above threshold (TX days above)",
-    parameters=_xclim_params(_tx_ind, "tasmax", "thresh", "freq"),
-)
-def tx_days_above(
-    tasmax: xr.DataArray,
-    thresh: str = "25 degC",
-    freq: str = "YS",
-) -> xr.DataArray:
-    """Number of days per period where daily maximum temperature exceeds a threshold.
-
-    Commonly used for heat stress assessment. The threshold is a parameter,
-    covering TX28°C through TX40°C variants with a single process.
-    """
-    return xclim_atmos.tx_days_above(  # type: ignore[no-any-return]
-        tasmax, thresh=thresh, freq=freq
     )
