@@ -204,6 +204,12 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
             detail=f"Published Zarr store for artifact '{artifact.artifact_id}' is temporarily unavailable",
         ) from exc
     try:
+        # The store's native CRS (written by the ingest orchestrator) takes precedence
+        # over the instance-wide CRS set in _build_collection_template. Plugins that
+        # store data in WGS84 (e.g. CHIRPS3) should not inherit the instance UTM CRS.
+        store_crs = ds.attrs.get("proj:code")
+        if store_crs:
+            template.extra_fields["proj:code"] = store_crs
         x_dimension, y_dimension = get_x_y_dims(ds)
         time_dimension = get_time_dim(ds)
         result = xarray_to_stac(
