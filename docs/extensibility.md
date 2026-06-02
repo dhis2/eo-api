@@ -129,17 +129,34 @@ For the built-in transforms and a full description of the pipeline, see [Transfo
 
 ---
 
-## Processes (UDFs)
+## Processes
 
-Custom data transformations are implemented as **UDFs** (User Defined Functions) — Python files placed in `plugins_dir/processes/`. A UDF receives a datacube, transforms it, and returns a datacube. It is the standard openEO extension point for custom indices, unit conversions, or special aggregations.
+Custom processes are Python functions decorated with `@process` and placed in `plugins_dir/processes/`. They appear in `GET /processes` alongside standard openEO processes and are callable directly by `process_id` in any process graph — no `run_udf` indirection needed.
 
+```python
+# plugins/processes/climate_indices.py
+import xarray as xr
+from open_climate_service.process import process
+
+@process(summary="Maximum consecutive dry days")
+def cdd(pr: xr.DataArray, thresh: str = "1mm/day") -> xr.DataArray:
+    """Maximum number of consecutive days with precipitation below threshold."""
+    import xclim.atmos
+    return xclim.atmos.maximum_consecutive_dry_days(pr, thresh=thresh)
 ```
-plugins/
-└── processes/
-    └── my_transform.py
+
+The `@process` decorator derives the process id (function name), summary, parameter names, types, and defaults from the function signature and docstring. Use explicit metadata to override:
+
+```python
+@process(
+    summary="Custom summary",
+    parameters={"thresh": {"description": "Precipitation threshold"}},
+)
+def cdd(pr: xr.DataArray, thresh: str = "1mm/day") -> xr.DataArray:
+    ...
 ```
 
-UDF files are served by the Open Climate Service so that openEO process graphs can reference them by URL via the standard `run_udf` process. Since `plugins_dir` is on `sys.path`, they are also importable as Python modules.
+A plugin process with the same id as a standard openEO process overrides it. The server must be restarted to pick up new process files.
 
 ---
 
