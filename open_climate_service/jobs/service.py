@@ -34,8 +34,9 @@ def _retry_delay_seconds(attempt: int) -> int:
     return int(min(240, 60 * (2**exponent)))
 
 
-def _job_links(job_id: str) -> list[JobLink]:
-    return [JobLink(href=f"/jobs/{job_id}", rel="self", title="Job detail")]
+def _job_links(job_id: str, href_base: str = "/jobs") -> list[JobLink]:
+    base = href_base.rstrip("/")
+    return [JobLink(href=f"{base}/{job_id}", rel="self", title="Job detail")]
 
 
 def _catalog_links() -> list[JobLink]:
@@ -140,6 +141,7 @@ class JobService:
         label: str,
         request: dict[str, Any],
         max_attempts: int = 1,
+        job_href_base: str = "/jobs",
     ) -> JobRecord:
         """Submit a callable directly as a background job — no YAML registry needed.
 
@@ -159,6 +161,7 @@ class JobService:
             process_id=label,
             request=safe_request,
             max_attempts=max_attempts,
+            job_href_base=job_href_base,
         )
 
     def _create_and_enqueue(
@@ -167,6 +170,7 @@ class JobService:
         process_id: str,
         request: dict[str, Any],
         max_attempts: int,
+        job_href_base: str,
     ) -> JobRecord:
         job_id = str(uuid4())
         record = JobRecord(
@@ -177,7 +181,7 @@ class JobService:
             max_attempts=max_attempts,
             executor_kind=self._executor.kind,
             request=request,
-            links=_job_links(job_id),
+            links=_job_links(job_id, href_base=job_href_base),
         )
         store.create_job_record(record)
         self._enqueue_job(record.job_id)
