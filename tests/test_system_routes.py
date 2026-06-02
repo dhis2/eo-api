@@ -147,6 +147,9 @@ def test_manage_page_shows_split_publication_and_sync_columns(
     assert 'data-dataset-id="chirps3_precipitation_daily&#39;quoted"' in response.text
     assert 'onclick="openSyncPanel(this.dataset.datasetId)"' in response.text
     assert 'onclick="closeSyncPanel(this.dataset.datasetId)"' in response.text
+    assert "function restoreJobControls(controls, btn, status)" in response.text
+    assert "label.textContent = 'Error: Sync ended unexpectedly.';" in response.text
+    assert "const message = err instanceof Error ? err.message : String(err);" in response.text
 
 
 def test_map_viewer_initializes_at_latest_timestep(client: TestClient) -> None:

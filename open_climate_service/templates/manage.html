@@ -568,6 +568,19 @@
         if (input) input.value = '';
       }
 
+      function restoreJobControls(controls, btn, status) {
+        controls.forEach(control => {
+          control.disabled = false;
+        });
+        if (status) {
+          status.className = 'badge badge-sync-idle';
+          status.textContent = 'Start sync';
+        }
+        if (btn) {
+          btn.disabled = false;
+        }
+      }
+
       async function runJob(event, form, btnId, progressId, statusId = null) {
         event.preventDefault();
         const btn = document.getElementById(btnId);
@@ -631,18 +644,12 @@
               }
             }
           }
+          label.textContent = 'Error: Sync ended unexpectedly.';
+          restoreJobControls(controls, btn, status);
         } catch (err) {
-          label.textContent = 'Error: ' + err.message;
-          controls.forEach(control => {
-            control.disabled = false;
-          });
-          if (status) {
-            status.className = 'badge badge-sync-idle';
-            status.textContent = 'Start sync';
-          }
-          if (btn) {
-            btn.disabled = false;
-          }
+          const message = err instanceof Error ? err.message : String(err);
+          label.textContent = 'Error: ' + message;
+          restoreJobControls(controls, btn, status);
         }
       }
     </script>
