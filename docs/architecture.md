@@ -140,72 +140,27 @@ metadata, and all public API integration.
 
 ---
 
-## Processes, execution, and jobs
+## Processes and jobs
 
-The platform is moving toward a shared process-based execution model.
+### openEO process catalog
 
-The hierarchy is:
+`GET /processes` serves the openEO process catalog — standard processes from `openeo-processes-dask` plus any `@process`-decorated plugin functions loaded from `plugins_dir/processes/`. Processes are executed via openEO process graphs submitted to `POST /jobs` (async batch) or `POST /result` (synchronous).
+
+### Ingestion and sync
+
+Ingestion and sync are domain operations with their own dedicated routes — they are not exposed as openEO processes.
 
 ```text
-/processes
-  |
-  +-- /processes/ingestion
-  |      |
-  |      +-- /execution
-  |             |
-  |             +-- creates or runs a job
-  |                    |
-  |                    +-- calls the ingestion execution function
-  |                           |
-  |                           +-- open_climate_service.ingestions.services
-  |                                  |
-  |                                  +-- open_climate_service.streaming      (new path)
-  |                                  +-- legacy download path       (old path)
-  |
-  +-- /processes/resample
-         |
-         +-- /execution
-                |
-                +-- creates or runs a job
-                       |
-                       +-- calls the resample execution function
-                              |
-                              +-- open_climate_service.processing.services
-                              +-- open_climate_service.ingestions.services
+POST /ingestions                  → synchronous, or
+POST /ingestions + Prefer: respond-async → 202 + Location: /ingestions/jobs/{id}
+
+POST /sync/{dataset_id}           → synchronous, or
+POST /sync/{dataset_id} + Prefer: respond-async → 202 + Location: /ingestions/jobs/{id}
 ```
-
-The important distinction is:
-
-- **process** — a named operation the system can perform
-- **execution** — an invocation of that operation
-- **job** — the persisted runtime record of one execution
-
-### Process
-
-A process is the catalog-level concept. It defines:
-
-- the public operation id, for example `ingestion` or `resample`
-- the input and output contract
-- whether sync and/or async execution is supported
-- the Python function that implements the operation
-
-Examples:
-
-- `ingestion` materializes a managed dataset from a dataset template
-- `resample` derives a new managed dataset from an existing one
-
-### Execution
-
-`/execution` means “run this process now”.
-
-Execution is an invocation surface shared by all processes. It is not specific
-to ingestion, resampling, or any one domain operation. This gives the platform
-one consistent way to run long-lived work.
 
 ### Job
 
-A job is the operational state of one execution. Jobs sit at the runtime layer,
-not at the domain layer.
+A job is the operational state of one async execution. The same job runtime is shared between async ingestion, async sync, and openEO batch jobs (the latter tracked at `/jobs/{id}`; native ingestion/sync jobs tracked at `/ingestions/jobs/{id}`).
 
 Jobs provide:
 
@@ -215,47 +170,6 @@ Jobs provide:
 - cancellation
 - retry and recovery after restart
 - a durable result or error record
-
-This is why jobs belong under execution: they describe *how one invocation is
-running*, not *what the invocation means*.
-
-### Domain processes on the shared runtime
-
-Both ingestion and resampling use the same execution substrate:
-
-```text
-process definition
-    -> execution request
-        -> job runtime
-            -> domain service
-                -> artifact / dataset update
-```
-
-For ingestion:
-
-- the domain goal is to materialize a managed dataset
-- the implementation may use the new `streaming` engine or the old download
-  path depending on the dataset contract
-
-For resampling:
-
-- the domain goal is to derive a new managed dataset from an existing one
-- the implementation uses the processing/resample services, then persists the
-  result through the same artifact layer
-
-The jobs framework is therefore horizontal. It does not need to know whether a
-process is ingestion, resampling, or something else later. It only needs to run
-the registered execution function and persist lifecycle state.
-
-### Current API stance
-
-For ingestion specifically:
-
-- `/processes/ingestion/execution` is the forward execution path
-- `/ingestions` is the legacy synchronous surface and may be reworked or removed later
-
-This keeps the public domain noun consistent (`ingestion`) while moving actual
-runtime execution onto the shared async process + job framework.
 
 ---
 
@@ -297,7 +211,7 @@ Before executing a sync, the engine calls the availability function to clamp the
 
 ## The plugin contract
 
-The platform has four extension points. Each one has a narrow contract — the framework handles everything else automatically.
+The platform has three plugin types. Each has a narrow contract — the framework handles everything else automatically.
 
 ### Ingestion function
 
@@ -377,15 +291,18 @@ def my_transform(ds: xr.Dataset, dataset: dict) -> xr.Dataset:
 
 Transforms are applied in order after the ingestion function returns, before the zarr is written. They receive the full xarray Dataset and the template dict. They return a modified Dataset. They do not write to disk.
 
-### Process execution function
+### Named openEO process (`@process`)
 
 ```python
-def execute(*, source_dataset_id: str, **kwargs) -> dict:
-    # Run a named operation (e.g. temporal resampling).
-    # Return a JSON-serialisable result dict.
+from open_climate_service.process import process
+
+@process(summary="My custom index")
+def my_index(data: xr.DataArray, thresh: float = 0.5) -> xr.DataArray:
+    """Compute a custom climate index."""
+    return (data > thresh).astype(float)
 ```
 
-Processes are named operations triggered via `POST /processes/{id}/execution`. They are broader than single-dataset transforms — they can read one managed dataset and produce another (e.g. daily → monthly aggregation).
+Functions decorated with `@process` and placed in `plugins_dir/processes/` are registered as named openEO processes. They appear in `GET /processes` and are callable directly by `process_id` in any openEO process graph. Parameter types and defaults are derived from the function signature.
 
 ---
 
@@ -452,7 +369,7 @@ The artifact store keeps the full history of records for sync deduplication and 
 
 ## What the framework guarantees
 
-Plugin code (ingestion functions, transforms, processes) can rely on the following being handled automatically by the framework:
+Plugin code (ingestion functions, streaming plugins, transforms, `@process` functions) can rely on the following being handled automatically by the framework:
 
 | Concern                                               | Where handled                               |
 | ----------------------------------------------------- | ------------------------------------------- |
