@@ -97,16 +97,35 @@ class CHIRPS3DailyPlugin:
         return await asyncio.get_running_loop().run_in_executor(_get_executor(), self._fetch_sync, period_id, bbox)
 
     def _availability_cutoff(self) -> date:
-        """Return the last day of the latest month treated as complete by this plugin."""
+        """Return the last day of the most recently published complete month.
+
+        Scans backward with a HEAD request on the last-day COG URL so the
+        cutoff reflects actual CDN state rather than a hardcoded lag assumption.
+        Falls back to 3 months back if the CDN probe fails.
+        """
+        import requests
+
         today = datetime.now(UTC).date()
-        months_back = 1 if today.day > _COMPLETE_AFTER_DAY else 2
-        year, month = today.year, today.month
-        for _ in range(months_back):
-            month -= 1
-            if month == 0:
-                month = 12
-                year -= 1
-        return date(year, month, calendar.monthrange(year, month)[1])
+        y, m = today.year, today.month
+        for _ in range(6):
+            m -= 1
+            if m == 0:
+                m, y = 12, y - 1
+            last_day = calendar.monthrange(y, m)[1]
+            candidate = date(y, m, last_day)
+            try:
+                resp = requests.head(self._url_for_day(candidate), timeout=10, allow_redirects=True)
+                if resp.status_code == 200:
+                    return candidate
+            except Exception:
+                continue
+        # Fallback: 3 months back (safe)
+        y, m = today.year, today.month
+        for _ in range(3):
+            m -= 1
+            if m == 0:
+                m, y = 12, y - 1
+        return date(y, m, calendar.monthrange(y, m)[1])
 
     def _url_for_day(self, day: date) -> str:
         """Build the remote CHIRPS3 raster URL for one day."""

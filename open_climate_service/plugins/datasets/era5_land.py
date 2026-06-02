@@ -46,8 +46,11 @@ class ERA5LandHourlySingleBandPlugin:
         )
 
     async def periods(self, start: str, end: str) -> list[str]:
+        """Return hourly period IDs up to the last timestamp published in the remote store."""
+        latest = await asyncio.to_thread(self._latest_available)
+        capped_end = min(end, latest)
         current = parse_period_string_to_datetime(start)
-        limit = parse_period_string_to_datetime(end)
+        limit = parse_period_string_to_datetime(capped_end)
         if current > limit:
             return []
         periods: list[str] = []
@@ -55,6 +58,13 @@ class ERA5LandHourlySingleBandPlugin:
             periods.append(datetime_to_period_string(current, "hourly"))
             current += timedelta(hours=1)
         return periods
+
+    def _latest_available(self) -> str:
+        """Read the last valid_time from the remote store (metadata only, no data loaded)."""
+        module = import_module("dhis2eo.data.destine.era5_land.hourly")
+        open_zarr = cast(Callable[[list[str]], xr.Dataset], getattr(module, "open_zarr"))
+        ds = open_zarr([self.variable])
+        return str(np.datetime64(ds.valid_time.values[-1], "h"))
 
     async def fetch_period(self, period_id: str, bbox: list[float], **params: Any) -> xr.Dataset:
         _ = params
