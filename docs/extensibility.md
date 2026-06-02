@@ -129,55 +129,31 @@ For the built-in transforms and a full description of the pipeline, see [Transfo
 
 ---
 
-## Processes
+## Processes (UDFs)
 
-Processes are named operations that produce derived datasets (e.g. temporal resampling). They are backed by YAML files and dispatched via `POST /processes/{id}/execution`.
-
-Built-in processes live in `open_climate_service/plugins/processes/`. Custom processes are loaded from `plugins_dir/processes/`.
+Custom data transformations are implemented as **UDFs** (User Defined Functions) — Python files placed in `plugins_dir/processes/`. A UDF receives a datacube, transforms it, and returns a datacube. It is the standard openEO extension point for custom indices, unit conversions, or special aggregations.
 
 ```
 plugins/
 └── processes/
-    └── my_process.yaml
+    └── my_transform.py
 ```
 
-### Process YAML
+UDF files are served by the Open Climate Service so that openEO process graphs can reference them by URL via the standard `run_udf` process. Since `plugins_dir` is on `sys.path`, they are also importable as Python modules.
 
-```yaml
-- id: my_process
-  title: My custom process
-  description: Describe what this process does.
-  version: "0.1.0"
-  execution:
-    function: mypackage.processes.my_process.execute
+---
+
+## Workflows (UDPs)
+
+Reusable pipeline compositions are implemented as **UDPs** (User Defined Processes) — JSON process graph files placed in `plugins_dir/workflows/`. A UDP is a named, parameterised composition of existing openEO processes callable by name from any openEO client.
+
+```
+plugins/
+└── workflows/
+    └── my_workflow.json
 ```
 
-| Field | Required | Description |
-| ----- | -------- | ----------- |
-| `id` | Yes | Unique process identifier. Callable from openEO process graphs and `POST /processes/{id}/execution` |
-| `title` | Yes | Human-readable title shown in `GET /processes` |
-| `description` | No | Longer description shown in API responses |
-| `version` | No | Process version string |
-| `jobControlOptions` | No | Supported execution modes. Default: `["sync-execute"]` |
-| `execution.function` | Yes | Dotted path to the Python function that runs the process |
-
-A custom process with the same `id` as a built-in overrides it.
-
-### Execution function
-
-The current built-in execution path accepts the raw JSON request body as keyword arguments and returns a JSON-serialisable dict:
-
-```python
-from typing import Any
-
-def execute(*, source_dataset_id: str, factor: float, **_ignored: Any) -> dict[str, Any]:
-    ...
-    return {"status": "completed", "artifact_id": "..."}
-```
-
-Invalid or missing arguments raise `TypeError`, which the route dispatcher catches and returns as HTTP 400.
-
-For the built-in `resample` process and usage examples, see [Processes](processes.md).
+UDP files are loaded on startup and appear in `GET /process_graphs` alongside runtime-registered UDPs. A plugin UDP with the same `id` as a built-in overrides it.
 
 ---
 

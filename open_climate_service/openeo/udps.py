@@ -138,7 +138,9 @@ def _load_plugin_udps() -> list[dict[str, object]]:
     plugins_dir = config.get("plugins_dir") if config else None
     if not plugins_dir:
         return []
-    workflows_dir = Path(plugins_dir) / "workflows"
+    config_path = api_config.get_config_path()
+    base = config_path.parent if config_path else Path()
+    workflows_dir = (base / plugins_dir).resolve() / "workflows"
     if not workflows_dir.is_dir():
         return []
     udps: list[dict[str, object]] = []
