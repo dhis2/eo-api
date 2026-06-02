@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import xarray as xr
 import xclim.indices
+import xclim.indicators.atmos as xclim_atmos
 
 from open_climate_service.process import process
 
@@ -37,4 +38,73 @@ def spi(
         window=window,
         cal_start=cal_start,
         cal_end=cal_end,
+    )
+
+
+@process(
+    summary="Maximum consecutive dry days (CDD)",
+    parameters={
+        "pr": {"description": "Daily precipitation (kg m-2 s-1 or mm/day)."},
+        "thresh": {"description": "Precipitation threshold below which a day is considered dry (e.g. '1 mm/day')."},
+        "freq": {"description": "Resampling frequency. 'YS' = annual (default), 'MS' = monthly."},
+    },
+)
+def cdd(
+    pr: xr.DataArray,
+    thresh: str = "1 mm/day",
+    freq: str = "YS",
+) -> xr.DataArray:
+    """Maximum number of consecutive dry days per period.
+
+    A dry day is one where precipitation is below the given threshold.
+    CDD is one of the ETCCDI core climate extreme indices.
+    """
+    return xclim_atmos.maximum_consecutive_dry_days(  # type: ignore[no-any-return]
+        pr, thresh=thresh, freq=freq
+    )
+
+
+@process(
+    summary="Maximum consecutive wet days (CWD)",
+    parameters={
+        "pr": {"description": "Daily precipitation (kg m-2 s-1 or mm/day)."},
+        "thresh": {"description": "Precipitation threshold at or above which a day is considered wet (e.g. '1 mm/day')."},
+        "freq": {"description": "Resampling frequency. 'YS' = annual (default), 'MS' = monthly."},
+    },
+)
+def cwd(
+    pr: xr.DataArray,
+    thresh: str = "1 mm/day",
+    freq: str = "YS",
+) -> xr.DataArray:
+    """Maximum number of consecutive wet days per period.
+
+    A wet day is one where precipitation meets or exceeds the given threshold.
+    CWD is one of the ETCCDI core climate extreme indices.
+    """
+    return xclim_atmos.maximum_consecutive_wet_days(  # type: ignore[no-any-return]
+        pr, thresh=thresh, freq=freq
+    )
+
+
+@process(
+    summary="Number of days with maximum temperature above threshold (TX days above)",
+    parameters={
+        "tasmax": {"description": "Daily maximum temperature (degC or K)."},
+        "thresh": {"description": "Temperature threshold (e.g. '25 degC', '30 degC')."},
+        "freq": {"description": "Resampling frequency. 'YS' = annual (default), 'MS' = monthly."},
+    },
+)
+def tx_days_above(
+    tasmax: xr.DataArray,
+    thresh: str = "25 degC",
+    freq: str = "YS",
+) -> xr.DataArray:
+    """Number of days per period where daily maximum temperature exceeds a threshold.
+
+    Commonly used for heat stress assessment. The threshold is a parameter,
+    covering TX28°C through TX40°C variants with a single process.
+    """
+    return xclim_atmos.tx_days_above(  # type: ignore[no-any-return]
+        tasmax, thresh=thresh, freq=freq
     )
