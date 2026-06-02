@@ -501,7 +501,8 @@
                     type="button"
                     id="sync-trigger-{{ ds.dataset_id }}"
                     class="sync-trigger"
-                    onclick="openSyncPanel('{{ ds.dataset_id }}')"
+                    data-dataset-id="{{ ds.dataset_id }}"
+                    onclick="openSyncPanel(this.dataset.datasetId)"
                   >
                     <span id="sync-status-{{ ds.dataset_id }}" class="badge badge-sync-idle">Start sync</span>
                   </button>
@@ -518,7 +519,12 @@
                     </div>
                     <div class="sync-panel-actions">
                       <button type="submit" class="sync-btn">Start sync</button>
-                      <button type="button" class="secondary-btn" onclick="closeSyncPanel('{{ ds.dataset_id }}')">Cancel</button>
+                      <button
+                        type="button"
+                        class="secondary-btn"
+                        data-dataset-id="{{ ds.dataset_id }}"
+                        onclick="closeSyncPanel(this.dataset.datasetId)"
+                      >Cancel</button>
                     </div>
                   </div>
                   <div id="sync-progress-{{ ds.dataset_id }}" class="progress-area" style="display:none">

@@ -123,7 +123,7 @@ def test_manage_page_shows_split_publication_and_sync_columns(
                 "Dataset",
                 (),
                 {
-                    "dataset_id": "chirps3_precipitation_daily",
+                    "dataset_id": "chirps3_precipitation_daily'quoted",
                     "dataset_name": "CHIRPS3 precipitation",
                     "period_type": "daily",
                     "extent": type(
@@ -144,6 +144,9 @@ def test_manage_page_shows_split_publication_and_sync_columns(
     assert "<th>Sync</th>" in response.text
     assert "Start sync" in response.text
     assert "Cutoff end" in response.text
+    assert 'data-dataset-id="chirps3_precipitation_daily&#39;quoted"' in response.text
+    assert 'onclick="openSyncPanel(this.dataset.datasetId)"' in response.text
+    assert 'onclick="closeSyncPanel(this.dataset.datasetId)"' in response.text
 
 
 def test_map_viewer_initializes_at_latest_timestep(client: TestClient) -> None:
