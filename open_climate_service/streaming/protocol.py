@@ -65,13 +65,13 @@ class IngestionPlugin(Protocol):
     """Minimal source contract for the streaming ingest engine.
 
     Contract notes:
-    - plugin classes may accept template-defined `ingestion.default_params`
+    - plugin classes may accept template-defined `ingestion.params`
       through their constructor for source configuration.
     - `probe(...)` must be cheap and must not transfer full raster data.
     - `periods(...)` must return an ordered, source-valid list of period ids.
     - `fetch_period(...)` must return exactly one logical period normalized to a
       consistent coordinate system for later append.
-    - the same `ingestion.default_params` are forwarded to `probe(...)` and
+    - the same `ingestion.params` are forwarded to `probe(...)` and
       `fetch_period(...)` as `**params` for sources that prefer per-call
       configuration rather than constructor state.
 
