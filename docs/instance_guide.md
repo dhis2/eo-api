@@ -28,12 +28,13 @@ my-climate-service/
 ├── .env.example            # committed template for environment variables
 ├── .gitignore
 ├── plugins/
-│   ├── datasets/           # custom dataset template YAMLs
-│   ├── <source>/           # custom streaming plugin classes
-│   │   ├── __init__.py
-│   │   └── plugin.py
-│   └── processes/          # custom @process-decorated functions
-│       └── my_process.py
+│   ├── datasets/           # dataset templates (.yaml) + plugin classes (.py)
+│   │   ├── enacts_rainfall.yaml
+│   │   └── enacts.py
+│   ├── processes/          # @process-decorated functions (.py)
+│   │   └── my_process.py
+│   └── workflows/          # reusable process graph compositions (.json)
+│       └── my_workflow.json
 └── data/                   # gitignored — downloaded files and Zarr stores
 ```
 
@@ -116,7 +117,7 @@ plugins_dir: ./plugins/
 | `extent.country_code` | No | ISO 3166-1 alpha-3 — required for WorldPop downloads |
 | `data_dir` | Yes | Directory for downloaded files and Zarr stores, resolved relative to the config file |
 | `crs` | No | EPSG code for the output Zarr CRS. Defaults to `EPSG:4326` |
-| `plugins_dir` | No | Directory containing custom datasets, functions, and processes |
+| `plugins_dir` | No | Directory containing `datasets/`, `processes/`, and `workflows/` plugin subdirectories |
 
 To find the bounding box for a region, [bboxfinder.com](http://bboxfinder.com) is a useful tool.
 
