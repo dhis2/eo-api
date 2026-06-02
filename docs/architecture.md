@@ -223,23 +223,6 @@ The map viewer reads `spatial:bbox` and `proj:code` to determine where to positi
 
 ---
 
-## CRS handling
-
-The instance CRS is configured in `climate-service.yaml`:
-
-```yaml
-extent:
-  name: Norway
-  bbox: [3.0, 57.0, 32.0, 72.5]
-  crs: EPSG:32633 # optional; defaults to EPSG:4326
-```
-
-Downloaded data is reprojected from the source CRS (`source_crs` in the template, default `EPSG:4326`) to the instance CRS during ingestion. The stored zarr is always in the instance CRS.
-
-If no `crs` is set in the config, data is stored in `EPSG:4326` (WGS84). This is the correct default for instances that do not need a metric CRS.
-
----
-
 ## Artifact deduplication and version history
 
 When a new ingestion request arrives, the framework checks whether an existing artifact already covers the requested scope:
