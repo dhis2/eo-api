@@ -388,11 +388,6 @@ def _load_streaming_plugin(plugin_path: str, *, params: dict[str, object]) -> In
 
     try:
         plugin = instantiate_plugin(plugin_path, dict(params))
-        if not isinstance(plugin, IngestionPlugin):
-            raise TypeError(
-                f"{plugin_path} does not implement the required streaming plugin contract "
-                "(probe, periods, fetch_period, max_concurrency, commit_batch_size)"
-            )
     except HTTPException:
         raise
     except Exception as exc:
