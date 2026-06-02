@@ -479,6 +479,7 @@
           </thead>
           <tbody>
             {% for ds in datasets %}
+            {% set sync_dom_id = "sync-row-" ~ loop.index0 %}
             <tr>
               <td>
                 <a href="{{ base }}/datasets/{{ ds.dataset_id }}">{{ ds.dataset_name }}</a>
@@ -493,25 +494,33 @@
                 {% endif %}
               </td>
               <td>
-                <form method="post" action="{{ base }}/manage/sync" class="sync-form"
-                      onsubmit="runJob(event, this, 'sync-trigger-{{ ds.dataset_id }}', 'sync-progress-{{ ds.dataset_id }}', 'sync-status-{{ ds.dataset_id }}')">
+                <form
+                  method="post"
+                  action="{{ base }}/manage/sync"
+                  class="sync-form"
+                  data-trigger-id="sync-trigger-{{ sync_dom_id }}"
+                  data-progress-id="sync-progress-{{ sync_dom_id }}"
+                  data-status-id="sync-status-{{ sync_dom_id }}"
+                  onsubmit="runJob(event, this, this.dataset.triggerId, this.dataset.progressId, this.dataset.statusId)"
+                >
                   <input type="hidden" name="dataset_id" value="{{ ds.dataset_id }}" />
                   <input type="hidden" name="publish" value="on" />
                   <button
                     type="button"
-                    id="sync-trigger-{{ ds.dataset_id }}"
+                    id="sync-trigger-{{ sync_dom_id }}"
                     class="sync-trigger"
                     data-dataset-id="{{ ds.dataset_id }}"
-                    onclick="openSyncPanel(this.dataset.datasetId)"
+                    data-sync-dom-id="{{ sync_dom_id }}"
+                    onclick="openSyncPanel(this.dataset.syncDomId)"
                   >
-                    <span id="sync-status-{{ ds.dataset_id }}" class="badge badge-sync-idle">Start sync</span>
+                    <span id="sync-status-{{ sync_dom_id }}" class="badge badge-sync-idle">Start sync</span>
                   </button>
-                  <div id="sync-panel-{{ ds.dataset_id }}" class="sync-panel">
+                  <div id="sync-panel-{{ sync_dom_id }}" class="sync-panel">
                     <div class="field">
-                      <label for="sync-end-{{ ds.dataset_id }}">Cutoff end <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+                      <label for="sync-end-{{ sync_dom_id }}">Cutoff end <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
                       <input
                         type="text"
-                        id="sync-end-{{ ds.dataset_id }}"
+                        id="sync-end-{{ sync_dom_id }}"
                         name="end"
                         placeholder="YYYY-MM-DD"
                       />
@@ -523,11 +532,12 @@
                         type="button"
                         class="secondary-btn"
                         data-dataset-id="{{ ds.dataset_id }}"
-                        onclick="closeSyncPanel(this.dataset.datasetId)"
+                        data-sync-dom-id="{{ sync_dom_id }}"
+                        onclick="closeSyncPanel(this.dataset.syncDomId)"
                       >Cancel</button>
                     </div>
                   </div>
-                  <div id="sync-progress-{{ ds.dataset_id }}" class="progress-area" style="display:none">
+                  <div id="sync-progress-{{ sync_dom_id }}" class="progress-area" style="display:none">
                     <div class="progress-bar-track">
                       <div class="progress-bar-fill indeterminate"></div>
                     </div>
@@ -552,17 +562,17 @@
     </footer>
 
     <script>
-      function openSyncPanel(datasetId) {
-        const panel = document.getElementById(`sync-panel-${datasetId}`);
-        const input = document.getElementById(`sync-end-${datasetId}`);
+      function openSyncPanel(syncDomId) {
+        const panel = document.getElementById(`sync-panel-${syncDomId}`);
+        const input = document.getElementById(`sync-end-${syncDomId}`);
         if (!panel) return;
         panel.classList.add('open');
         if (input) input.focus();
       }
 
-      function closeSyncPanel(datasetId) {
-        const panel = document.getElementById(`sync-panel-${datasetId}`);
-        const input = document.getElementById(`sync-end-${datasetId}`);
+      function closeSyncPanel(syncDomId) {
+        const panel = document.getElementById(`sync-panel-${syncDomId}`);
+        const input = document.getElementById(`sync-end-${syncDomId}`);
         if (!panel) return;
         panel.classList.remove('open');
         if (input) input.value = '';

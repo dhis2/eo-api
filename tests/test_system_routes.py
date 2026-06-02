@@ -1,4 +1,5 @@
 from collections.abc import Callable, Coroutine
+from html.parser import HTMLParser
 from typing import cast
 
 import pytest
@@ -10,6 +11,40 @@ from starlette.responses import StreamingResponse
 from open_climate_service.ingestions import services as ingestion_services
 from open_climate_service.system import routes as system_routes
 from open_climate_service.system import templates as system_templates
+
+
+class _ManageHtmlParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.current_sync_form: dict[str, str] | None = None
+        self.sync_forms_by_dataset_id: dict[str, dict[str, str]] = {}
+        self.sync_triggers: dict[str, dict[str, str]] = {}
+        self.cancel_buttons: dict[str, dict[str, str]] = {}
+
+    @staticmethod
+    def _has_class(attr_map: dict[str, str], class_name: str) -> bool:
+        return class_name in attr_map.get("class", "").split()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = {key: value for key, value in attrs if value is not None}
+        if tag == "form" and self._has_class(attr_map, "sync-form") and "data-trigger-id" in attr_map:
+            self.current_sync_form = attr_map
+        if (
+            tag == "input"
+            and self.current_sync_form is not None
+            and attr_map.get("type") == "hidden"
+            and attr_map.get("name") == "dataset_id"
+            and "value" in attr_map
+        ):
+            self.sync_forms_by_dataset_id[attr_map["value"]] = self.current_sync_form
+        if tag == "button" and "data-dataset-id" in attr_map and attr_map.get("id", "").startswith("sync-trigger-"):
+            self.sync_triggers[attr_map["data-dataset-id"]] = attr_map
+        if tag == "button" and self._has_class(attr_map, "secondary-btn") and "data-dataset-id" in attr_map:
+            self.cancel_buttons[attr_map["data-dataset-id"]] = attr_map
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "form":
+            self.current_sync_form = None
 
 
 class _FakeRequest:
@@ -113,6 +148,7 @@ async def test_manage_sync_treats_blank_end_as_none(monkeypatch: pytest.MonkeyPa
 def test_manage_page_shows_split_publication_and_sync_columns(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    dataset_id = "chirps3_precipitation_daily'quoted"
     monkeypatch.setattr(system_templates, "_load_templates", lambda: [])
     monkeypatch.setattr(system_templates, "_load_extent", lambda: {"id": "sle", "name": "Sierra Leone", "bbox": []})
     monkeypatch.setattr(
@@ -123,7 +159,7 @@ def test_manage_page_shows_split_publication_and_sync_columns(
                 "Dataset",
                 (),
                 {
-                    "dataset_id": "chirps3_precipitation_daily'quoted",
+                    "dataset_id": dataset_id,
                     "dataset_name": "CHIRPS3 precipitation",
                     "period_type": "daily",
                     "extent": type(
@@ -140,13 +176,33 @@ def test_manage_page_shows_split_publication_and_sync_columns(
     response = client.get("/manage")
 
     assert response.status_code == 200
+
+    parser = _ManageHtmlParser()
+    parser.feed(response.text)
+    sync_form_attrs = parser.sync_forms_by_dataset_id.get(dataset_id)
+    sync_trigger_attrs = parser.sync_triggers.get(dataset_id)
+    cancel_button_attrs = parser.cancel_buttons.get(dataset_id)
+
     assert "<th>Publication</th>" in response.text
     assert "<th>Sync</th>" in response.text
     assert "Start sync" in response.text
     assert "Cutoff end" in response.text
-    assert 'data-dataset-id="chirps3_precipitation_daily&#39;quoted"' in response.text
-    assert 'onclick="openSyncPanel(this.dataset.datasetId)"' in response.text
-    assert 'onclick="closeSyncPanel(this.dataset.datasetId)"' in response.text
+    assert sync_form_attrs is not None
+    assert sync_form_attrs["data-trigger-id"].startswith("sync-trigger-sync-row-")
+    assert sync_form_attrs["data-progress-id"].startswith("sync-progress-sync-row-")
+    assert sync_form_attrs["data-status-id"].startswith("sync-status-sync-row-")
+    assert "runJob(" in sync_form_attrs["onsubmit"]
+    assert "this.dataset.triggerId" in sync_form_attrs["onsubmit"]
+    assert "this.dataset.progressId" in sync_form_attrs["onsubmit"]
+    assert "this.dataset.statusId" in sync_form_attrs["onsubmit"]
+    assert sync_trigger_attrs is not None
+    assert sync_trigger_attrs["data-dataset-id"] == dataset_id
+    assert sync_trigger_attrs["data-sync-dom-id"].startswith("sync-row-")
+    assert sync_trigger_attrs["onclick"] == "openSyncPanel(this.dataset.syncDomId)"
+    assert cancel_button_attrs is not None
+    assert cancel_button_attrs["data-dataset-id"] == dataset_id
+    assert cancel_button_attrs["data-sync-dom-id"] == sync_trigger_attrs["data-sync-dom-id"]
+    assert cancel_button_attrs["onclick"] == "closeSyncPanel(this.dataset.syncDomId)"
     assert "function restoreJobControls(controls, btn, status)" in response.text
     assert "label.textContent = 'Error: Sync ended unexpectedly.';" in response.text
     assert "const message = err instanceof Error ? err.message : String(err);" in response.text
