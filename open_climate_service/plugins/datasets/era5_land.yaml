@@ -16,7 +16,7 @@
       begin: "1950-01-01"
       resolution: PT1H
   ingestion:
-    plugin: open_climate_service.streaming.plugins.era5_land.ERA5LandHourlySingleBandPlugin
+    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandHourlySingleBandPlugin
     default_params:
       variable: t2m
   transforms:
@@ -47,7 +47,7 @@
       begin: "1950-01-01"
       resolution: PT1H
   ingestion:
-    plugin: open_climate_service.streaming.plugins.era5_land.ERA5LandPrecipitationPlugin
+    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandPrecipitationPlugin
     default_params: {}
   transforms:
     - open_climate_service.transforms.metres_to_mm

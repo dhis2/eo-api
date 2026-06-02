@@ -21,7 +21,7 @@ def test_post_ingestion_respond_async_returns_202_with_location(
             "name": "CHIRPS3 precipitation",
             "variable": "precip",
             "period_type": "daily",
-            "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
         },
     )
     monkeypatch.setattr(

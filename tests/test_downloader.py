@@ -274,7 +274,7 @@ def test_download_dataset_returns_400_when_bbox_outside_dataset_extents(
 def test_download_dataset_returns_409_for_plugin_only_templates() -> None:
     dataset: dict[str, Any] = {
         "id": "chirps3_precipitation_daily",
-        "ingestion": {"plugin": "open_climate_service.streaming.plugins.chirps3.CHIRPS3DailyPlugin"},
+        "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
     }
 
     with pytest.raises(HTTPException) as exc_info:
