@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
-import xclim.indicators.atmos as xclim_atmos
 from fastapi.testclient import TestClient
 
+from open_climate_service.openeo.plugin_processes import load_plugin_processes
 from open_climate_service.plugins.processes.climate_indices import spi
 from open_climate_service.process import get_process_metadata
 
@@ -129,19 +129,24 @@ def test_tx_days_above_catalog_metadata(client: TestClient) -> None:
     assert "25" in thresh["default"]
 
 
-def test_cdd_computes_via_xclim(daily_precip: xr.DataArray) -> None:
-    result = xclim_atmos.maximum_consecutive_dry_days(daily_precip)
+def test_cdd_registered_callable_computes(daily_precip: xr.DataArray) -> None:
+    procs = dict(load_plugin_processes())
+    assert "cdd" in procs
+    result = xr.DataArray(procs["cdd"](pr=daily_precip))
     assert isinstance(result, xr.DataArray)
     assert "time" in result.dims
 
 
-def test_cdd_cwd_complementary_via_xclim(daily_precip: xr.DataArray) -> None:
-    r_cdd = xr.DataArray(xclim_atmos.maximum_consecutive_dry_days(daily_precip))
-    r_cwd = xr.DataArray(xclim_atmos.maximum_consecutive_wet_days(daily_precip))
+def test_cdd_cwd_registered_callables_are_complementary(daily_precip: xr.DataArray) -> None:
+    procs = dict(load_plugin_processes())
+    r_cdd = xr.DataArray(procs["cdd"](pr=daily_precip))
+    r_cwd = xr.DataArray(procs["cwd"](pr=daily_precip))
     assert not np.allclose(r_cdd.values, r_cwd.values, equal_nan=True)
 
 
-def test_tx_days_above_higher_threshold_gives_fewer_days(daily_tasmax: xr.DataArray) -> None:
-    r25 = xr.DataArray(xclim_atmos.tx_days_above(daily_tasmax, thresh="25 degC"))
-    r35 = xr.DataArray(xclim_atmos.tx_days_above(daily_tasmax, thresh="35 degC"))
+def test_tx_days_above_registered_callable_higher_threshold_gives_fewer_days(daily_tasmax: xr.DataArray) -> None:
+    procs = dict(load_plugin_processes())
+    assert "tx_days_above" in procs
+    r25 = xr.DataArray(procs["tx_days_above"](tasmax=daily_tasmax, thresh="25 degC"))
+    r35 = xr.DataArray(procs["tx_days_above"](tasmax=daily_tasmax, thresh="35 degC"))
     assert float(r35.mean().item()) <= float(r25.mean().item())
