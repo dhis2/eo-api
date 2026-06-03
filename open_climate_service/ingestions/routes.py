@@ -1,7 +1,7 @@
 """Routes for EO ingestion, datasets, and sync operations."""
 
 from fastapi import APIRouter, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from starlette.responses import Response
 
 from open_climate_service.data_registry.routes import _get_dataset_or_404
@@ -146,14 +146,19 @@ def download_artifact_file(dataset_id: str) -> FileResponse:
 
 
 @zarr_router.api_route("/{dataset_id}", methods=["GET", "HEAD"])
-def get_canonical_zarr_store_info(dataset_id: str) -> dict[str, object]:
-    """Return canonical Zarr store listing for a managed dataset."""
-    return services.get_dataset_zarr_store_info_or_404(dataset_id)
+def get_canonical_zarr_store_root(dataset_id: str) -> RedirectResponse:
+    """Redirect to the root zarr.json so the URL is a valid Zarr store entry point for GDAL and zarr clients."""
+    services.get_latest_artifact_for_dataset_or_404(dataset_id)
+    return RedirectResponse(url=f"/zarr/{dataset_id}/zarr.json", status_code=302)
 
 
 @zarr_router.api_route("/{dataset_id}/{relative_path:path}", methods=["GET", "HEAD"], response_model=None)
-def get_canonical_zarr_store_file(dataset_id: str, relative_path: str) -> FileResponse | Response | dict[str, object]:
+def get_canonical_zarr_store_file(
+    dataset_id: str, relative_path: str
+) -> FileResponse | Response | dict[str, object] | RedirectResponse:
     """Serve canonical Zarr store content for a managed dataset."""
+    if not relative_path:
+        return RedirectResponse(url=f"/zarr/{dataset_id}/zarr.json", status_code=302)
     return services.get_dataset_zarr_store_file_or_404(dataset_id, relative_path)
 
 
