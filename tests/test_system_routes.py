@@ -215,3 +215,23 @@ def test_map_viewer_initializes_at_latest_timestep(client: TestClient) -> None:
     assert "function initialTimeIndex()" in response.text
     assert "{ [timeDimKey]: initialTimeIndex() }" in response.text
     assert "timeSlider.value = initialIndex;" in response.text
+
+
+def test_root_returns_json_for_no_accept_header(client: TestClient) -> None:
+    response = client.get("/", headers={"accept": ""})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["api_version"]
+
+
+def test_root_returns_json_for_wildcard_accept(client: TestClient) -> None:
+    response = client.get("/", headers={"accept": "*/*"})
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json()["api_version"]
+
+
+def test_root_returns_html_for_browser_accept(client: TestClient) -> None:
+    response = client.get("/", headers={"accept": "text/html,application/xhtml+xml,*/*;q=0.8"})
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]

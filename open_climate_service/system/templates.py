@@ -63,10 +63,23 @@ def get_template(name: str) -> jinja2.Template:
 
 
 def _media_type_q(accept: str, media_type: str) -> float:
-    """Return the q-value for media_type in an Accept header, or -1.0 if absent."""
+    """Return the effective q-value for media_type in an Accept header, or -1.0.
+
+    Handles exact matches, type wildcards (e.g. application/*), and */*.
+    RFC 7231: more-specific entries take precedence over wildcards.
+    """
+    target_type, _, target_subtype = media_type.partition("/")
+    best_q = -1.0
     for item in accept.split(","):
         parts = item.strip().split(";")
-        if parts[0].strip() != media_type:
+        m = parts[0].strip()
+        if not m:
+            continue
+        m_type, _, m_subtype = m.partition("/")
+        exact = m == media_type
+        type_wild = m_type == target_type and m_subtype == "*"
+        full_wild = m == "*/*"
+        if not (exact or type_wild or full_wild):
             continue
         q = 1.0
         for param in parts[1:]:
@@ -76,8 +89,9 @@ def _media_type_q(accept: str, media_type: str) -> float:
                     q = float(param[2:])
                 except ValueError:
                     pass
-        return q
-    return -1.0
+        if q > best_q:
+            best_q = q
+    return best_q
 
 
 def wants_json(request: Request) -> bool:
@@ -91,7 +105,7 @@ def wants_json(request: Request) -> bool:
         return True
     accept = request.headers.get("accept", "")
     if not accept:
-        return False
+        return True  # no Accept header → programmatic client, serve JSON
     json_q = _media_type_q(accept, "application/json")
     html_q = _media_type_q(accept, "text/html")
     return json_q >= 0 and (html_q < 0 or json_q >= html_q)
