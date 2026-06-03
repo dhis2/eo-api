@@ -604,6 +604,41 @@ def _make_fake_pyramid(ds: xr.Dataset, zarr_path: Path) -> Pyramid:
     return Pyramid(datatree=dt, encoding={})
 
 
+class _FakeDataTree:
+    def __init__(self, ds: xr.Dataset) -> None:
+        self._ds = ds
+        self.attrs: dict[str, Any] = {}
+
+    def to_zarr(self, zarr_path: Path, mode: str, encoding: dict[str, object], zarr_format: int) -> None:
+        _ = encoding
+        assert mode == "w"
+        assert zarr_format == 3
+        level0 = self._ds.chunk({"t": 1})
+        level1 = self._ds.coarsen(y=2, x=2, boundary="trim").mean()  # pyright: ignore[reportAttributeAccessIssue]
+        var_name = next(iter(self._ds.data_vars))
+        var_chunks = tuple(1 if dim == "t" else self._ds.sizes[dim] for dim in self._ds[var_name].dims)
+        level0.to_zarr(
+            zarr_path / "0",
+            mode="w",
+            zarr_format=3,
+            encoding={"t": {"chunks": (1,)}, var_name: {"chunks": var_chunks}},
+        )
+        level1.to_zarr(zarr_path / "1", mode="w", zarr_format=3)
+        root = zarr.open_group(str(zarr_path), mode="a", zarr_format=3)
+        root.attrs["sentinel"] = "kept"
+        for key, value in self.attrs.items():
+            root.attrs[key] = value
+
+    def close(self) -> None:
+        return None
+
+
+class _FakePyramid:
+    def __init__(self, ds: xr.Dataset) -> None:
+        self.dt = _FakeDataTree(ds)
+        self.encoding: dict[str, object] = {}
+
+
 def test_build_dataset_zarr_pyramid_copies_time_to_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Pyramid zarr build copies the time coordinate to the store root for zarr-layer."""
     nc_files = _write_nc_files(tmp_path)
@@ -621,6 +656,81 @@ def test_build_dataset_zarr_pyramid_copies_time_to_root(tmp_path: Path, monkeypa
     zarr_path = tmp_path / "my_dataset.zarr"
     assert (zarr_path / "0").exists(), "pyramid level 0 should exist"
     assert (zarr_path / "t").exists(), "t coordinate must be copied to zarr root"
+
+
+def test_build_dataset_zarr_pyramid_writes_root_time_as_single_chunk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    nc_files = _write_nc_files(tmp_path)
+    monkeypatch.setattr(downloader, "DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr(downloader, "get_cache_files", lambda _: nc_files)
+    monkeypatch.setattr(downloader, "_needs_pyramid", lambda *_: True)
+
+    def fake_create_pyramid(ds: xr.Dataset, levels: int, x_dim: str, y_dim: str, method: str) -> _FakePyramid:
+        del levels, x_dim, y_dim, method
+        return _FakePyramid(ds)
+
+    monkeypatch.setattr(downloader, "create_pyramid", fake_create_pyramid)
+
+    downloader.build_dataset_zarr(_PYRAMID_DATASET)
+
+    zarr_path = tmp_path / "my_dataset.zarr"
+    root_time = zarr.open_array(str(zarr_path / "t"), mode="r", zarr_format=3)
+    level0_time = zarr.open_array(str(zarr_path / "0" / "t"), mode="r", zarr_format=3)
+
+    assert level0_time.chunks == (1,)
+    assert root_time.chunks == (2,)
+    root = zarr.open_group(str(zarr_path), mode="r", zarr_format=3)
+    assert root.attrs["sentinel"] == "kept"
+
+
+def test_write_root_time_coordinate_skips_when_time_dimension_missing(tmp_path: Path) -> None:
+    zarr_path = tmp_path / "no-time.zarr"
+    root = zarr.open_group(str(zarr_path), mode="w", zarr_format=3)
+    root.attrs["sentinel"] = "kept"
+    ds = xr.Dataset(
+        {"pop_total": (["y", "x"], np.ones((2, 2), dtype="float32"))},
+        coords={"y": [1.0, 2.0], "x": [3.0, 4.0]},
+    )
+
+    downloader._write_root_time_coordinate(zarr_path, ds, time_dim="t")
+
+    root = zarr.open_group(str(zarr_path), mode="r", zarr_format=3)
+    assert "t" not in root
+    assert root.attrs["sentinel"] == "kept"
+
+
+def test_write_root_time_coordinate_skips_when_time_coordinate_missing(tmp_path: Path) -> None:
+    zarr_path = tmp_path / "missing-time-coord.zarr"
+    root = zarr.open_group(str(zarr_path), mode="w", zarr_format=3)
+    root.attrs["sentinel"] = "kept"
+    ds = xr.Dataset(
+        {"pop_total": (["t", "y", "x"], np.ones((2, 2, 2), dtype="float32"))},
+        coords={"y": [1.0, 2.0], "x": [3.0, 4.0]},
+    )
+
+    downloader._write_root_time_coordinate(zarr_path, ds, time_dim="t")
+
+    root = zarr.open_group(str(zarr_path), mode="r", zarr_format=3)
+    assert "t" not in root
+    assert root.attrs["sentinel"] == "kept"
+
+
+def test_write_root_time_coordinate_replaces_existing_root_time(tmp_path: Path) -> None:
+    zarr_path = tmp_path / "existing-time.zarr"
+    root = zarr.open_group(str(zarr_path), mode="w", zarr_format=3)
+    root.attrs["sentinel"] = "kept"
+    first = xr.Dataset(coords={"t": pd.date_range("2020-01-01", periods=3, freq="D")})
+    second = xr.Dataset(coords={"t": pd.date_range("2020-02-01", periods=2, freq="D")})
+
+    downloader._write_root_time_coordinate(zarr_path, first, time_dim="t")
+    downloader._write_root_time_coordinate(zarr_path, second, time_dim="t")
+
+    root_time = zarr.open_array(str(zarr_path / "t"), mode="r", zarr_format=3)
+    assert root_time.shape == (2,)
+    assert root_time.chunks == (2,)
+    root = zarr.open_group(str(zarr_path), mode="r", zarr_format=3)
+    assert root.attrs["sentinel"] == "kept"
 
 
 def test_build_dataset_zarr_pyramid_is_openable_via_level_0(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

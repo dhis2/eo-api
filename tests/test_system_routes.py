@@ -132,7 +132,7 @@ async def test_manage_sync_treats_blank_end_as_none(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(system_routes.asyncio, "create_task", fake_create_task)
 
     response = await system_routes.manage_sync(
-        cast(Request, _FakeRequest({"dataset_id": "chirps3_precipitation_daily", "end": "", "publish": "on"}))
+        cast(Request, _FakeRequest({"dataset_id": "  chirps3_precipitation_daily  ", "end": "", "publish": "on"}))
     )
 
     assert isinstance(response, StreamingResponse)
@@ -143,6 +143,109 @@ async def test_manage_sync_treats_blank_end_as_none(monkeypatch: pytest.MonkeyPa
         "end": None,
         "publish": True,
     }
+
+
+@pytest.mark.anyio  # pyright: ignore[reportUntypedFunctionDecorator]
+async def test_manage_ingest_strips_string_inputs_and_treats_blank_end_as_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    scheduled: list[Coroutine[object, object, None]] = []
+
+    def fake_create_artifact(
+        *,
+        dataset: dict[str, object],
+        start: str,
+        end: str | None,
+        bbox: list[float],
+        country_code: str | None,
+        overwrite: bool,
+        publish: bool,
+        on_progress: Callable[[int | None, int | None, str | None], None],
+    ) -> None:
+        captured["dataset"] = dataset
+        captured["start"] = start
+        captured["end"] = end
+        captured["bbox"] = bbox
+        captured["country_code"] = country_code
+        captured["overwrite"] = overwrite
+        captured["publish"] = publish
+        on_progress(1, 1, "done")
+
+    async def fake_to_thread(func: Callable[[], None]) -> None:
+        func()
+
+    def fake_create_task(coro: Coroutine[object, object, None]) -> None:
+        scheduled.append(coro)
+        return None
+
+    template = {"id": "chirps3_precipitation_daily", "name": "CHIRPS3 precipitation"}
+    monkeypatch.setattr(system_routes.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(system_routes.asyncio, "create_task", fake_create_task)
+    monkeypatch.setattr(ingestion_services, "create_artifact", fake_create_artifact)
+    monkeypatch.setattr(
+        "open_climate_service.data_registry.services.datasets.get_dataset",
+        lambda dataset_id: template if dataset_id == template["id"] else None,
+    )
+    monkeypatch.setattr(
+        "open_climate_service.extents.services.get_extent_or_404",
+        lambda: {"bbox": [0.0, 1.0, 2.0, 3.0], "country_code": "SLE"},
+    )
+
+    response = await system_routes.manage_ingest(
+        cast(
+            Request,
+            _FakeRequest(
+                {
+                    "dataset_id": "  chirps3_precipitation_daily  ",
+                    "start": " 2024-02-01 ",
+                    "end": "   ",
+                    "publish": "on",
+                }
+            ),
+        )
+    )
+
+    assert isinstance(response, StreamingResponse)
+    assert len(scheduled) == 1
+    await scheduled[0]
+    assert captured == {
+        "dataset": template,
+        "start": "2024-02-01",
+        "end": None,
+        "bbox": [0.0, 1.0, 2.0, 3.0],
+        "country_code": "SLE",
+        "overwrite": False,
+        "publish": True,
+    }
+
+
+@pytest.mark.anyio  # pyright: ignore[reportUntypedFunctionDecorator]
+async def test_manage_ingest_rejects_blank_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "open_climate_service.data_registry.services.datasets.get_dataset",
+        lambda dataset_id: {"id": dataset_id, "name": "CHIRPS3 precipitation"},
+    )
+    monkeypatch.setattr(
+        "open_climate_service.extents.services.get_extent_or_404",
+        lambda: {"bbox": [0.0, 1.0, 2.0, 3.0], "country_code": "SLE"},
+    )
+
+    response = await system_routes.manage_ingest(
+        cast(
+            Request,
+            _FakeRequest(
+                {
+                    "dataset_id": "chirps3_precipitation_daily",
+                    "start": "   ",
+                    "end": "",
+                }
+            ),
+        )
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "http://testserver/manage?error=Start%20date%20is%20required"
 
 
 def test_manage_page_shows_split_publication_and_sync_columns(

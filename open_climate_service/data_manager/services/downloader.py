@@ -4,12 +4,12 @@ import datetime
 import inspect
 import logging
 import os
-import shutil
 from pathlib import Path
 from typing import Any
 
 import xarray as xr
 import xproj  # noqa: F401  # type: ignore[import-untyped]  # pyright: ignore[reportUnusedImport]
+import zarr
 from fastapi import BackgroundTasks, HTTPException
 from geozarr_toolkit import MultiscalesConventionMetadata, create_geozarr_attrs
 from topozarr.coarsen import create_pyramid
@@ -196,14 +196,9 @@ def build_dataset_zarr(dataset: dict[str, Any], *, start: str | None = None, end
         pyramid.dt.to_zarr(zarr_path, mode="w", encoding=pyramid.encoding, zarr_format=3)
 
         # zarr-layer looks for the time coordinate at the root of the store, not inside each level.
-        # Copy it from level 0 so browser clients can discover it without knowing the level structure.
-        time_dim = get_time_dim(ds)
-        time_src = zarr_path / "0" / time_dim
-        time_dst = zarr_path / time_dim
-        if time_src.exists():
-            if time_dst.exists():
-                shutil.rmtree(time_dst)
-            shutil.copytree(time_src, time_dst)
+        # Write it as a single root-level chunk so browser clients can discover it without
+        # incurring a fan-out of tiny copied coordinate chunks from level 0.
+        _write_root_time_coordinate(zarr_path, ds, time_dim="t")
 
         pyramid.dt.close()
 
@@ -230,6 +225,7 @@ def build_dataset_zarr(dataset: dict[str, Any], *, start: str | None = None, end
 _PYRAMID_PIXEL_THRESHOLD = 2048 * 2048
 _PYRAMID_MAX_LEVELS = 8
 _PYRAMID_TARGET_TILE_SIZE = 512
+_ROOT_TIME_COORD_MAX_CHUNK = 4096
 
 
 def _needs_pyramid(ds: xr.Dataset, x_dim: str, y_dim: str) -> bool:
@@ -308,6 +304,33 @@ def _compute_time_space_chunks(
     chunks[y_dim] = min(ds.sizes[y_dim], max_spatial_chunk)
 
     return chunks
+
+
+def _write_root_time_coordinate(zarr_path: Path, ds: xr.Dataset, *, time_dim: str) -> None:
+    """Expose the time coordinate at the pyramid root with bounded chunking for browser clients."""
+    if time_dim not in ds.dims:
+        logger.debug("Skipping root time coordinate write for %s: no %s dimension found", zarr_path, time_dim)
+        return
+    if time_dim not in ds.coords or ds.sizes.get(time_dim, 0) == 0:
+        logger.debug("Skipping root time coordinate write for %s: empty or missing %s coordinate", zarr_path, time_dim)
+        return
+
+    root = zarr.open_group(str(zarr_path), mode="a", zarr_format=3)
+    root_attrs = dict(root.attrs)
+    if time_dim in root:
+        del root[time_dim]
+    time_coord = xr.Dataset(coords={time_dim: ds[time_dim]})
+    time_coord.to_zarr(
+        zarr_path,
+        mode="a",
+        zarr_format=3,
+        consolidated=False,
+        encoding={time_dim: {"chunks": (min(ds.sizes[time_dim], _ROOT_TIME_COORD_MAX_CHUNK),)}},
+    )
+    root = zarr.open_group(str(zarr_path), mode="a", zarr_format=3)
+    for key, value in root_attrs.items():
+        if root.attrs.get(key) != value:
+            root.attrs[key] = value
 
 
 def _get_cache_prefix(dataset: dict[str, Any]) -> str:
