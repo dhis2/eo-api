@@ -74,6 +74,7 @@ nav:
   - Guides:
       - Accessing data: user_guide.md
       - openEO: openeo.md
+      - openEO QGIS plugin: qgis_openeo_plugin.md
       - Built-in datasets: built_in_datasets.md
       - Processes: processes.md
       - Workflows: workflows.md
