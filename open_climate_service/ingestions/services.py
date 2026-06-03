@@ -719,7 +719,10 @@ def _icechunk_list_dir(store: _IcechunkReadableStore, prefix: str) -> list[str]:
 
 
 def _icechunk_exists(store: _IcechunkReadableStore, key: str) -> bool:
-    return cast(bool, _run_async(store.exists(key)))
+    try:
+        return cast(bool, _run_async(store.exists(key)))
+    except KeyError:
+        return False
 
 
 def _icechunk_get(store: _IcechunkReadableStore, key: str) -> bytes | None:
