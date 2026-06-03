@@ -71,37 +71,50 @@ def test_health_returns_healthy_status(client: TestClient) -> None:
     assert result.status == "healthy"
 
 
+def test_zarr_route_redirects_to_zarr_json(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        ingestion_services,
+        "get_latest_artifact_for_dataset_or_404",
+        lambda _: object(),
+    )
+
+    response = client.get("/zarr/dataset-1", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/zarr/dataset-1/zarr.json"
+
+
 def test_zarr_route_echoes_origin_for_browser_access(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ingestion_services,
-        "get_dataset_zarr_store_info_or_404",
-        lambda _: {"kind": "ZarrListing", "dataset_id": "dataset-1", "path": ".", "entries": []},
+        "get_latest_artifact_for_dataset_or_404",
+        lambda _: object(),
     )
 
-    response = client.get("/zarr/dataset-1", headers={"Origin": "https://inspect.geozarr.org"})
+    response = client.get("/zarr/dataset-1", headers={"Origin": "https://inspect.geozarr.org"}, follow_redirects=False)
 
-    assert response.status_code == 200
+    assert response.status_code == 302
     assert response.headers["access-control-allow-origin"] == "https://inspect.geozarr.org"
 
 
 def test_zarr_route_does_not_allow_unconfigured_origin(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ingestion_services,
-        "get_dataset_zarr_store_info_or_404",
-        lambda _: {"kind": "ZarrListing", "dataset_id": "dataset-1", "path": ".", "entries": []},
+        "get_latest_artifact_for_dataset_or_404",
+        lambda _: object(),
     )
 
-    response = client.get("/zarr/dataset-1", headers={"Origin": "https://example.org"})
+    response = client.get("/zarr/dataset-1", headers={"Origin": "https://example.org"}, follow_redirects=False)
 
-    assert response.status_code == 200
+    assert response.status_code == 302
     assert "access-control-allow-private-network" not in response.headers
 
 
 def test_zarr_route_allows_private_network_preflight(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ingestion_services,
-        "get_dataset_zarr_store_info_or_404",
-        lambda _: {"kind": "ZarrListing", "dataset_id": "dataset-1", "path": ".", "entries": []},
+        "get_latest_artifact_for_dataset_or_404",
+        lambda _: object(),
     )
 
     response = client.options(
@@ -121,8 +134,8 @@ def test_zarr_route_allows_private_network_preflight(client: TestClient, monkeyp
 def test_zarr_route_preserves_existing_vary_values(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ingestion_services,
-        "get_dataset_zarr_store_info_or_404",
-        lambda _: {"kind": "ZarrListing", "dataset_id": "dataset-1", "path": ".", "entries": []},
+        "get_latest_artifact_for_dataset_or_404",
+        lambda _: object(),
     )
 
     response = client.options(

@@ -544,6 +544,71 @@ def plan_sync_dataset(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _get_pyramid_zarr_path(dataset_id: str) -> Path | None:
+    """Return the pyramid .zarr store path for a dataset if it exists."""
+    from open_climate_service.data_manager.services.downloader import DOWNLOAD_DIR
+
+    path = DOWNLOAD_DIR / f"{dataset_id}.zarr"
+    return path if path.exists() else None
+
+
+def _enrich_root_zarr_json_with_pyramid(response: JSONResponse, dataset_id: str) -> JSONResponse:
+    """Merge multiscales from the pyramid .zarr into an Icechunk root zarr.json response.
+
+    Injects two representations of the pyramid structure:
+    - ``multiscales``: the native GeoZarr-toolkit layout dict (preserved as-is)
+    - ``_multiscales_ogc``: an OGC-compatible list understood by GDAL and qgis-geozarr,
+      where each entry has a ``path`` key pointing to a pyramid level directory
+    """
+    pyramid_path = _get_pyramid_zarr_path(dataset_id)
+    if pyramid_path is None:
+        return response
+    pyramid_zarr_json = pyramid_path / "zarr.json"
+    if not pyramid_zarr_json.exists():
+        return response
+    try:
+        pyramid_attrs = json.loads(pyramid_zarr_json.read_text(encoding="utf-8")).get("attributes", {})
+        multiscales = pyramid_attrs.get("multiscales")
+        if not multiscales:
+            return response
+        # Convert native layout to an OGC-compliant multiscales list with axes and
+        # coordinateTransformations so tools like GDAL and qgis-geozarr can correctly
+        # position each pyramid level in space.
+        layout = multiscales.get("layout", []) if isinstance(multiscales, dict) else []
+        if not layout:
+            return response
+        axes: list[dict[str, object]] = [
+            {"name": "t", "type": "time"},
+            {"name": "y", "type": "space", "unit": "degree"},
+            {"name": "x", "type": "space", "unit": "degree"},
+        ]
+        datasets: list[dict[str, object]] = []
+        for entry in layout:
+            if "asset" not in entry:
+                continue
+            dataset: dict[str, object] = {"path": str(entry["asset"])}
+            st = entry.get("spatial:transform")  # [pixel_w, 0, x_origin, 0, pixel_h, y_origin]
+            if isinstance(st, list) and len(st) == 6:
+                pixel_w, _, x_origin, _, pixel_h, y_origin = (float(v) for v in st)
+                dataset["coordinateTransformations"] = [
+                    {"type": "scale", "scale": [1.0, abs(pixel_h), abs(pixel_w)]},
+                    {"type": "translation", "translation": [0.0, y_origin, x_origin]},
+                ]
+            datasets.append(dataset)
+        if not datasets:
+            return response
+        payload: dict[str, object] = json.loads(response.body)
+        attrs = payload.get("attributes", {})
+        if isinstance(attrs, dict) and "multiscales" not in attrs:
+            attrs["multiscales"] = [{"axes": axes, "datasets": datasets, "type": "gaussian"}]
+            attrs["multiscales_native"] = multiscales
+            payload["attributes"] = attrs
+            return JSONResponse(content=payload)
+    except Exception:
+        pass
+    return response
+
+
 def get_dataset_zarr_store_info_or_404(dataset_id: str) -> dict[str, object]:
     """Return a public Zarr store listing for a managed dataset."""
     artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
@@ -631,11 +696,20 @@ def _read_zarr_bounds(store_attrs: dict[str, object] | None) -> list[float] | No
 def get_dataset_zarr_store_file_or_404(
     dataset_id: str, relative_path: str
 ) -> FileResponse | Response | dict[str, object]:
-    """Serve a file, metadata document, or directory listing within a dataset Zarr store."""
+    """Serve a file, metadata document, or directory listing within a dataset Zarr store.
+
+    For Icechunk-backed datasets the root zarr.json is enriched with multiscales
+    metadata from the pyramid .zarr when one exists, so external tools (GDAL,
+    qgis-geozarr) see the pyramid structure without a separate serving path.
+    """
     artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
     if artifact.format == ArtifactFormat.ICECHUNK:
         store = _open_icechunk_store_or_404(artifact)
-        return _get_icechunk_store_path_or_404(dataset_id=dataset_id, store=store, relative_path=relative_path)
+        response = _get_icechunk_store_path_or_404(dataset_id=dataset_id, store=store, relative_path=relative_path)
+        # Enrich the root zarr.json with multiscales from pyramid when available
+        if _normalize_icechunk_relative_path(relative_path) == "zarr.json" and isinstance(response, JSONResponse):
+            response = _enrich_root_zarr_json_with_pyramid(response, dataset_id)
+        return response
 
     store_root = _get_zarr_root_or_409(artifact)
     target = _resolve_zarr_path(store_root, relative_path)
