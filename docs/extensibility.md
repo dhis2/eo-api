@@ -17,7 +17,8 @@ Dataset templates are YAML files that describe a data source. Built-ins live in 
 ```
 plugins/
 └── datasets/
-    └── enacts_rainfall.yaml
+    ├── enacts_rainfall.yaml    # dataset template
+    └── enacts.py               # streaming plugin class
 ```
 
 ```yaml
@@ -25,11 +26,9 @@ plugins/
 plugins_dir: ./plugins/
 ```
 
-All `*.yaml` files in `plugins_dir/datasets/` are merged with the built-ins. A custom template with the same `id` as a built-in overrides it — useful for adjusting lag times, display ranges, or availability settings on an existing dataset.
+All `*.yaml` files in `plugins_dir/datasets/` are merged with the built-ins. A custom template with the same `id` as a built-in overrides it — useful for adjusting display ranges or availability settings on an existing dataset.
 
-A Python plugin class is declared alongside the YAML using the `ingestion.plugin` dotted path. Any data transformations (unit conversion, clamping, etc.) are applied inside `fetch_period` before the `xr.Dataset` is returned — no separate framework-level declaration is needed.
-
-Plugin modules can live in any importable package or directly under `plugins_dir`, which is automatically added to `sys.path`.
+A Python plugin class is declared alongside the YAML using the `ingestion.plugin` dotted path. Any data transformations (unit conversion, clamping, etc.) are applied inside `fetch_period` before the `xr.Dataset` is returned.
 
 See [Adding custom datasets](adding_custom_datasets.md) for the full template field reference, streaming plugin contract and transform function signature.
 
