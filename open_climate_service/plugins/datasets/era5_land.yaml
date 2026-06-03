@@ -17,7 +17,7 @@
       resolution: PT1H
   ingestion:
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandHourlySingleBandPlugin
-    default_params:
+    params:
       variable: t2m
   transforms:
     - open_climate_service.transforms.kelvin_to_celsius
@@ -48,7 +48,7 @@
       resolution: PT1H
   ingestion:
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandPrecipitationPlugin
-    default_params: {}
+    params: {}
   transforms:
     - open_climate_service.transforms.metres_to_mm
   units: mm
