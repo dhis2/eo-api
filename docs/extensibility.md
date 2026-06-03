@@ -28,7 +28,7 @@ plugins_dir: ./plugins/
 
 All `*.yaml` files in `plugins_dir/datasets/` are merged with the built-ins. A custom template with the same `id` as a built-in overrides it — useful for adjusting display ranges or availability settings on an existing dataset.
 
-A Python plugin class is declared alongside the YAML using the `ingestion.plugin` dotted path. Any data transformations (unit conversion, clamping, etc.) are applied inside `fetch_period` before the `xr.Dataset` is returned.
+A Python plugin class is declared alongside the YAML using the `ingestion.plugin` dotted path. Any data transformations (unit conversion, etc.) are applied inside `fetch_period` before the `xr.Dataset` is returned.
 
 See [Adding custom datasets](adding_custom_datasets.md) for the full template field reference, streaming plugin contract and transform function signature.
 
