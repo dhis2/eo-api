@@ -101,7 +101,7 @@ class CHIRPS3DailyPlugin:
 
         Scans backward with a HEAD request on the last-day COG URL so the
         cutoff reflects actual CDN state rather than a hardcoded lag assumption.
-        Falls back to 3 months back if the CDN probe fails.
+        Raises if no published month is found within the last 6 months.
         """
         import httpx
 
@@ -113,19 +113,10 @@ class CHIRPS3DailyPlugin:
                 m, y = 12, y - 1
             last_day = calendar.monthrange(y, m)[1]
             candidate = date(y, m, last_day)
-            try:
-                resp = httpx.head(self._url_for_day(candidate), timeout=10, follow_redirects=True)
-                if resp.status_code == 200:
-                    return candidate
-            except httpx.HTTPError:
-                continue
-        # Fallback: 3 months back (safe)
-        y, m = today.year, today.month
-        for _ in range(3):
-            m -= 1
-            if m == 0:
-                m, y = 12, y - 1
-        return date(y, m, calendar.monthrange(y, m)[1])
+            resp = httpx.head(self._url_for_day(candidate), timeout=10, follow_redirects=True)
+            if resp.status_code == 200:
+                return candidate
+        raise RuntimeError("No published CHIRPS3 month found in the last 6 months")
 
     def _url_for_day(self, day: date) -> str:
         """Build the remote CHIRPS3 raster URL for one day."""
