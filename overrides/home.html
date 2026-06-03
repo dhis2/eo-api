@@ -1,0 +1,269 @@
+{% extends "main.html" %}
+
+{% block tabs %}{{ super() }}
+
+<section class="home-hero">
+  <div class="home-hero__inner">
+    <h1 class="home-hero__headline">Open Climate Service</h1>
+    <p class="home-hero__sub">
+      Climate and earth observation data is distributed across dozens of
+      providers — each with different APIs, formats, and access mechanisms.
+      Open Climate Service is an open-source platform that cuts through this
+      complexity to deliver tailored data for climate-smart decision-making.
+    </p>
+    <div class="home-hero__ctas">
+      <a href="setup_guide/" class="home-btn home-btn--primary">Get started</a>
+      <a href="https://github.com/dhis2/climate-api" class="home-btn home-btn--outline">
+        GitHub
+      </a>
+    </div>
+  </div>
+</section>
+
+<section class="home-pipeline">
+  <div class="home-section__inner">
+    <h2 class="home-section__title">How it works</h2>
+    <p class="home-section__sub">
+      Open Climate Service brings together data about our climate, environment, and society
+      from many different sources — to help you make informed decisions, manage risks,
+      and adapt to climate change.
+    </p>
+
+    <div class="pipeline-diagram" role="img" aria-label="Open Climate Service data pipeline: observations from many sources are tailored to a local context and made available to decision-making tools">
+
+      <!-- Sources -->
+      <div class="pipeline-col">
+        <p class="pipeline-col__label">Data</p>
+        <div class="pipeline-box pipeline-box--source">
+          <span class="pipeline-box__title">Climate &amp; weather</span>
+          <span class="pipeline-box__sub">Temperature, precipitation, humidity</span>
+        </div>
+        <div class="pipeline-box pipeline-box--source">
+          <span class="pipeline-box__title">Environment</span>
+          <span class="pipeline-box__sub">Land cover, vegetation, air quality</span>
+        </div>
+        <div class="pipeline-box pipeline-box--source">
+          <span class="pipeline-box__title">Population &amp; society</span>
+          <span class="pipeline-box__sub">Population distribution, socio-economic indicators</span>
+        </div>
+        <div class="pipeline-box pipeline-box--source pipeline-box--dashed">
+          <span class="pipeline-box__title">Local &amp; national sources</span>
+          <span class="pipeline-box__sub">Meteorological services, surveys, custom data</span>
+        </div>
+      </div>
+
+      <!-- Arrow -->
+      <div class="pipeline-arrow" aria-hidden="true">
+        <svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+          <line x1="2" y1="10" x2="32" y2="10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <polyline points="24,4 32,10 24,16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
+      <!-- Open Climate Service -->
+      <div class="pipeline-col pipeline-col--center">
+        <p class="pipeline-col__label">Open Climate Service</p>
+        <div class="pipeline-box pipeline-box--api">
+          <span class="pipeline-box__title">Download</span>
+          <span class="pipeline-box__sub">Retrieve data for your country and time range</span>
+        </div>
+        <div class="pipeline-box pipeline-box--api">
+          <span class="pipeline-box__title">Keep current</span>
+          <span class="pipeline-box__sub">Automatically update as new data is released</span>
+        </div>
+        <div class="pipeline-box pipeline-box--api">
+          <span class="pipeline-box__title">Tailor</span>
+          <span class="pipeline-box__sub">Combine, aggregate, and derive new variables</span>
+        </div>
+        <div class="pipeline-box pipeline-box--api">
+          <span class="pipeline-box__title">Publish</span>
+          <span class="pipeline-box__sub">Make data available through open standards</span>
+        </div>
+      </div>
+
+      <!-- Arrow -->
+      <div class="pipeline-arrow" aria-hidden="true">
+        <svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg">
+          <line x1="2" y1="10" x2="32" y2="10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <polyline points="24,4 32,10 24,16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+
+      <!-- Consumers -->
+      <div class="pipeline-col">
+        <p class="pipeline-col__label">Decision-making tools</p>
+        <div class="pipeline-box pipeline-box--consumer">
+          <span class="pipeline-box__title">DHIS2</span>
+          <span class="pipeline-box__sub">Maps, dashboards, and health analytics</span>
+        </div>
+        <div class="pipeline-box pipeline-box--consumer">
+          <span class="pipeline-box__title">CHAP</span>
+          <span class="pipeline-box__sub">Climate-informed disease modelling</span>
+        </div>
+        <div class="pipeline-box pipeline-box--consumer">
+          <span class="pipeline-box__title">Any compatible tool</span>
+          <span class="pipeline-box__sub">QGIS, Python, R, and more</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="home-features">
+  <div class="home-section__inner">
+    <h2 class="home-section__title">What it does</h2>
+    <p class="home-section__sub">
+      Open Climate Service handles the complexity of sourcing, processing, and
+      serving climate data — so you can focus on using it.
+    </p>
+    <div class="features-grid">
+
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--blue">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </div>
+        <h3>Always up to date</h3>
+        <p>Data is kept current automatically. When a new day, week, or month of data is released upstream, Open Climate Service retrieves only what is missing and updates your local copy — no manual intervention required.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--green">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+        </div>
+        <h3>Your data, your infrastructure</h3>
+        <p>Deploy on your own servers, national cloud, or any infrastructure you control. No dependency on proprietary platforms. Countries retain full ownership of their data and can operate the service independently.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--teal">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2"/>
+            <line x1="8" y1="21" x2="16" y2="21"/>
+            <line x1="12" y1="17" x2="12" y2="21"/>
+          </svg>
+        </div>
+        <h3>Works with DHIS2</h3>
+        <p>Climate data is aggregated to org unit boundaries and pushed directly into DHIS2, where it becomes available to the Maps App, Climate App, and the CHAP modelling platform — no manual data handling needed.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--indigo">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+        </div>
+        <h3>Works with any tool</h3>
+        <p>Data is published through open geospatial standards, so it is accessible to QGIS, Python, R, and any other analysis tool without custom integration. If a tool understands standard geospatial formats, it works with Open Climate Service.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--orange">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10"/>
+            <line x1="12" y1="20" x2="12" y2="4"/>
+            <line x1="6" y1="20" x2="6" y2="14"/>
+          </svg>
+        </div>
+        <h3>Tailored to your needs</h3>
+        <p>Data is processed and aggregated at the temporal and spatial resolution that matters for your programme — daily, weekly, or monthly; national, district, or facility level. Derived variables and custom data sources can be added without modifying the core service.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-card__icon feature-card__icon--purple">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <h3>Built with the communities that use it</h3>
+        <p>Developed in close collaboration with HISP groups and country teams across Africa and Asia — the people who understand local data landscapes, institutional constraints, and what it takes to run a sustainable climate service in practice.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<section class="home-personas">
+  <div class="home-section__inner">
+    <h2 class="home-section__title">Where do you want to start?</h2>
+    <div class="personas-grid">
+
+      <a href="setup_guide/" class="persona-card">
+        <div class="persona-card__icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+        </div>
+        <div class="persona-card__body">
+          <h3>I want to run a climate service for my country</h3>
+          <p>Set up Open Climate Service for your country, configure your spatial extent, and start ingesting climate data. Works via Docker or direct installation.</p>
+          <span class="persona-card__link">Setup guide &rarr;</span>
+        </div>
+      </a>
+
+      <a href="user_guide/" class="persona-card">
+        <div class="persona-card__icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+          </svg>
+        </div>
+        <div class="persona-card__body">
+          <h3>I want to use climate data for analysis</h3>
+          <p>Discover and access climate datasets from a running instance. Visualise in QGIS, analyse in Python or R.</p>
+          <span class="persona-card__link">User guide &rarr;</span>
+        </div>
+      </a>
+
+      <a href="instance_guide/" class="persona-card">
+        <div class="persona-card__icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+          </svg>
+        </div>
+        <div class="persona-card__body">
+          <h3>I want to build applications on top of it</h3>
+          <p>Add custom data sources, build processing workflows, or use Open Climate Service as a data backend in your own application or modelling platform.</p>
+          <span class="persona-card__link">Instance guide &rarr;</span>
+        </div>
+      </a>
+
+    </div>
+  </div>
+</section>
+
+<section class="home-ecosystem">
+  <div class="home-section__inner">
+    <p class="home-ecosystem__label">Part of the DHIS2 Climate ecosystem</p>
+    <div class="ecosystem-links">
+      <a href="https://climate-tools.dhis2.org/" class="ecosystem-link">
+        <span class="ecosystem-link__name">Climate Tools</span>
+        <span class="ecosystem-link__desc">Python tools for climate data access and processing</span>
+      </a>
+      <a href="https://chap.dhis2.org/" class="ecosystem-link">
+        <span class="ecosystem-link__name">CHAP</span>
+        <span class="ecosystem-link__desc">Climate-informed health analytics and modelling</span>
+      </a>
+      <a href="https://dhis2.org/climate/" class="ecosystem-link">
+        <span class="ecosystem-link__name">DHIS2 Climate</span>
+        <span class="ecosystem-link__desc">Climate and health data integration for DHIS2</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block content %}{% endblock %}
+{% block footer %}{{ super() }}{% endblock %}
