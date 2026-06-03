@@ -70,6 +70,9 @@ The config is regenerated on each `publish_artifact` call and also at startup vi
 
 ## Commit conventions
 
-- Use conventional commits (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`)
-- No attribution lines in commit messages
-- No emojis anywhere — not in commits, code, comments, or documentation
+- **Conventional Commits** for all git activity — commit messages, branch names, and PR titles.
+  - Format: `<type>(<scope>)?: <description>` (e.g. `feat(ci): add docker publish workflow`, `fix(main): correct db path creation`).
+  - Types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`, `build`, `perf`, `style`, `revert`.
+  - Branch names: `<type>/<short-description>` (e.g. `feat/makefile-and-ci`, `fix/sqlite-path`).
+- **No attribution.** Do not add `Co-Authored-By: Claude ...`, "Generated with Claude Code", or any similar attribution to commits, PRs, or files.
+- **No emojis** anywhere — not in commits, code, comments, or documentation.
