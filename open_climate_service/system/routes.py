@@ -173,6 +173,9 @@ async def manage_sync(request: Request) -> Response:
         dataset_id = str(form.get("dataset_id", "")).strip()
         end = str(form.get("end", "")).strip() or None
         publish = "publish" in form
+
+        if not dataset_id:
+            raise HTTPException(status_code=400, detail="Dataset ID is required")
     except HTTPException as exc:
         msg = urllib.parse.quote(str(exc.detail))
         return RedirectResponse(f"{base}/manage?error={msg}", status_code=303)

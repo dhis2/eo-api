@@ -146,6 +146,24 @@ async def test_manage_sync_treats_blank_end_as_none(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.anyio  # pyright: ignore[reportUntypedFunctionDecorator]
+async def test_manage_sync_rejects_blank_dataset_id() -> None:
+    response = await system_routes.manage_sync(
+        cast(
+            Request,
+            _FakeRequest(
+                {
+                    "dataset_id": "   ",
+                    "end": "",
+                }
+            ),
+        )
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "http://testserver/manage?error=Dataset%20ID%20is%20required"
+
+
+@pytest.mark.anyio  # pyright: ignore[reportUntypedFunctionDecorator]
 async def test_manage_ingest_strips_string_inputs_and_treats_blank_end_as_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

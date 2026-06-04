@@ -328,9 +328,7 @@ def _write_root_time_coordinate(zarr_path: Path, ds: xr.Dataset, *, time_dim: st
         encoding={time_dim: {"chunks": (min(ds.sizes[time_dim], _ROOT_TIME_COORD_MAX_CHUNK),)}},
     )
     root = zarr.open_group(str(zarr_path), mode="a", zarr_format=3)
-    for key, value in root_attrs.items():
-        if root.attrs.get(key) != value:
-            root.attrs[key] = value
+    root.attrs.update(root_attrs)
 
 
 def _get_cache_prefix(dataset: dict[str, Any]) -> str:
