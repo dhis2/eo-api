@@ -142,3 +142,19 @@ def get_data_dir() -> Path | None:
     if not isinstance(raw, (str, Path)):
         raise ValueError(f"data_dir in CLIMATE_SERVICE_CONFIG must be a path string, got {type(raw).__name__}")
     return (config_path.parent / raw).resolve()
+
+
+def get_utc_offset_hours() -> float:
+    """Return the UTC offset in hours for daily period boundaries, defaulting to 0 (UTC).
+
+    Set ``utc_offset_hours: 3`` in climate-service.yaml to aggregate hourly data
+    into local days (e.g. UTC+3 for East Africa) rather than UTC days.
+    """
+    raw = get_config().get("utc_offset_hours", 0)
+    if not isinstance(raw, (int, float)):
+        raise ValueError(
+            f"utc_offset_hours in CLIMATE_SERVICE_CONFIG must be a number, got {type(raw).__name__}"
+        )
+    if not -12 <= float(raw) <= 14:
+        raise ValueError(f"utc_offset_hours must be between -12 and 14, got {raw}")
+    return float(raw)
