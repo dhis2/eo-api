@@ -12,6 +12,7 @@ import xarray as xr
 from fastapi.testclient import TestClient
 
 from open_climate_service.openeo.execution import (
+    SaveResultEnvelope,
     _augment_with_workflows,
     _bbox_to_dict,
     _RegistryOverlay,
@@ -252,6 +253,21 @@ def test_result_assets_none_output_returns_empty() -> None:
     assert _result_assets(_record(None)) == {}
 
 
+def test_download_result_file_serves_geojson_with_geojson_media_type(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("open_climate_service.openeo.jobs._JOBS_DIR", tmp_path)
+    results_dir = tmp_path / "job-1" / "results"
+    results_dir.mkdir(parents=True)
+    geojson_path = results_dir / "result.geojson"
+    geojson_path.write_text('{"type":"FeatureCollection","features":[]}')
+
+    response = client.get("/jobs/job-1/results/result.geojson")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/geo+json")
+
+
 def test_create_job_does_not_advertise_missing_logs_endpoint(client: TestClient) -> None:
     response = client.post(
         "/jobs",
@@ -332,3 +348,33 @@ def test_result_route_rejects_synchronous_zarr_datacube(client: TestClient, monk
 
     assert response.status_code == 400
     assert "do not support ZARR output" in response.json()["detail"]
+
+
+def test_result_route_returns_geojson_payload_for_synchronous_vector_result(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import geopandas as gpd
+    from shapely.geometry import Point
+
+    gdf = gpd.GeoDataFrame({"value": [1.0, 2.0]}, geometry=[Point(0, 0), Point(1, 1)], crs="EPSG:4326")
+
+    def return_geojson_result(*args: object, **kwargs: object) -> SaveResultEnvelope:
+        del args, kwargs
+        return SaveResultEnvelope(gdf, "GEOJSON")
+
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        return_geojson_result,
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/geo+json")
+    payload = response.json()
+    assert payload["type"] == "FeatureCollection"
+    assert len(payload["features"]) == 2
+    assert sorted(feature["properties"]["value"] for feature in payload["features"]) == [1.0, 2.0]
