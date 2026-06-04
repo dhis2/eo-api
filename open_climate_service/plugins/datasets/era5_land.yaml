@@ -59,3 +59,55 @@
     colormap: blues
     range: [0.0, 5.0]
     nodata: 0.0
+
+- id: era5land_temperature_monthly
+  name: 2m temperature (ERA5-Land monthly)
+  short_name: 2m temperature
+  variable: t2m
+  period_type: monthly
+  sync:
+    kind: temporal
+    execution: append
+  extents:
+    spatial:
+      bbox: [-180, -90, 180, 90]
+    temporal:
+      begin: "1950-01"
+      resolution: P1M
+  ingestion:
+    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandMonthlySingleBandPlugin
+    params:
+      variable: t2m
+  units: degC
+  resolution: 9 km x 9 km
+  source: ERA5-Land Reanalysis
+  source_url: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means
+  display:
+    colormap: rdbu_r
+    range: [-30.0, 30.0]
+
+- id: era5land_precipitation_monthly
+  name: Total precipitation (ERA5-Land monthly)
+  short_name: Total precipitation
+  variable: tp
+  period_type: monthly
+  sync:
+    kind: temporal
+    execution: append
+  extents:
+    spatial:
+      bbox: [-180, -90, 180, 90]
+    temporal:
+      begin: "1950-01"
+      resolution: P1M
+  ingestion:
+    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandMonthlyPrecipitationPlugin
+    params: {}
+  units: mm
+  resolution: 9 km x 9 km
+  source: ERA5-Land Reanalysis
+  source_url: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means
+  display:
+    colormap: blues
+    range: [0.0, 100.0]
+    nodata: 0.0
