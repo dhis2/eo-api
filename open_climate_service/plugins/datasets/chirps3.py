@@ -59,7 +59,7 @@ class CHIRPS3DailyPlugin:
     max_concurrency = 4
     commit_batch_size = 30
 
-    def __init__(self, stage: str = "final", flavor: str = "rnl") -> None:
+    def __init__(self, stage: str = "final", flavor: str = "rnl", **_: Any) -> None:
         if stage not in {"final", "prelim"}:
             raise ValueError(f"stage must be 'final' or 'prelim', got {stage!r}")
         if stage == "final" and flavor not in {"rnl", "sat"}:
@@ -97,16 +97,26 @@ class CHIRPS3DailyPlugin:
         return await asyncio.get_running_loop().run_in_executor(_get_executor(), self._fetch_sync, period_id, bbox)
 
     def _availability_cutoff(self) -> date:
-        """Return the last day of the latest month treated as complete by this plugin."""
+        """Return the last day of the most recently published complete month.
+
+        Scans backward with a HEAD request on the last-day COG URL so the
+        cutoff reflects actual CDN state rather than a hardcoded lag assumption.
+        Raises if no published month is found within the last 6 months.
+        """
+        import httpx
+
         today = datetime.now(UTC).date()
-        months_back = 1 if today.day > _COMPLETE_AFTER_DAY else 2
-        year, month = today.year, today.month
-        for _ in range(months_back):
-            month -= 1
-            if month == 0:
-                month = 12
-                year -= 1
-        return date(year, month, calendar.monthrange(year, month)[1])
+        y, m = today.year, today.month
+        for _ in range(6):
+            m -= 1
+            if m == 0:
+                m, y = 12, y - 1
+            last_day = calendar.monthrange(y, m)[1]
+            candidate = date(y, m, last_day)
+            resp = httpx.head(self._url_for_day(candidate), timeout=10, follow_redirects=True)
+            if resp.status_code == 200:
+                return candidate
+        raise RuntimeError("No published CHIRPS3 month found in the last 6 months")
 
     def _url_for_day(self, day: date) -> str:
         """Build the remote CHIRPS3 raster URL for one day."""

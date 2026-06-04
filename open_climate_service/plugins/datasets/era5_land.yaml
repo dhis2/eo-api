@@ -6,9 +6,6 @@
   sync:
     kind: temporal
     execution: append
-    availability:
-      latest_available_function: open_climate_service.providers.availability.lagged_latest_available
-      lag_hours: 120
   extents:
     spatial:
       bbox: [-180, -90, 180, 90]
@@ -19,8 +16,6 @@
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandHourlySingleBandPlugin
     params:
       variable: t2m
-  transforms:
-    - open_climate_service.transforms.kelvin_to_celsius
   units: degC
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
@@ -37,9 +32,6 @@
   sync:
     kind: temporal
     execution: append
-    availability:
-      latest_available_function: open_climate_service.providers.availability.lagged_latest_available
-      lag_hours: 120
   extents:
     spatial:
       bbox: [-180, -90, 180, 90]
@@ -49,8 +41,6 @@
   ingestion:
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandPrecipitationPlugin
     params: {}
-  transforms:
-    - open_climate_service.transforms.metres_to_mm
   units: mm
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
