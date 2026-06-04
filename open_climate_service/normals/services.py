@@ -21,6 +21,7 @@ _EDH_API_KEY_ENV = "EDH_API_KEY"
 # Map from source dataset ID to (edh_variable, unit_transform)
 _EDH_DAILY_SOURCES: dict[str, tuple[str, str]] = {
     "era5land_temperature_daily": ("t2m", "kelvin_to_celsius"),
+    "era5land_precipitation_daily": ("tp", "metres_to_mm"),
 }
 
 
@@ -96,6 +97,9 @@ def compute_normals(request: NormalsRequest, bbox: list[float]) -> NormalsRespon
     if transform == "kelvin_to_celsius":
         normals[edh_var] = normals[edh_var] - 273.15
         normals[edh_var].attrs["units"] = "degC"
+    elif transform == "metres_to_mm":
+        normals[edh_var] = normals[edh_var] * 1000
+        normals[edh_var].attrs["units"] = "mm"
 
     normals = normals.rename({"longitude": "x", "latitude": "y"})
 
