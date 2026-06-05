@@ -407,7 +407,11 @@ def _maybe_build_pyramid(
             return ArtifactFormat.ICECHUNK, store_path, [store_path]
 
         zarr_path = downloader.get_zarr_path_unconditional(dataset)
-        downloader.build_pyramid_zarr(ds, zarr_path)
+        try:
+            downloader.build_pyramid_zarr(ds, zarr_path)
+        except Exception:
+            logger.warning("Pyramid build failed; storing as flat IceChunk artifact", exc_info=True)
+            return ArtifactFormat.ICECHUNK, store_path, [store_path]
         return ArtifactFormat.ZARR, zarr_path, [store_path, zarr_path]
     finally:
         ds.close()

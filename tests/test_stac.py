@@ -454,7 +454,6 @@ def test_collection_uses_root_href_for_remote_pyramid_zarr_store(
     )
     monkeypatch.setattr(stac_services, "_zarr_asset_metadata", lambda _: {"zarr:consolidated": True})
     monkeypatch.setattr(stac_services, "_zarr_open_kwargs", lambda _: {"consolidated": None})
-    monkeypatch.setattr(stac_services, "_is_pyramid_zarr", lambda _: True)
 
     response = client.get("/collections/chirps3_precipitation_daily")
 

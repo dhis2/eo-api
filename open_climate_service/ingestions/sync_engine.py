@@ -418,7 +418,7 @@ def _icechunk_path_for(artifact: ArtifactRecord) -> str | None:
         return artifact.path or (artifact.asset_paths[0] if artifact.asset_paths else None)
     if artifact.format == ArtifactFormat.ZARR:
         for ap in artifact.asset_paths or []:
-            if ".icechunk" in ap:
+            if ap.endswith(".icechunk"):
                 return ap
     return None
 
@@ -434,8 +434,7 @@ def _supports_append(source_dataset: dict[str, Any], latest_artifact: ArtifactRe
     if latest_artifact.format == ArtifactFormat.ZARR and _icechunk_path_for(latest_artifact) is not None:
         return True
     logger.info(
-        "Sync append execution for dataset '%s' requires an existing Icechunk artifact; "
-        "falling back to rematerialize",
+        "Sync append execution for dataset '%s' requires an existing Icechunk artifact; falling back to rematerialize",
         source_dataset.get("id", "<unknown>"),
     )
     return False
