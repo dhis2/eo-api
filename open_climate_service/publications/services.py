@@ -35,5 +35,3 @@ def _collection_id_for(record: ArtifactRecord) -> str:
 def managed_dataset_id_for(record: ArtifactRecord) -> str:
     """Return the stable managed dataset id for a stored record."""
     return _collection_id_for(record)
-
-
