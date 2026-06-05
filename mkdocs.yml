@@ -76,6 +76,7 @@ nav:
       - openEO: openeo.md
       - Built-in datasets: built_in_datasets.md
       - Processes: processes.md
+      - Climate indices: climate_indices.md
       - Workflows: workflows.md
       - Instance guide: instance_guide.md
       - Adding custom datasets: adding_custom_datasets.md
