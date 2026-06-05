@@ -118,6 +118,22 @@ def file_formats() -> dict[str, Any]:
             "parameters": {},
             "links": [{"rel": "about", "href": "https://geoparquet.org"}],
         },
+        "DHIS2DVSJSON": {
+            "title": "DHIS2 data value set JSON",
+            "description": (
+                "DHIS2 import-ready JSON dataValues envelope for aggregated org-unit results. "
+                "Requires save_result options such as data_element_id, org_unit_field, and period_type."
+            ),
+            "gis_data_types": ["table", "vector"],
+            "parameters": {
+                "data_element_id": {"type": "string"},
+                "org_unit_field": {"type": "string"},
+                "period_field": {"type": "string", "default": "t"},
+                "period_type": {"type": "string"},
+                "category_option_combo": {"type": "string"},
+            },
+            "links": [],
+        },
     }
     return {
         "input": {},
@@ -277,9 +293,20 @@ _RESULT_MEDIA_TYPES: dict[str, str] = {
     ".tif": "image/tiff; subtype=geotiff",
     ".png": "image/png",
     ".csv": "text/csv",
+    ".json": "application/json",
     ".geojson": "application/geo+json",
     ".parquet": "application/vnd.apache.parquet",
 }
+
+
+def _json_tabular_payload_response(frame: Any, options: dict[str, Any]) -> JSONResponse:
+    from open_climate_service.openeo.jobs import _build_dhis2_dvs_payload
+
+    try:
+        payload = _build_dhis2_dvs_payload(frame, options)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(payload)
 
 
 @jobs_router.get("/{job_id}/results/{filename}")
@@ -336,18 +363,27 @@ def execute_synchronous(
     import xarray as xr
 
     from open_climate_service.openeo.execution import SaveResultEnvelope
-    from open_climate_service.openeo.jobs import _VECTOR_FORMATS, _write_raster, _write_vector
+    from open_climate_service.openeo.jobs import (
+        _TABULAR_EXPORT_FORMATS,
+        _VECTOR_FORMATS,
+        _write_raster,
+        _write_vector,
+    )
 
     # Unwrap save_result envelope to get requested format
     fmt = "ZARR"
+    options: dict[str, Any] = {}
     if isinstance(result, SaveResultEnvelope):
         fmt = result.format
+        options = result.options
         result = result.data
 
     if isinstance(result, xr.DataArray):
         result = result.to_dataset(name=result.name or "result")
 
     if isinstance(result, xr.Dataset):
+        if fmt in _TABULAR_EXPORT_FORMATS:
+            return _json_tabular_payload_response(result.to_dataframe().reset_index(), options)
         if fmt == "ZARR":
             raise HTTPException(
                 status_code=400,
@@ -381,8 +417,12 @@ def execute_synchronous(
 
     try:
         import geopandas as gpd
+        import pandas as pd
 
         if isinstance(result, gpd.GeoDataFrame):
+            if fmt in _TABULAR_EXPORT_FORMATS:
+                frame = pd.DataFrame(result.drop(columns="geometry", errors="ignore"))
+                return _json_tabular_payload_response(frame, options)
             if fmt == "GEOJSON":
                 if result.crs is not None and result.crs.to_epsg() != 4326:
                     result = result.to_crs("EPSG:4326")

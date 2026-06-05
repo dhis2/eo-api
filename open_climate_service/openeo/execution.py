@@ -235,13 +235,14 @@ def _load_collection_impl(
 class SaveResultEnvelope:
     """Wraps the process graph result with the requested output format."""
 
-    def __init__(self, data: Any, format: str) -> None:
+    def __init__(self, data: Any, format: str, options: dict[str, Any] | None = None) -> None:
         self.data = data
         self.format = format.upper()
+        self.options = dict(options or {})
 
 
 def _save_result_impl(data: Any, format: str = "Zarr", options: dict[str, Any] | None = None) -> Any:
-    return SaveResultEnvelope(data, format)
+    return SaveResultEnvelope(data, format, options)
 
 
 # ---------------------------------------------------------------------------
