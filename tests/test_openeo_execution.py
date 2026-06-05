@@ -335,6 +335,55 @@ def test_download_result_file_serves_json_with_json_media_type(
     assert response.headers["content-type"].startswith("application/json")
 
 
+def test_create_job_uses_explicit_title_when_provided(client: TestClient) -> None:
+    response = client.post(
+        "/jobs",
+        json={
+            "title": "My custom job",
+            "process": {"process_graph": {"result": {"process_id": "constant", "arguments": {"x": 1}, "result": True}}},
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["title"] == "My custom job"
+
+
+def test_create_job_derives_title_from_load_collection(client: TestClient) -> None:
+    response = client.post(
+        "/jobs",
+        json={
+            "process": {
+                "process_graph": {
+                    "load": {
+                        "process_id": "load_collection",
+                        "arguments": {
+                            "id": "chirps3_precipitation_daily",
+                            "temporal_extent": ["2023-01-01", "2023-12-31"],
+                        },
+                    },
+                    "result": {
+                        "process_id": "save_result",
+                        "arguments": {"data": {"from_node": "load"}, "format": "GTiff"},
+                        "result": True,
+                    },
+                }
+            }
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["title"] == "chirps3_precipitation_daily 2023-01-01–2023-12-31"
+
+
+def test_create_job_title_is_none_when_no_load_collection(client: TestClient) -> None:
+    response = client.post(
+        "/jobs",
+        json={
+            "process": {"process_graph": {"result": {"process_id": "constant", "arguments": {"x": 1}, "result": True}}}
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["title"] is None
+
+
 def test_create_job_does_not_advertise_missing_logs_endpoint(client: TestClient) -> None:
     response = client.post(
         "/jobs",

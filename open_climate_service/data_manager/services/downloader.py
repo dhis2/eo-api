@@ -17,7 +17,6 @@ from topozarr.coarsen import create_pyramid
 from open_climate_service import config as api_config
 from open_climate_service.shared.dynamic_import import get_dynamic_function
 from open_climate_service.shared.time import resolve_iso_period_step, time_chunk_for_iso_step
-from open_climate_service.transforms.pipeline import run_dataset_transforms
 from open_climate_service.transforms.reproject import reproject_to_instance_crs
 
 from .utils import get_time_dim, get_x_y_dims
@@ -148,7 +147,6 @@ def build_dataset_zarr(dataset: dict[str, Any], *, start: str | None = None, end
     dims = [x_dim, y_dim]
 
     ds = _select_time_range(ds, dataset=dataset, start=start, end=end)
-    ds = _run_transforms(ds, dataset)
 
     source_crs: str = dataset.get("source_crs", "EPSG:4326")
     ds = reproject_to_instance_crs(ds, dataset, source_crs=source_crs)
@@ -265,10 +263,6 @@ def _select_time_range(
         selected.sizes[time_dim],
     )
     return selected
-
-
-def _run_transforms(ds: xr.Dataset, dataset: dict[str, Any]) -> xr.Dataset:
-    return run_dataset_transforms(ds, dataset)
 
 
 def _compute_time_space_chunks(

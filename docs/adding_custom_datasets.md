@@ -96,26 +96,6 @@ class ENACTSRainfallPlugin:
 | `period_type` | Yes | Temporal resolution: `hourly`, `daily`, `monthly`, `yearly` |
 | `sync.kind` | Yes | `temporal` — data grows over time; `release` — versioned releases; `static` — never synced |
 | `sync.execution` | No | `append` — new time steps appended to existing store; `rematerialize` — full rebuild on each sync |
-| `sync.availability` | No | Provider availability policy — see below |
-
-**Sync availability** — how the API determines the latest available data:
-
-```yaml
-sync:
-  kind: temporal
-  execution: append
-  availability:
-    latest_available_function: open_climate_service.providers.availability.lagged_latest_available
-    lag_hours: 48
-```
-
-| Field | Description |
-| ----- | ----------- |
-| `latest_available_function` | Dotted path to a built-in availability function in `open_climate_service.providers.availability` |
-| `lag_hours` / `lag_days` | Data is delayed by this many hours or days |
-| `allow_future` | Allow requesting future dates (e.g. forecasts or projections). Default: `false` |
-
-Omit `sync.availability` entirely for `static` datasets or when you always want to sync up to the requested end date.
 
 **Ingestion**
 

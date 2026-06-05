@@ -156,21 +156,3 @@ def _validate_dataset_template(dataset: object, *, source: str) -> None:
     has_plugin = isinstance(plugin, str) and bool(plugin)
     if not has_plugin:
         raise ValueError(f"Dataset template '{dataset_id}' in {source} must define ingestion.plugin")
-
-    sync_availability = sync_block.get("availability") if isinstance(sync_block, dict) else None
-    if sync_availability is not None:
-        _validate_sync_availability(sync_availability, dataset_id=dataset_id, source=source)
-
-
-def _validate_sync_availability(sync_availability: object, *, dataset_id: str, source: str) -> None:
-    """Validate optional source availability policy metadata."""
-    if not isinstance(sync_availability, dict):
-        raise ValueError(f"Dataset template '{dataset_id}' in {source} has invalid sync.availability")
-
-    latest_available_function = sync_availability.get("latest_available_function")
-    if latest_available_function is not None and (
-        not isinstance(latest_available_function, str) or not latest_available_function
-    ):
-        raise ValueError(
-            f"Dataset template '{dataset_id}' in {source} has invalid sync.availability.latest_available_function"
-        )
