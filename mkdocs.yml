@@ -75,6 +75,7 @@ nav:
       - Accessing data: user_guide.md
       - openEO: openeo.md
       - Built-in datasets: built_in_datasets.md
+      - ERA5-Land datasets: era5_land_datasets.md
       - Processes: processes.md
       - Climate indices: climate_indices.md
       - Workflows: workflows.md
