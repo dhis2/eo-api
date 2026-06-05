@@ -427,14 +427,18 @@ def _supports_append(source_dataset: dict[str, Any], latest_artifact: ArtifactRe
     """Return whether this template opts into store-based append sync execution."""
     if source_dataset.get("sync", {}).get("execution") != SyncAction.APPEND.value:
         return False
-    if _icechunk_path_for(latest_artifact) is None:
-        logger.info(
-            "Sync append execution for dataset '%s' requires an existing Icechunk artifact; "
-            "falling back to rematerialize",
-            source_dataset.get("id", "<unknown>"),
-        )
-        return False
-    return True
+    # Plain IceChunk artifact — path may not yet be set on first sync plan.
+    if latest_artifact.format == ArtifactFormat.ICECHUNK:
+        return True
+    # Pyramid-upgraded ZARR artifact — IceChunk companion must be present in asset_paths.
+    if latest_artifact.format == ArtifactFormat.ZARR and _icechunk_path_for(latest_artifact) is not None:
+        return True
+    logger.info(
+        "Sync append execution for dataset '%s' requires an existing Icechunk artifact; "
+        "falling back to rematerialize",
+        source_dataset.get("id", "<unknown>"),
+    )
+    return False
 
 
 def _is_plugin_backed(source_dataset: dict[str, Any]) -> bool:

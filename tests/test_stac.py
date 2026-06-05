@@ -354,7 +354,7 @@ def test_collection_sets_hourly_step_to_pt1h(client: TestClient, monkeypatch: py
     assert payload["cube:dimensions"]["t"]["step"] == "PT1H"
 
 
-def test_collection_uses_level0_href_for_pyramid_zarr_store(
+def test_collection_uses_root_href_for_pyramid_zarr_store(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
@@ -389,7 +389,7 @@ def test_collection_uses_level0_href_for_pyramid_zarr_store(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["assets"]["zarr"]["href"].endswith("/zarr/chirps3_precipitation_daily/0")
+    assert payload["assets"]["zarr"]["href"].endswith("/zarr/chirps3_precipitation_daily")
 
 
 def test_collection_uses_root_href_for_icechunk_store(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -426,7 +426,7 @@ def test_collection_uses_root_href_for_icechunk_store(client: TestClient, monkey
     assert payload["assets"]["zarr"]["zarr:zarr_format"] == 3
 
 
-def test_collection_uses_level0_href_for_remote_pyramid_zarr_store(
+def test_collection_uses_root_href_for_remote_pyramid_zarr_store(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     artifact = _artifact(artifact_id="a1", path="s3://example-bucket/chirps3_precipitation_daily.zarr")
@@ -460,7 +460,7 @@ def test_collection_uses_level0_href_for_remote_pyramid_zarr_store(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["assets"]["zarr"]["href"].endswith("/zarr/chirps3_precipitation_daily/0")
+    assert payload["assets"]["zarr"]["href"].endswith("/zarr/chirps3_precipitation_daily")
 
 
 def test_collection_returns_404_for_unknown_dataset(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
