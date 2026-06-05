@@ -12,6 +12,7 @@ import xarray as xr
 from fastapi.testclient import TestClient
 
 from open_climate_service.openeo.execution import (
+    SaveResultEnvelope,
     _augment_with_workflows,
     _bbox_to_dict,
     _RegistryOverlay,
@@ -252,6 +253,70 @@ def test_result_assets_none_output_returns_empty() -> None:
     assert _result_assets(_record(None)) == {}
 
 
+def test_download_result_file_serves_geojson_with_geojson_media_type(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("open_climate_service.openeo.jobs._JOBS_DIR", tmp_path)
+    results_dir = tmp_path / "job-1" / "results"
+    results_dir.mkdir(parents=True)
+    geojson_path = results_dir / "result.geojson"
+    geojson_path.write_text('{"type":"FeatureCollection","features":[]}')
+
+    response = client.get("/jobs/job-1/results/result.geojson")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/geo+json")
+
+
+def test_create_job_uses_explicit_title_when_provided(client: TestClient) -> None:
+    response = client.post(
+        "/jobs",
+        json={
+            "title": "My custom job",
+            "process": {"process_graph": {"result": {"process_id": "constant", "arguments": {"x": 1}, "result": True}}},
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["title"] == "My custom job"
+
+
+def test_create_job_derives_title_from_load_collection(client: TestClient) -> None:
+    response = client.post(
+        "/jobs",
+        json={
+            "process": {
+                "process_graph": {
+                    "load": {
+                        "process_id": "load_collection",
+                        "arguments": {
+                            "id": "chirps3_precipitation_daily",
+                            "temporal_extent": ["2023-01-01", "2023-12-31"],
+                        },
+                    },
+                    "result": {
+                        "process_id": "save_result",
+                        "arguments": {"data": {"from_node": "load"}, "format": "GTiff"},
+                        "result": True,
+                    },
+                }
+            }
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["title"] == "chirps3_precipitation_daily 2023-01-01–2023-12-31"
+
+
+def test_create_job_title_is_none_when_no_load_collection(client: TestClient) -> None:
+    response = client.post(
+        "/jobs",
+        json={
+            "process": {"process_graph": {"result": {"process_id": "constant", "arguments": {"x": 1}, "result": True}}}
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["title"] is None
+
+
 def test_create_job_does_not_advertise_missing_logs_endpoint(client: TestClient) -> None:
     response = client.post(
         "/jobs",
@@ -332,3 +397,60 @@ def test_result_route_rejects_synchronous_zarr_datacube(client: TestClient, monk
 
     assert response.status_code == 400
     assert "do not support ZARR output" in response.json()["detail"]
+
+
+def test_result_route_returns_geojson_payload_for_synchronous_vector_result(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import geopandas as gpd
+    from shapely.geometry import Point
+
+    gdf = gpd.GeoDataFrame({"value": [1.0, 2.0]}, geometry=[Point(0, 0), Point(1, 1)], crs="EPSG:4326")
+
+    def return_geojson_result(*args: object, **kwargs: object) -> SaveResultEnvelope:
+        del args, kwargs
+        return SaveResultEnvelope(gdf, "GEOJSON")
+
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        return_geojson_result,
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/geo+json")
+    payload = response.json()
+    assert payload["type"] == "FeatureCollection"
+    assert len(payload["features"]) == 2
+    assert sorted(feature["properties"]["value"] for feature in payload["features"]) == [1.0, 2.0]
+
+
+def test_result_route_reprojects_geojson_payload_to_wgs84(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import geopandas as gpd
+    from shapely.geometry import Point
+
+    gdf = gpd.GeoDataFrame({"value": [1.0]}, geometry=[Point(111319.49079327357, 111325.1428663851)], crs="EPSG:3857")
+
+    def return_geojson_result(*args: object, **kwargs: object) -> SaveResultEnvelope:
+        del args, kwargs
+        return SaveResultEnvelope(gdf, "GEOJSON")
+
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        return_geojson_result,
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    coords = payload["features"][0]["geometry"]["coordinates"]
+    assert coords[0] == pytest.approx(1.0, rel=0, abs=1e-6)
+    assert coords[1] == pytest.approx(1.0, rel=0, abs=1e-6)

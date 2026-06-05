@@ -55,7 +55,6 @@ dependencies = [
     "pystac>=1.10,<2",
     "geojson-pydantic>=2.1.0",
     "httpx>=0.28.1",
-    "earthkit-transforms==0.5.*",
     "metpy>=1.7,<2",
     "xstac>=1.0,<2",
     "zarr>=3.1.6,<4",
@@ -68,6 +67,7 @@ dependencies = [
     "openeo-pg-parser-networkx>=2026.3.3",
     "openeo-processes-dask[implementations]",
     "python-multipart>=0.0.29",
+    "xclim>=0.61.1",
 ]
 
 [project.urls]
@@ -121,7 +121,7 @@ module = "tests.*"
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-module = ["pygeoapi.*", "rasterio.*", "pygeofilter.*", "requests.*", "geopandas.*", "earthkit.*", "metpy.*", "matplotlib.*", "yaml", "xproj", "topozarr.*", "geozarr_toolkit", "xstac", "openeo_pg_parser_networkx", "openeo_pg_parser_networkx.*", "openeo_processes_dask", "openeo_processes_dask.*", "dask_geopandas", "dask_geopandas.*"]
+module = ["pygeoapi.*", "rasterio.*", "pygeofilter.*", "requests.*", "geopandas.*", "earthkit.*", "metpy.*", "matplotlib.*", "yaml", "xproj", "topozarr.*", "geozarr_toolkit", "xstac", "openeo_pg_parser_networkx", "openeo_pg_parser_networkx.*", "openeo_processes_dask", "openeo_processes_dask.*", "dask_geopandas", "dask_geopandas.*", "xclim", "xclim.*"]
 ignore_missing_imports = true
 
 [tool.pyright]

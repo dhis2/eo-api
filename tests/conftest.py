@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from open_climate_service import config as api_config
 from open_climate_service.main import app
+from open_climate_service.openeo import xclim_processes
 
 _TEST_CONFIG = """\
 extent:
@@ -32,8 +33,10 @@ def _test_open_climate_service_config(tmp_path_factory: pytest.TempPathFactory) 
 @pytest.fixture(autouse=True)
 def _reset_config_cache() -> Generator[None, None, None]:
     api_config._cache = None
+    xclim_processes._cache = None
     yield
     api_config._cache = None
+    xclim_processes._cache = None
 
 
 @pytest.fixture

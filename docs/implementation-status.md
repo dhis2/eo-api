@@ -44,8 +44,6 @@ The public surface is intentionally small:
   - sync planning and execution engine
 - [open_climate_service/ingestions/schemas.py](../open_climate_service/ingestions/schemas.py)
   - public ingestion, dataset, and sync contracts
-- [open_climate_service/providers/availability.py](../open_climate_service/providers/availability.py)
-  - provider-specific sync availability policies
 - [open_climate_service/extents/routes.py](../open_climate_service/extents/routes.py)
   - extent discovery endpoint
 - [open_climate_service/extents/services.py](../open_climate_service/extents/services.py)
@@ -199,7 +197,7 @@ Implemented sync behavior:
 - temporal datasets can append missing periods
 - release datasets rematerialize when a newer requested release exists
 - static datasets return `not_syncable`
-- provider availability policies clamp unsafe future targets before execution
+- plugin `periods()` clamps target end to actually available data before execution
 - append V1 downloads only the missing range, then rebuilds the canonical artifact from local cache
 - Zarr materialization clips cached upstream data to the requested artifact scope
 - artifact reuse ignores records whose stored coverage does not match the requested scope
@@ -239,7 +237,7 @@ Implemented sync behavior:
 
 1. `GET /sync/{dataset_id}/plan` resolves the latest local artifact and source template
 2. `sync_engine.plan_sync(...)` computes the action, target, and delta range
-3. provider availability metadata clamps unsupported future targets
+3. plugin `periods()` is probed to clamp the target end to available data
 4. `POST /sync/{dataset_id}` returns `up_to_date` or `not_syncable` without writes when applicable
 5. otherwise, sync calls the existing artifact creation path
 6. the new version is optionally published under the same stable managed dataset id

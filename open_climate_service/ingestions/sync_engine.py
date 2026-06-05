@@ -11,7 +11,7 @@ and keeps future scheduler-driven sync jobs on the same code path.
 
 from __future__ import annotations
 
-import inspect
+import asyncio
 import logging
 import os
 from collections.abc import Callable
@@ -29,9 +29,7 @@ from open_climate_service.ingestions.schemas import (
     SyncKind,
     SyncResponse,
 )
-from open_climate_service.providers import availability as provider_availability
 from open_climate_service.publications.services import managed_dataset_id_for
-from open_climate_service.shared.dynamic_import import get_dynamic_function
 from open_climate_service.shared.time import (
     datetime_to_period_string,
     normalize_period_string,
@@ -90,37 +88,56 @@ def plan_sync(
     period_type = str(source_dataset["period_type"])
     normalized_requested_end = requested_end.strip() if isinstance(requested_end, str) else None
     normalized_requested_end = normalized_requested_end or None
-    requested_target_end_source = "request" if normalized_requested_end is not None else "default_today"
+    target_end_source = "request" if normalized_requested_end is not None else "default_today"
     if normalized_requested_end is not None:
-        resolved_end = normalize_period_string(normalized_requested_end, period_type)
+        target_end = normalize_period_string(normalized_requested_end, period_type)
     else:
-        resolved_end = _default_target_end(period_type=period_type)
-    latest_available_end = _latest_available_end(source_dataset=source_dataset, requested_end=resolved_end)
-    target_end_source = (
-        requested_target_end_source
-        if latest_available_end == resolved_end
-        else f"{requested_target_end_source}_clamped_by_availability"
-    )
+        target_end = _default_target_end(period_type=period_type)
 
     if sync_kind == SyncKind.TEMPORAL:
         next_period_start = _next_period_start(current_end, period_type=period_type)
-        if next_period_start > latest_available_end:
+        if next_period_start > target_end:
             return SyncDetail(
                 source_dataset_id=latest_artifact.dataset_id,
                 sync_kind=sync_kind,
                 action=SyncAction.NO_OP,
                 reason="no_new_period",
                 message=(
-                    f"Data already exists through {current_end}; target {latest_available_end} "
-                    "does not require a new download."
+                    f"Data already exists through {current_end}; target {target_end} does not require a new download."
                 ),
                 current_start=current_start,
                 current_end=current_end,
-                target_end=latest_available_end,
+                target_end=target_end,
                 target_end_source=target_end_source,
             )
+        # Probe the plugin for actually-available periods before committing to a sync.
+        # The full list is stored on the SyncDetail so the orchestrator can reuse it
+        # without a second probe at execution time.
+        available_periods = _probe_available_periods(source_dataset, next_period_start, target_end)
+        # available_periods is None  → no plugin, use target_end as-is
+        # available_periods is []    → plugin exists but nothing available → NO_OP
+        # available_periods is [...]  → clamp target_end to the last available period
+        if available_periods == []:
+            return SyncDetail(
+                source_dataset_id=latest_artifact.dataset_id,
+                sync_kind=sync_kind,
+                action=SyncAction.NO_OP,
+                reason="no_new_period",
+                message=f"Data already exists through {current_end}; no new periods available from the source.",
+                current_start=current_start,
+                current_end=current_end,
+                target_end=target_end,
+                target_end_source=target_end_source,
+            )
+        if available_periods is not None and available_periods[-1] < target_end:
+            target_end = available_periods[-1]
+            target_end_source = "plugin_availability"
         action = SyncAction.APPEND if _supports_append(source_dataset, latest_artifact) else SyncAction.REMATERIALIZE
         reason = "new_periods_available_for_append" if action == SyncAction.APPEND else "new_periods_available"
+        # Only pass periods for APPEND — it covers [next_period_start, target_end].
+        # For REMATERIALIZE the orchestrator must probe the full [current_start, target_end]
+        # range so we pass None and let it call plugin.periods() with the correct bounds.
+        periods_for_orchestrator = available_periods if action == SyncAction.APPEND else None
         return SyncDetail(
             source_dataset_id=latest_artifact.dataset_id,
             sync_kind=sync_kind,
@@ -129,31 +146,51 @@ def plan_sync(
             message=_sync_plan_message(
                 action=action,
                 current_end=current_end,
-                target_end=latest_available_end,
+                target_end=target_end,
                 delta_start=next_period_start,
-                delta_end=latest_available_end,
+                delta_end=target_end,
             ),
             current_start=current_start,
             current_end=current_end,
-            target_end=latest_available_end,
+            target_end=target_end,
             target_end_source=target_end_source,
             delta_start=next_period_start,
-            delta_end=latest_available_end,
+            delta_end=target_end,
+            periods=periods_for_orchestrator,
         )
 
-    if current_end >= latest_available_end:
+    # Clamp target_end to what the plugin reports as actually available so we
+    # never plan a rematerialization into future/unpublished releases.
+    available_periods = _probe_available_periods(source_dataset, current_end, target_end)
+    if available_periods is not None:
+        if not available_periods:
+            return SyncDetail(
+                source_dataset_id=latest_artifact.dataset_id,
+                sync_kind=sync_kind,
+                action=SyncAction.NO_OP,
+                reason="no_new_release",
+                message=f"No new release available beyond {current_end}.",
+                current_start=current_start,
+                current_end=current_end,
+                target_end=target_end,
+                target_end_source=target_end_source,
+            )
+        target_end = available_periods[-1]
+        target_end_source = "plugin_availability"
+
+    if current_end >= target_end:
         return SyncDetail(
             source_dataset_id=latest_artifact.dataset_id,
             sync_kind=sync_kind,
             action=SyncAction.NO_OP,
             reason="no_new_release",
             message=(
-                f"Release {current_end} is already available locally; target {latest_available_end} "
+                f"Release {current_end} is already available locally; target {target_end} "
                 "does not require a new download."
             ),
             current_start=current_start,
             current_end=current_end,
-            target_end=latest_available_end,
+            target_end=target_end,
             target_end_source=target_end_source,
         )
 
@@ -162,10 +199,10 @@ def plan_sync(
         sync_kind=sync_kind,
         action=SyncAction.REMATERIALIZE,
         reason="new_release_available",
-        message=f"A newer release is available: {latest_available_end}. Sync will rematerialize the dataset.",
+        message=f"A newer release is available: {target_end}. Sync will rematerialize the dataset.",
         current_start=current_start,
         current_end=current_end,
-        target_end=latest_available_end,
+        target_end=target_end,
         target_end_source=target_end_source,
     )
 
@@ -259,6 +296,7 @@ def run_sync(
         overwrite=False,
         publish=publish,
         on_progress=on_progress,
+        periods=sync_detail.periods,
     )
     logger.info(
         "Sync completed for dataset '%s': artifact_id=%s action=%s",
@@ -297,6 +335,32 @@ def _sync_plan_message(
             f"{delta_start} through {delta_end} and extend coverage through {target_end}."
         )
     return f"Data exists through {current_end}. Sync will rematerialize the dataset through {target_end}."
+
+
+def _probe_available_periods(
+    source_dataset: dict[str, Any],
+    start: str,
+    target_end: str,
+) -> list[str] | None:
+    """Ask the plugin which periods are actually available.
+
+    Returns the full period list (possibly empty) so the result can be reused
+    at execution time, avoiding a second probe in the orchestrator.
+
+    Returns None only when the dataset has no plugin (non-streaming) — the
+    caller falls back to the requested target_end without clamping.
+
+    Returns [] when the plugin exists but has no periods for the requested
+    range — the caller should treat this as NO_OP.
+    """
+    from open_climate_service.shared.plugin_loader import instantiate_plugin
+
+    plugin_path = source_dataset.get("ingestion", {}).get("plugin")
+    if not plugin_path:
+        return None
+    params: dict[str, Any] = source_dataset.get("ingestion", {}).get("params") or {}
+    plugin = instantiate_plugin(plugin_path, params)
+    return asyncio.run(plugin.periods(start, target_end))
 
 
 def _next_period_start(latest_period_end: str, *, period_type: str) -> str:
@@ -340,36 +404,6 @@ def _default_target_end(*, period_type: str) -> str:
     if period_type == "yearly":
         return str(today.year)
     raise ValueError(f"Unsupported period_type '{period_type}' for sync")
-
-
-def _latest_available_end(*, source_dataset: dict[str, Any], requested_end: str) -> str:
-    """Clamp requested sync end to the latest upstream state declared by template metadata.
-
-    The current engine does not query upstream providers directly. Instead it can
-    apply conservative template metadata so sync planning does not overshoot known
-    provider lag or release cadence.
-    """
-    availability = source_dataset.get("sync", {}).get("availability")
-    if not isinstance(availability, dict):
-        return requested_end
-
-    provider_latest = _provider_latest_available_end(
-        source_dataset=source_dataset,
-        availability=availability,
-        requested_end=requested_end,
-    )
-    if provider_latest is not None:
-        return min(requested_end, provider_latest)
-    # Keep the legacy metadata-only lag fallback for templates that do not yet
-    # declare a latest_available_function, but delegate to the provider helper
-    # so lag logic lives in one place.
-    return min(
-        requested_end,
-        provider_availability.lagged_latest_available(
-            dataset=source_dataset,
-            requested_end=requested_end,
-        ),
-    )
 
 
 def _supports_append(source_dataset: dict[str, Any], latest_artifact: ArtifactRecord) -> bool:
@@ -494,36 +528,3 @@ def _sync_current_end(*, source_dataset: dict[str, Any], latest_artifact: Artifa
             exc,
         )
         return latest_artifact.coverage.temporal.end
-
-
-def _provider_latest_available_end(
-    *,
-    source_dataset: dict[str, Any],
-    availability: dict[str, Any],
-    requested_end: str,
-) -> str | None:
-    """Call an optional provider-specific latest-availability function."""
-    function_path = availability.get("latest_available_function")
-    if not isinstance(function_path, str) or not function_path:
-        return None
-
-    try:
-        latest_available_fn = get_dynamic_function(function_path)
-        params: dict[str, Any] = {}
-        signature = inspect.signature(latest_available_fn)
-        if "dataset" in signature.parameters:
-            params["dataset"] = source_dataset
-        if "requested_end" in signature.parameters:
-            params["requested_end"] = requested_end
-        result = latest_available_fn(**params)
-    except (AttributeError, ImportError, TypeError, ValueError) as exc:
-        raise SyncConfigurationError(f"Latest availability function '{function_path}' failed: {exc}") from exc
-    if not isinstance(result, str):
-        raise SyncConfigurationError(f"Latest availability function '{function_path}' must return a period string")
-    try:
-        return normalize_period_string(result, period_type=str(source_dataset["period_type"]))
-    except (KeyError, TypeError, ValueError) as exc:
-        raise SyncConfigurationError(
-            f"Latest availability function '{function_path}' returned invalid period "
-            f"'{result}' for dataset period_type '{source_dataset.get('period_type')}'"
-        ) from exc
