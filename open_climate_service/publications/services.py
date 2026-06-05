@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
 
 from open_climate_service.ingestions.schemas import ArtifactRecord, PublicationStatus
@@ -38,18 +37,3 @@ def managed_dataset_id_for(record: ArtifactRecord) -> str:
     return _collection_id_for(record)
 
 
-def _native_dataset_href(dataset_id: str) -> str:
-    """Return a dataset-detail link suitable for generated metadata."""
-    path = f"/datasets/{dataset_id}"
-    base_url = os.getenv("CLIMATE_SERVICE_BASE_URL")
-    if base_url:
-        return f"{base_url.rstrip('/')}{path}"
-
-    ogcapi_base_url = os.getenv("OGCAPI_BASE_URL")
-    if ogcapi_base_url:
-        normalized = ogcapi_base_url.rstrip("/")
-        if normalized.endswith("/ogcapi"):
-            normalized = normalized[: -len("/ogcapi")]
-        return f"{normalized}{path}"
-
-    return path
