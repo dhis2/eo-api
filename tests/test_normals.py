@@ -48,7 +48,7 @@ def test_circular_rolling_mean_smooths_spike() -> None:
     da = xr.DataArray(vals, dims=["dayofyear", "y", "x"])
     result = _circular_rolling_mean(da, window=31)
     assert float(result[180, 0, 0]) < 10.0  # spike is smoothed
-    assert float(result[0, 0, 0]) < 1.0     # days far from spike near zero
+    assert float(result[0, 0, 0]) < 1.0  # days far from spike near zero
 
 
 def test_compute_normals_temperature(tmp_path: pytest.TempPathFactory) -> None:
