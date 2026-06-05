@@ -355,15 +355,17 @@ def _create_streaming_artifact(
 
         request_scope = request_scope.model_copy(update={"end": coverage.temporal.end})
 
+        artifact_format, artifact_path, asset_paths = _maybe_build_pyramid(store_path, dataset)
+
         record = ArtifactRecord(
             artifact_id=str(uuid4()),
             dataset_id=str(dataset["id"]),
             dataset_name=str(dataset["name"]),
             variable=str(dataset["variable"]),
             period_type=str(dataset.get("period_type")) if dataset.get("period_type") is not None else None,
-            format=ArtifactFormat.ICECHUNK,
-            path=str(store_path.resolve()),
-            asset_paths=[str(store_path.resolve())],
+            format=artifact_format,
+            path=str(artifact_path.resolve()),
+            asset_paths=[str(p.resolve()) for p in asset_paths],
             variables=[str(dataset["variable"])],
             request_scope=request_scope,
             coverage=coverage,
@@ -380,6 +382,35 @@ def _create_streaming_artifact(
         return stored_record
     finally:
         lock.release()
+
+
+def _maybe_build_pyramid(
+    store_path: Path,
+    dataset: dict[str, object],
+) -> tuple[ArtifactFormat, Path, list[Path]]:
+    """Check whether the committed IceChunk store is large enough to need a pyramid.
+
+    If yes, builds a companion pyramid zarr and returns ZARR format with both paths.
+    The IceChunk path is kept as the first asset so the sync engine can still reach it.
+    If no, returns ICECHUNK format with the store path unchanged.
+    """
+    from open_climate_service.data_accessor.services.accessor import open_icechunk_dataset
+
+    try:
+        ds = open_icechunk_dataset(store_path)
+    except Exception:
+        logger.warning("Could not open IceChunk store for pyramid check; skipping", exc_info=True)
+        return ArtifactFormat.ICECHUNK, store_path, [store_path]
+
+    try:
+        if not downloader.needs_pyramid(ds):
+            return ArtifactFormat.ICECHUNK, store_path, [store_path]
+
+        zarr_path = downloader.get_zarr_path_unconditional(dataset)
+        downloader.build_pyramid_zarr(ds, zarr_path)
+        return ArtifactFormat.ZARR, zarr_path, [store_path, zarr_path]
+    finally:
+        ds.close()
 
 
 def _load_streaming_plugin(plugin_path: str, *, params: dict[str, object]) -> IngestionPlugin:
