@@ -309,7 +309,7 @@ def _public_zarr_asset_href(
     if artifact.format == ArtifactFormat.ICECHUNK:
         return _abs_url(request, f"/zarr/{dataset_id}")
     if _is_pyramid_zarr(artifact_path):
-        return _abs_url(request, f"/zarr/{dataset_id}/0")
+        return _abs_url(request, f"/zarr/{dataset_id}")
     return _abs_url(request, f"/zarr/{dataset_id}")
 
 
