@@ -11,6 +11,7 @@ from types import ModuleType
 from typing import Any
 
 from open_climate_service import config as api_config
+from open_climate_service.openeo import xclim_processes
 from open_climate_service.process import get_process_metadata
 
 logger = logging.getLogger(__name__)
@@ -19,11 +20,16 @@ logger = logging.getLogger(__name__)
 def load_plugin_processes() -> list[tuple[str, Any]]:
     """Return (process_id, callable) for all @process-decorated functions.
 
-    Scans built-ins from ``open_climate_service/plugins/processes/`` first,
-    then instance plugins from ``plugins_dir/processes/``. Instance plugins
-    override built-ins with the same id.
+    Resolution order (last wins):
+    1. xclim indicators — auto-registered from all indicator modules
+    2. Built-in file plugins — ``open_climate_service/plugins/processes/``
+    3. Instance plugins — ``plugins_dir/processes/`` (override everything)
     """
     found: dict[str, Any] = {}
+    for func in xclim_processes.scan():
+        meta = get_process_metadata(func)
+        if meta:
+            found[meta["id"]] = func
     for func in _scan_builtin_processes():
         meta = get_process_metadata(func)
         if meta:

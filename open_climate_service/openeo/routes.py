@@ -277,6 +277,7 @@ _RESULT_MEDIA_TYPES: dict[str, str] = {
     ".tif": "image/tiff; subtype=geotiff",
     ".png": "image/png",
     ".csv": "text/csv",
+    ".geojson": "application/geo+json",
     ".parquet": "application/vnd.apache.parquet",
 }
 
@@ -335,7 +336,7 @@ def execute_synchronous(
     import xarray as xr
 
     from open_climate_service.openeo.execution import SaveResultEnvelope
-    from open_climate_service.openeo.jobs import _write_raster, _write_vector
+    from open_climate_service.openeo.jobs import _VECTOR_FORMATS, _write_raster, _write_vector
 
     # Unwrap save_result envelope to get requested format
     fmt = "ZARR"
@@ -365,16 +366,8 @@ def execute_synchronous(
                     detail=f"Format '{fmt}' produced no output",
                 )
             data = Path(output).read_bytes()
-            mime_map = {
-                ".nc": "application/netcdf",
-                ".tif": "image/tiff; subtype=geotiff",
-                ".png": "image/png",
-                ".csv": "text/csv",
-                ".geojson": "application/geo+json",
-                ".parquet": "application/vnd.apache.parquet",
-            }
-            suffix = Path(output).suffix
-            media_type = mime_map.get(suffix, "application/octet-stream")
+            suffix = Path(output).suffix.lower()
+            media_type = _RESULT_MEDIA_TYPES.get(suffix, "application/octet-stream")
             return Response(content=data, media_type=media_type)
 
     # Try vector
@@ -390,15 +383,23 @@ def execute_synchronous(
         import geopandas as gpd
 
         if isinstance(result, gpd.GeoDataFrame):
-            if fmt in {"PARQUET", "CSV"}:
+            if fmt == "GEOJSON":
+                if result.crs is not None and result.crs.to_epsg() != 4326:
+                    result = result.to_crs("EPSG:4326")
+                return Response(content=result.to_json(), media_type="application/geo+json")
+            if fmt in _VECTOR_FORMATS:
                 with tempfile.TemporaryDirectory() as tmp:
                     from pathlib import Path
 
                     output = _write_vector(result, Path(tmp), fmt)
-                    if output:
-                        data = Path(output).read_bytes()
-                        mime = "application/vnd.apache.parquet" if fmt == "PARQUET" else "text/csv"
-                        return Response(content=data, media_type=mime)
+                    if output is None:
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Format '{fmt}' produced no output",
+                        )
+                    data = Path(output).read_bytes()
+                    mime = _VECTOR_FORMATS[fmt][1]
+                    return Response(content=data, media_type=mime)
             info = {
                 "type": "vector",
                 "features": len(result),

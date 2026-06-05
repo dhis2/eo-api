@@ -380,7 +380,7 @@ Implemented behavior:
 Current sync constraints:
 
 - append execution is a delta-download plus canonical rebuild, not in-place Zarr mutation
-- upstream availability is delegated to provider-specific `sync_availability.latest_available_function` adapters or conservative template metadata such as lag days/hours
+- upstream availability is determined by each plugin's `periods()` method
 
 Configured availability policies:
 
