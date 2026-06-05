@@ -384,6 +384,8 @@ def execute_synchronous(
 
         if isinstance(result, gpd.GeoDataFrame):
             if fmt == "GEOJSON":
+                if result.crs is not None and result.crs.to_epsg() != 4326:
+                    result = result.to_crs("EPSG:4326")
                 return Response(content=result.to_json(), media_type="application/geo+json")
             if fmt in _VECTOR_FORMATS:
                 with tempfile.TemporaryDirectory() as tmp:

@@ -378,3 +378,30 @@ def test_result_route_returns_geojson_payload_for_synchronous_vector_result(
     assert payload["type"] == "FeatureCollection"
     assert len(payload["features"]) == 2
     assert sorted(feature["properties"]["value"] for feature in payload["features"]) == [1.0, 2.0]
+
+
+def test_result_route_reprojects_geojson_payload_to_wgs84(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import geopandas as gpd
+    from shapely.geometry import Point
+
+    gdf = gpd.GeoDataFrame({"value": [1.0]}, geometry=[Point(111319.49079327357, 111325.1428663851)], crs="EPSG:3857")
+
+    def return_geojson_result(*args: object, **kwargs: object) -> SaveResultEnvelope:
+        del args, kwargs
+        return SaveResultEnvelope(gdf, "GEOJSON")
+
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        return_geojson_result,
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    coords = payload["features"][0]["geometry"]["coordinates"]
+    assert coords[0] == pytest.approx(1.0, rel=0, abs=1e-6)
+    assert coords[1] == pytest.approx(1.0, rel=0, abs=1e-6)
