@@ -1,8 +1,8 @@
-- id: era5land_temperature_hourly
+- id: era5land_temperature_daily
   name: 2m temperature (ERA5-Land)
   short_name: 2m temperature
   variable: t2m
-  period_type: hourly
+  period_type: daily
   sync:
     kind: temporal
     execution: append
@@ -11,11 +11,114 @@
       bbox: [-180, -90, 180, 90]
     temporal:
       begin: "1950-01-01"
-      resolution: PT1H
+      resolution: P1D
   ingestion:
-    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandHourlySingleBandPlugin
+    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandTempDailyPlugin
     params:
       variable: t2m
+  units: degC
+  resolution: 9 km x 9 km
+  source: ERA5-Land Reanalysis
+  source_url: https://earthdatahub.destine.eu/collections/era5/datasets/era5-land-daily
+  display:
+    colormap: rdbu_r
+    range: [-30.0, 30.0]
+
+- id: era5land_precipitation_daily
+  name: Total precipitation (ERA5-Land)
+  short_name: Total precipitation
+  variable: tp
+  period_type: daily
+  sync:
+    kind: temporal
+    execution: append
+  extents:
+    spatial:
+      bbox: [-180, -90, 180, 90]
+    temporal:
+      begin: "1950-01-01"
+      resolution: P1D
+  ingestion:
+    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandPrecipDailyPlugin
+    params: {}
+  units: mm
+  resolution: 9 km x 9 km
+  source: ERA5-Land Reanalysis
+  source_url: https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land
+  display:
+    colormap: blues
+    range: [0.0, 20.0]
+    nodata: 0.0
+
+- id: era5land_temperature_monthly
+  name: 2m temperature (ERA5-Land)
+  short_name: 2m temperature
+  variable: t2m
+  period_type: monthly
+  sync:
+    kind: temporal
+    execution: append
+  extents:
+    spatial:
+      bbox: [-180, -90, 180, 90]
+    temporal:
+      begin: "1950-01"
+      resolution: P1M
+  ingestion:
+    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandMonthlyPlugin
+    params:
+      variable: t2m
+  units: degC
+  resolution: 9 km x 9 km
+  source: ERA5-Land Reanalysis
+  source_url: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means
+  display:
+    colormap: rdbu_r
+    range: [-30.0, 30.0]
+
+- id: era5land_precipitation_monthly
+  name: Total precipitation (ERA5-Land)
+  short_name: Total precipitation
+  variable: tp
+  period_type: monthly
+  sync:
+    kind: temporal
+    execution: append
+  extents:
+    spatial:
+      bbox: [-180, -90, 180, 90]
+    temporal:
+      begin: "1950-01"
+      resolution: P1M
+  ingestion:
+    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandMonthlyPrecipitationPlugin
+    params: {}
+  units: mm
+  resolution: 9 km x 9 km
+  source: ERA5-Land Reanalysis
+  source_url: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means
+  display:
+    colormap: blues
+    range: [0.0, 100.0]
+    nodata: 0.0
+
+- id: era5land_temperature_daily_from_hourly
+  name: 2m temperature (ERA5-Land, local time)
+  short_name: 2m temperature
+  variable: t2m
+  period_type: daily
+  sync:
+    kind: temporal
+    execution: append
+  extents:
+    spatial:
+      bbox: [-180, -90, 180, 90]
+    temporal:
+      begin: "1950-01-01"
+      resolution: P1D
+  ingestion:
+    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandTempDailyFromHourlyPlugin
+    params: {}
   units: degC
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
@@ -24,11 +127,11 @@
     colormap: rdbu_r
     range: [-30.0, 30.0]
 
-- id: era5land_precipitation_hourly
-  name: Total precipitation (ERA5-Land)
+- id: era5land_precipitation_daily_from_hourly
+  name: Total precipitation (ERA5-Land, local time)
   short_name: Total precipitation
   variable: tp
-  period_type: hourly
+  period_type: daily
   sync:
     kind: temporal
     execution: append
@@ -37,9 +140,9 @@
       bbox: [-180, -90, 180, 90]
     temporal:
       begin: "1950-01-01"
-      resolution: PT1H
+      resolution: P1D
   ingestion:
-    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandPrecipitationPlugin
+    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandPrecipDailyPlugin
     params: {}
   units: mm
   resolution: 9 km x 9 km
@@ -47,5 +150,5 @@
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land
   display:
     colormap: blues
-    range: [0.0, 5.0]
+    range: [0.0, 20.0]
     nodata: 0.0

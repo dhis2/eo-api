@@ -47,6 +47,7 @@ Field reference:
 | `extent.name`  | No  | Human-readable label shown in API responses |
 | `bbox`         | Yes | Bounding box as `[xmin, ymin, xmax, ymax]` in WGS84 decimal degrees |
 | `country_code` | No  | ISO 3166-1 alpha-3 code — required for WorldPop downloads |
+| `utc_offset_hours` | No  | UTC offset in hours (e.g. `3` for East Africa). Affects daily datasets computed from hourly data — the "local day" is shifted accordingly. Defaults to `0` (UTC) |
 
 `data_dir` sets the directory where downloaded NetCDF files and Zarr stores are kept. It is required when a config file is present and is resolved relative to the config file. Each instance must have its own `data_dir` to avoid mixing data between deployments.
 
@@ -70,7 +71,7 @@ cp .env.example .env
 
 `CLIMATE_SERVICE_CONFIG=./climate-service.yaml` is already set in `.env.example`. The remaining defaults are sufficient to run the API and ingest CHIRPS3 and WorldPop data. Review the file and adjust as needed — the comments explain each variable.
 
-For ERA5-Land downloads see [ERA5-Land setup](#era5-land-via-destine-earth-data-hub) below.
+For ERA5-Land downloads see [ERA5-Land datasets](era5_land_datasets.md).
 
 ## Step 4: Start the API
 
@@ -157,51 +158,9 @@ See [user_guide.md](user_guide.md) for more usage examples.
 
 ---
 
-## ERA5-Land via DestinE Earth Data Hub
+## ERA5-Land datasets
 
-ERA5-Land hourly temperature and precipitation data is downloaded from the [DestinE Earth Data Hub](https://earthdatahub.destine.eu). Access is free but requires registration.
-
-### 1. Register
-
-Create a free account at [earthdatahub.destine.eu](https://earthdatahub.destine.eu). Free accounts include a monthly request limit of 500,000 — sufficient for national-scale downloads.
-
-### 2. Configure authentication
-
-DestinE authentication uses a `.netrc` file in your home directory. Create or append to `~/.netrc`:
-
-```
-machine data.earthdatahub.destine.eu
-login edh
-password <your-personal-access-token>
-```
-
-The `login` is the literal string `edh`. The `password` is a personal access token, not your account password — generate one at `earthdatahub.destine.eu/account-settings` under "My Personal Access Tokens"
-
-Set the correct permissions:
-
-```bash
-chmod 600 ~/.netrc
-```
-
-**Windows:** Python's `netrc` module looks for `_netrc` (underscore) instead of `.netrc`. Create the file as `%USERPROFILE%\_netrc` with the same content. The `chmod` step is not needed on Windows.
-
-### 3. Ingest ERA5-Land data
-
-Once authenticated, ingest ERA5-Land temperature for Rwanda:
-
-```bash
-curl -s -X POST http://127.0.0.1:8000/ingestions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dataset_id": "era5land_temperature_hourly",
-    "start": "2024-01-01T00",
-    "end": "2024-01-31T23",
-    "prefer_zarr": true,
-    "publish": true
-  }' | jq
-```
-
-ERA5-Land data has a configured lag of 120 hours (5 days) — the sync planner will not request data from the last 120 hours. This can be adjusted by placing a custom `era5_land.yaml` in `plugins_dir/datasets/` — see `adding_custom_datasets.md`.
+ERA5-Land temperature and precipitation data requires registration with the DestinE Earth Data Hub and/or the Copernicus Climate Data Store. See **[ERA5-Land datasets](era5_land_datasets.md)** for setup instructions and the full list of available datasets.
 
 ---
 

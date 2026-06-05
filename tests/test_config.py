@@ -119,8 +119,8 @@ def test_builtin_datasets_include_chirps_era5_worldpop(monkeypatch: pytest.Monke
 
     ids = {d["id"] for d in dataset_registry.list_datasets()}
     assert "chirps3_precipitation_daily" in ids
-    assert "era5land_temperature_hourly" in ids
-    assert "era5land_precipitation_hourly" in ids
+    assert "era5land_temperature_daily" in ids
+    assert "era5land_precipitation_monthly" in ids
     assert "worldpop_population_yearly" in ids
 
 

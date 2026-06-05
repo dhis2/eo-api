@@ -1,5 +1,6 @@
 """Instance configuration loaded from CLIMATE_SERVICE_CONFIG."""
 
+import datetime
 import os
 import re
 from pathlib import Path
@@ -142,3 +143,26 @@ def get_data_dir() -> Path | None:
     if not isinstance(raw, (str, Path)):
         raise ValueError(f"data_dir in CLIMATE_SERVICE_CONFIG must be a path string, got {type(raw).__name__}")
     return (config_path.parent / raw).resolve()
+
+
+def get_utc_offset_hours() -> float:
+    """Return the UTC offset in hours for daily period boundaries, defaulting to 0 (UTC).
+
+    Set ``utc_offset_hours: 5.5`` in climate-service.yaml for UTC+5:30 (India),
+    ``utc_offset_hours: 3`` for East Africa (UTC+3), etc.
+    """
+    raw = get_config().get("utc_offset_hours", 0)
+    if not isinstance(raw, (int, float)):
+        raise ValueError(f"utc_offset_hours in CLIMATE_SERVICE_CONFIG must be a number, got {type(raw).__name__}")
+    if not -12 <= float(raw) <= 14:
+        raise ValueError(f"utc_offset_hours must be between -12 and 14, got {raw}")
+    return float(raw)
+
+
+def get_utc_offset() -> datetime.timedelta:
+    """Return the UTC offset as a timedelta, supporting fractional-hour zones (e.g. UTC+5:30).
+
+    Prefer this over ``get_utc_offset_hours()`` wherever a timedelta is needed,
+    as it correctly handles half- and quarter-hour offsets rather than truncating.
+    """
+    return datetime.timedelta(hours=get_utc_offset_hours())
