@@ -89,11 +89,14 @@ async def manage_ingest(request: Request) -> Response:
     base = str(request.base_url).rstrip("/")
     try:
         form = await request.form()
-        dataset_id = str(form.get("dataset_id", ""))
-        start = str(form.get("start", ""))
-        end = str(form.get("end", "")) or None
+        dataset_id = str(form.get("dataset_id", "")).strip()
+        start = str(form.get("start", "")).strip()
+        end = str(form.get("end", "")).strip() or None
         publish = "publish" in form
         overwrite = "overwrite" in form
+
+        if not start:
+            raise HTTPException(status_code=400, detail="Start date is required")
 
         template = get_dataset(dataset_id)
         if template is None:
@@ -167,9 +170,12 @@ async def manage_sync(request: Request) -> Response:
     base = str(request.base_url).rstrip("/")
     try:
         form = await request.form()
-        dataset_id = str(form.get("dataset_id", ""))
+        dataset_id = str(form.get("dataset_id", "")).strip()
         end = str(form.get("end", "")).strip() or None
         publish = "publish" in form
+
+        if not dataset_id:
+            raise HTTPException(status_code=400, detail="Dataset ID is required")
     except HTTPException as exc:
         msg = urllib.parse.quote(str(exc.detail))
         return RedirectResponse(f"{base}/manage?error={msg}", status_code=303)
