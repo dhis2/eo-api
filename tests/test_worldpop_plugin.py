@@ -97,3 +97,10 @@ def test_worldpop_plugin_masks_nodata_sentinel_to_nan(
     assert np.isnan(values[1]), "sentinel -99999 must be masked to NaN"
     assert values[0] == pytest.approx(5.0), "valid values must be preserved"
     assert values[2] == pytest.approx(12.0), "valid values must be preserved"
+
+
+def test_worldpop_plugin_accepts_extra_kwargs() -> None:
+    plugin = WorldPopYearlyPlugin(
+        version="global2", product="total", variable="pop_total", unknown_future_field="ignored"
+    )
+    assert plugin.version == "global2"

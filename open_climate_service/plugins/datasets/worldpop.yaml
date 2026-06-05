@@ -5,10 +5,6 @@
   period_type: yearly
   sync:
     kind: release
-    availability:
-      latest_available_function: open_climate_service.providers.availability.worldpop_release_latest_available
-      # WorldPop projections are intentionally request-driven for future years.
-      allow_future: true
   extents:
     spatial:
       bbox: [-180, -90, 180, 90]

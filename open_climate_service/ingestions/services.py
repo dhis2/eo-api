@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 import logging
 import mimetypes
@@ -12,7 +11,6 @@ import shutil
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime
-from importlib import import_module
 from pathlib import Path
 from typing import Any, Protocol, cast
 from uuid import uuid4
@@ -201,6 +199,7 @@ def create_artifact(
     on_progress: Callable[[int | None, int | None, str | None], None] | None = None,
     is_cancel_requested: Callable[[], bool] | None = None,
     save_cursor: Callable[[dict[str, object]], None] | None = None,
+    periods: list[str] | None = None,
 ) -> ArtifactRecord:
     """Materialize one managed dataset artifact and persist its metadata.
 
@@ -247,6 +246,7 @@ def create_artifact(
             on_progress=on_progress,
             is_cancel_requested=is_cancel_requested,
             save_cursor=save_cursor,
+            periods=periods,
         )
     raise HTTPException(status_code=500, detail=f"Dataset '{dataset['id']}' does not define ingestion.plugin")
 
@@ -265,6 +265,7 @@ def _create_streaming_artifact(
     on_progress: Callable[[int | None, int | None, str | None], None] | None = None,
     is_cancel_requested: Callable[[], bool] | None = None,
     save_cursor: Callable[[dict[str, object]], None] | None = None,
+    periods: list[str] | None = None,
 ) -> ArtifactRecord:
     """Create or update one plugin-backed Icechunk artifact.
 
@@ -324,6 +325,7 @@ def _create_streaming_artifact(
             on_progress=on_progress,
             is_cancel_requested=is_cancel_requested,
             save_cursor=save_cursor,
+            periods=periods,
         )
         if result.periods_written == 0 and not store_path.exists():
             raise HTTPException(status_code=409, detail="Source has no data for the requested temporal scope")
@@ -388,27 +390,13 @@ def _load_streaming_plugin(plugin_path: str, *, params: dict[str, object]) -> In
     forwarded later to `probe(...)` and `fetch_period(...)` so plugins may keep
     configuration in constructor state, per-call kwargs, or both.
     """
+    from open_climate_service.shared.plugin_loader import instantiate_plugin
+
     module_path, _, attr_name = plugin_path.rpartition(".")
     if not module_path or not attr_name:
         raise HTTPException(status_code=500, detail=f"Invalid ingestion.plugin path '{plugin_path}'")
     try:
-        module = import_module(module_path)
-        plugin_cls = getattr(module, attr_name)
-        if not callable(plugin_cls):
-            raise TypeError(f"{plugin_path} is not callable")
-        constructor_kwargs = dict(params)
-        signature = inspect.signature(plugin_cls)
-        accepts_var_kwargs = any(
-            parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()
-        )
-        if not accepts_var_kwargs:
-            constructor_kwargs = {name: value for name, value in params.items() if name in signature.parameters}
-        plugin = plugin_cls(**constructor_kwargs)
-        if not isinstance(plugin, IngestionPlugin):
-            raise TypeError(
-                f"{plugin_path} does not implement the required streaming plugin contract "
-                "(probe, periods, fetch_period, max_concurrency, commit_batch_size)"
-            )
+        plugin = instantiate_plugin(plugin_path, dict(params))
     except HTTPException:
         raise
     except Exception as exc:
