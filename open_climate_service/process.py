@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import inspect
+import types
+import typing
 from collections.abc import Callable
 from typing import Any, TypeVar, overload
 
@@ -16,6 +18,25 @@ _PYTHON_TYPE_MAP: dict[type, str] = {
     float: "number",
     bool: "boolean",
 }
+
+
+def _annotation_to_schema(ann: Any) -> dict[str, Any]:
+    """Return a JSON Schema dict for a Python type annotation.
+
+    Handles plain types (str, int, …) and nullable unions (str | None).
+    Returns {} for types with no known mapping (e.g. xr.DataArray).
+    """
+    direct = _PYTHON_TYPE_MAP.get(ann)
+    if direct:
+        return {"type": direct}
+    # str | None  →  UnionType (Python 3.10+) or typing.Union
+    origin = getattr(ann, "__origin__", None)
+    args: tuple[Any, ...] = getattr(ann, "__args__", ())
+    if isinstance(ann, types.UnionType) or origin is typing.Union:
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            return _annotation_to_schema(non_none[0])
+    return {}
 
 
 @overload
@@ -72,12 +93,16 @@ def process(
             p: dict[str, Any] = {"name": name, "schema": {}}
             ann = param.annotation
             if ann is not inspect.Parameter.empty:
-                type_str = _PYTHON_TYPE_MAP.get(ann)
-                if type_str:
-                    p["schema"] = {"type": type_str}
+                schema = _annotation_to_schema(ann)
+                if schema:
+                    p["schema"] = schema
             if param.default is not inspect.Parameter.empty:
                 p["optional"] = True
-                p["default"] = param.default
+                # Only emit the default value when it is not None, or when the
+                # schema explicitly allows null.  Emitting default=None for a
+                # purely-string schema creates a type mismatch in the catalog.
+                if param.default is not None or not p.get("schema"):
+                    p["default"] = param.default
             if parameters and name in parameters:
                 p.update(parameters[name])
             params.append(p)
