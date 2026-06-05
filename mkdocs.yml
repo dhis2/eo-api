@@ -66,6 +66,7 @@ nav:
   - Home: index.md
   - Get started: setup_guide.md
   - Concepts:
+      - Climate Services: climate_services.md
       - Architecture: architecture.md
       - Zarr and GeoZarr: zarr_and_geozarr.md
       - Project overview: project_description.md
