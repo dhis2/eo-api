@@ -60,7 +60,7 @@ def precip_anomaly(pr: xr.DataArray, baseline: float = 0.0) -> xr.DataArray:
     ...
 ```
 
-A plugin process with the same id as an existing process (standard openEO or built-in) overrides it. The server must be restarted to pick up new process files.
+A plugin process with the same id as an existing process overrides it. The server must be restarted to pick up new process files. For built-in climate indices, see [Climate indices](climate_indices.md).
 
 ---
 
