@@ -1,8 +1,8 @@
 # Built-in datasets
 
-The Open Climate Service ships with four built-in dataset templates covering precipitation, temperature, and population. Each template describes a data source and the rules for downloading, transforming, and syncing it. They are available in every instance without any additional configuration.
+The Open Climate Service ships with built-in dataset templates covering precipitation, temperature, and population. Each template describes a data source and the rules for downloading, transforming, and syncing it. They are available in every instance without any additional configuration.
 
-To ingest a built-in dataset for your configured extent, see the [API reference](managed_data_api_guide.md). To add datasets beyond these four, see [Adding custom datasets](adding_custom_datasets.md).
+To ingest a built-in dataset for your configured extent, see the [API reference](managed_data_api_guide.md). To add datasets beyond these, see [Adding custom datasets](adding_custom_datasets.md).
 
 ---
 
@@ -27,45 +27,11 @@ CHIRPS (Climate Hazards Group InfraRed Precipitation with Station data) v3 is a 
 
 ---
 
-## ERA5-Land — 2 m temperature (hourly)
+## ERA5-Land — temperature and precipitation
 
-| Property | Value |
-| --- | --- |
-| **Dataset ID** | `era5land_temperature_hourly` |
-| **Variable** | `t2m` |
-| **Units** | °C |
-| **Period** | Hourly |
-| **Spatial coverage** | Global |
-| **Spatial resolution** | ~9 km |
-| **Record start** | 1950-01-01 |
-| **Source** | [ERA5-Land Reanalysis via DestinE Earth Data Hub](https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land) |
+ERA5-Land provides temperature and precipitation at hourly, daily, and monthly resolution. Nine dataset templates are available covering both variables and all resolutions, with options for UTC or local-timezone daily aggregation.
 
-ERA5-Land is a global atmospheric reanalysis produced by ECMWF. The 2 m temperature variable (`t2m`) represents the air temperature 2 metres above the land surface, including corrections for topography relative to the ERA5 pressure levels.
-
-**Sync behaviour** — new hours are appended incrementally. ERA5-Land is published with a nominal 5-day lag; the API will not request data closer than 120 hours to the current time.
-
-**Transforms** — raw values are in Kelvin. The `kelvin_to_celsius` transform is applied at ingest time, so stored values are in °C.
-
----
-
-## ERA5-Land — total precipitation (hourly)
-
-| Property | Value |
-| --- | --- |
-| **Dataset ID** | `era5land_precipitation_hourly` |
-| **Variable** | `tp` |
-| **Units** | mm |
-| **Period** | Hourly |
-| **Spatial coverage** | Global |
-| **Spatial resolution** | ~9 km |
-| **Record start** | 1950-01-01 |
-| **Source** | [ERA5-Land Reanalysis via DestinE Earth Data Hub](https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land) |
-
-Total precipitation (`tp`) from ERA5-Land is an accumulated hourly value representing the sum of large-scale and convective precipitation falling onto the land surface. It is useful as a high-resolution complement to CHIRPS for countries outside CHIRPS's 50°N–50°S band, or for sub-daily analysis.
-
-**Sync behaviour** — same 5-day lag as ERA5-Land temperature; hours are appended incrementally.
-
-**Transforms** — raw values are in metres per hour. The `metres_to_mm` transform converts to mm at ingest time.
+See **[ERA5-Land datasets](era5_land_datasets.md)** for the full reference, including dataset IDs, coverage, lag times, and guidance on choosing the right dataset for your use case.
 
 ---
 
