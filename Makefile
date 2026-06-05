@@ -30,10 +30,6 @@ fix: ## Autofix ruff lint and format issues
 test: ## Run tests with pytest
 	uv run pytest tests/
 
-openapi: ## Generate pygeoapi OpenAPI spec
-	@set -a && . ./.env && set +a && \
-		uv run python -c "from open_climate_service.publications.services import ensure_pygeoapi_base_config; ensure_pygeoapi_base_config()"
-
 start: ## Start the Docker stack (builds images first)
 	docker compose up --build
 
