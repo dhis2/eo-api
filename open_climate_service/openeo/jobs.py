@@ -213,7 +213,7 @@ class OpenEOJobService:
         now = utc_now()
         record = OpenEOJobRecord(
             id=job_id,
-            title=body.title,
+            title=body.title if body.title is not None else _derive_job_title(body.process),
             description=body.description,
             process=body.process,
             status=OpenEOJobStatus.CREATED,
@@ -667,6 +667,36 @@ def _write_png(ds: Any, results_dir: Any) -> str | None:
     fig.savefig(path, bbox_inches="tight", dpi=dpi, transparent=True, pad_inches=0)
     plt.close(fig)
     return path
+
+
+def _derive_job_title(process: dict[str, Any]) -> str | None:
+    """Generate a human-readable job title from a process graph when none is provided.
+
+    Looks for a load_collection node and uses the collection id (plus temporal
+    extent if present) to build a short label, e.g. "chirps3_precipitation_daily
+    2023-01-01–2023-12-31". Returns None if no load_collection is found.
+    """
+    graph = process.get("process_graph")
+    if not isinstance(graph, dict):
+        return None
+    for node in graph.values():
+        if not isinstance(node, dict) or node.get("process_id") != "load_collection":
+            continue
+        args = node.get("arguments", {})
+        collection_id = args.get("id")
+        if not isinstance(collection_id, str):
+            continue
+        temporal = args.get("temporal_extent")
+        if isinstance(temporal, (list, tuple)) and len(temporal) == 2:
+            start, end = temporal[0], temporal[1]
+            if start and end:
+                return f"{collection_id} {start}–{end}"
+            if start:
+                return f"{collection_id} from {start}"
+            if end:
+                return f"{collection_id} until {end}"
+        return collection_id
+    return None
 
 
 _service: OpenEOJobService | None = None
