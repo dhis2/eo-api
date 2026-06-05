@@ -14,6 +14,7 @@ import xarray as xr
 
 from open_climate_service.shared.time import datetime_to_period_string, parse_period_string_to_datetime
 from open_climate_service.streaming.protocol import GridSpec
+from open_climate_service.transforms.unit_conversion import kelvin_to_celsius, metres_to_mm
 
 
 class ERA5LandHourlySingleBandPlugin:
@@ -22,7 +23,7 @@ class ERA5LandHourlySingleBandPlugin:
     max_concurrency = 2
     commit_batch_size = 24
 
-    def __init__(self, variable: str) -> None:
+    def __init__(self, variable: str, **_: Any) -> None:
         if not variable:
             raise ValueError("ERA5LandHourlySingleBandPlugin requires a non-empty variable")
         self.variable = variable
@@ -45,8 +46,11 @@ class ERA5LandHourlySingleBandPlugin:
         )
 
     async def periods(self, start: str, end: str) -> list[str]:
+        """Return hourly period IDs up to the last timestamp published in the remote store."""
+        latest = await asyncio.to_thread(self._latest_available)
+        capped_end = min(end, latest)
         current = parse_period_string_to_datetime(start)
-        limit = parse_period_string_to_datetime(end)
+        limit = parse_period_string_to_datetime(capped_end)
         if current > limit:
             return []
         periods: list[str] = []
@@ -54,6 +58,16 @@ class ERA5LandHourlySingleBandPlugin:
             periods.append(datetime_to_period_string(current, "hourly"))
             current += timedelta(hours=1)
         return periods
+
+    def _latest_available(self) -> str:
+        """Read the last valid_time from the remote store (metadata only, no data loaded)."""
+        module = import_module("dhis2eo.data.destine.era5_land.hourly")
+        open_zarr = cast(Callable[[list[str]], xr.Dataset], getattr(module, "open_zarr"))
+        ds = open_zarr([self.variable])
+        try:
+            return str(np.datetime64(ds.valid_time.isel(valid_time=-1).values, "h"))
+        finally:
+            ds.close()
 
     async def fetch_period(self, period_id: str, bbox: list[float], **params: Any) -> xr.Dataset:
         _ = params
@@ -65,7 +79,10 @@ class ERA5LandHourlySingleBandPlugin:
         selected = region.sel(valid_time=slice(timestamp, timestamp))
         ds = selected[[self.variable]].load()
         rename_map = {"longitude": "x", "latitude": "y", "valid_time": "t"}
-        return ds.rename(rename_map) if rename_map else ds
+        ds = ds.rename(rename_map) if rename_map else ds
+        if self.variable == "t2m":
+            ds = kelvin_to_celsius(ds, {"variable": self.variable})
+        return ds
 
     def _region_for_bbox(self, bbox: list[float]) -> xr.Dataset:
         bbox_tuple = cast(tuple[float, float, float, float], tuple(map(float, bbox)))
@@ -92,17 +109,25 @@ class ERA5LandHourlySingleBandPlugin:
 class ERA5LandPrecipitationPlugin(ERA5LandHourlySingleBandPlugin):
     """ERA5-Land hourly precipitation plugin.
 
-    This currently preserves the legacy dataset semantics exactly:
-    - fetch direct `tp` values from the upstream ERA5-Land source
-    - rely on the template transform pipeline for metres -> millimetres
+    Fetches `tp` values from the upstream ERA5-Land source and converts
+    metres to millimetres inline.
 
     Deaccumulation and trailing-boundary handling belong to the dedicated
-    precipitation canonicalization work and should be added here later without
-    forcing another dataset-template contract change.
+    precipitation canonicalization work and should be added here later.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, **_: Any) -> None:
         super().__init__(variable="tp")
+
+    def _fetch_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
+        region = self._region_for_bbox(bbox)
+        timestamp = parse_period_string_to_datetime(period_id).replace(tzinfo=None)
+        selected = region.sel(valid_time=slice(timestamp, timestamp))
+        ds = selected[[self.variable]].load()
+        rename_map = {"longitude": "x", "latitude": "y", "valid_time": "t"}
+        ds = ds.rename(rename_map) if rename_map else ds
+        ds = metres_to_mm(ds, {"variable": self.variable})
+        return ds
 
 
 def _open_era5_land_region(variable: str, bbox: tuple[float, float, float, float]) -> xr.Dataset:

@@ -35,7 +35,9 @@ class WorldPopYearlyPlugin:
     max_concurrency = 1
     commit_batch_size = 1
 
-    def __init__(self, version: str = "global2", product: str = "total", variable: str = "pop_total") -> None:
+    def __init__(
+        self, version: str = "global2", product: str = "total", variable: str = "pop_total", **_: object
+    ) -> None:
         self.version = version
         self.variant = _resolve_variant(product=product, variable=variable)
 

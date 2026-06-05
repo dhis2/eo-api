@@ -107,18 +107,7 @@ Within `sync.kind: temporal`, two execution modes control what happens when new 
 
 ### Availability clamping
 
-Providers publish data on a delay. The `sync.availability` block in a template tells the sync engine how far back from today data is reliably available:
-
-```yaml
-sync:
-  kind: temporal
-  execution: append
-  availability:
-    latest_available_function: open_climate_service.providers.availability.lagged_latest_available
-    lag_hours: 120
-```
-
-Before executing a sync, the engine calls the availability function to clamp the target end date. This prevents requesting data that has not yet been published, which would leave temporal gaps.
+Each plugin's `periods(start, end)` method is responsible for returning only periods that are actually available from the source. The sync planner calls `plugin.periods()` before deciding the sync action and uses the result to clamp `target_end` to what the plugin reports as available, avoiding jobs that would fetch nothing.
 
 ---
 
