@@ -32,7 +32,6 @@ from open_climate_service.streaming.store import (
     read_committed_period_ids,
     write_geozarr_attrs,
 )
-from open_climate_service.transforms.pipeline import run_dataset_transforms
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +79,7 @@ async def run_streaming_ingest(
     on_progress: Callable[[int | None, int | None, str | None], None] | None = None,
     is_cancel_requested: Callable[[], bool] | None = None,
     save_cursor: Callable[[dict[str, Any]], None] | None = None,
+    periods: list[str] | None = None,
 ) -> StreamingIngestResult:
     """Stream one dataset into a flat Zarr v3 store one period at a time.
 
@@ -88,11 +88,15 @@ async def run_streaming_ingest(
 
     This avoids replaying already-committed periods after crashes that happen
     between a store commit and a later cursor write.
+
+    ``periods`` may be supplied by the sync planner to avoid a
+    second ``plugin.periods()`` probe when the list was already fetched during
+    planning.
     """
     from open_climate_service.jobs.models import JobCancelledError
 
     spec: GridSpec = await plugin.probe(bbox, **params)
-    all_periods = await plugin.periods(start, end)
+    all_periods = periods if periods is not None else await plugin.periods(start, end)
     if not all_periods:
         return StreamingIngestResult(store_path=store_path, period_type=period_type, periods_written=0)
 
@@ -141,8 +145,6 @@ async def run_streaming_ingest(
 
             period_id, task = in_flight.popleft()
             ds = await task
-            if dataset is not None:
-                ds = run_dataset_transforms(ds, dataset)
             _strip_cf_encoding(ds, period_type, time_dim=spec.time_dim)
             try:
                 spatial_shape = (int(ds.sizes[spec.y_dim]), int(ds.sizes[spec.x_dim]))
@@ -226,6 +228,7 @@ def run_streaming_ingest_sync(
     on_progress: Callable[[int | None, int | None, str | None], None] | None = None,
     is_cancel_requested: Callable[[], bool] | None = None,
     save_cursor: Callable[[dict[str, Any]], None] | None = None,
+    periods: list[str] | None = None,
 ) -> StreamingIngestResult:
     """Synchronous wrapper for threaded job execution.
 
@@ -253,5 +256,6 @@ def run_streaming_ingest_sync(
             on_progress=on_progress,
             is_cancel_requested=is_cancel_requested,
             save_cursor=save_cursor,
+            periods=periods,
         )
     )

@@ -6,8 +6,6 @@
   sync:
     kind: temporal
     execution: append
-    availability:
-      latest_available_function: open_climate_service.providers.availability.chirps3_daily_latest_available
   extents:
     spatial:
       bbox: [-180, -50, 180, 50]

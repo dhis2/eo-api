@@ -8,8 +8,9 @@ import xarray as xr
 from open_climate_service.plugins.datasets.era5_land import ERA5LandHourlySingleBandPlugin, ERA5LandPrecipitationPlugin
 
 
-def test_era5_land_periods_enumerate_hours() -> None:
+def test_era5_land_periods_enumerate_hours(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = ERA5LandHourlySingleBandPlugin(variable="t2m")
+    monkeypatch.setattr(plugin, "_latest_available", lambda: "2099-12-31T23")
 
     periods = asyncio.run(plugin.periods("2026-01-01T00", "2026-01-01T02"))
 
@@ -63,7 +64,9 @@ def test_era5_land_fetch_period_normalizes_coordinates(monkeypatch: pytest.Monke
     assert "y" in dataset.dims
     assert "longitude" not in dataset.dims
     assert "latitude" not in dataset.dims
-    assert dataset["t2m"].values.tolist() == [[[281.0]]]
+    # 281.0 K → 281.0 - 273.15 = 7.85 °C
+    np.testing.assert_allclose(dataset["t2m"].values, [[[281.0 - 273.15]]], rtol=1e-4)
+    assert dataset["t2m"].attrs.get("units") == "degC"
 
 
 def test_era5_land_precipitation_plugin_defaults_to_tp(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,7 +88,9 @@ def test_era5_land_precipitation_plugin_defaults_to_tp(monkeypatch: pytest.Monke
     dataset = asyncio.run(plugin.fetch_period("2026-01-01T00", [1.0, 2.0, 3.0, 4.0]))
 
     assert list(dataset.data_vars) == ["tp"]
-    np.testing.assert_allclose(dataset["tp"].values, [[[0.002]]])
+    # 0.002 m → 0.002 * 1000 = 2.0 mm
+    np.testing.assert_allclose(dataset["tp"].values, [[[2.0]]], rtol=1e-4)
+    assert dataset["tp"].attrs.get("units") == "mm"
 
 
 def test_era5_land_cached_region_closes_previous_dataset_when_bbox_changes(
@@ -138,3 +143,18 @@ def test_era5_land_plugin_close_releases_cached_region(monkeypatch: pytest.Monke
     plugin.close()
 
     assert region.closed is True
+
+
+def test_era5_land_plugin_accepts_extra_kwargs() -> None:
+    plugin = ERA5LandHourlySingleBandPlugin(variable="t2m", unknown_future_field="ignored")
+    assert plugin.variable == "t2m"
+
+
+def test_era5_land_plugin_still_rejects_empty_variable_with_extra_kwargs() -> None:
+    with pytest.raises(ValueError, match="non-empty variable"):
+        ERA5LandHourlySingleBandPlugin(variable="", unknown_future_field="ignored")
+
+
+def test_era5_land_precipitation_plugin_accepts_extra_kwargs() -> None:
+    plugin = ERA5LandPrecipitationPlugin(unknown_future_field="ignored")
+    assert plugin.variable == "tp"
