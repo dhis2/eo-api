@@ -405,6 +405,14 @@ def _load_streaming_plugin(plugin_path: str, *, params: dict[str, object]) -> In
     return plugin
 
 
+def register_artifact_record(record: ArtifactRecord, *, publish: bool) -> ArtifactRecord:
+    """Store a pre-built artifact record and optionally publish it to STAC."""
+    stored = _store_artifact_record(record, publish=publish)
+    if publish and stored.publication.status != PublicationStatus.PUBLISHED:
+        return publish_artifact_record(stored.artifact_id)
+    return stored
+
+
 def publish_artifact_record(artifact_id: str) -> ArtifactRecord:
     """Publish an artifact via pygeoapi and persist publication metadata."""
     published = publish_artifact(get_artifact_or_404(artifact_id))

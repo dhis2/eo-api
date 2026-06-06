@@ -11,6 +11,7 @@ import pytest
 import xarray as xr
 from fastapi.testclient import TestClient
 
+from open_climate_service.ingestions.schemas import ArtifactFormat
 from open_climate_service.openeo.execution import (
     SaveResultEnvelope,
     _augment_with_workflows,
@@ -19,7 +20,13 @@ from open_climate_service.openeo.execution import (
     _temporal_to_list,
     run_process_graph,
 )
-from open_climate_service.openeo.jobs import OpenEOJobService, _result_assets
+from open_climate_service.openeo.jobs import (
+    OpenEOJobService,
+    _derive_coverage,
+    _derive_variable,
+    _infer_period_type,
+    _result_assets,
+)
 from open_climate_service.openeo.schemas import OpenEOJobCreate, OpenEOJobRecord, OpenEOJobStatus
 from open_climate_service.shared.time import utc_now
 
@@ -454,3 +461,202 @@ def test_result_route_reprojects_geojson_payload_to_wgs84(client: TestClient, mo
     coords = payload["features"][0]["geometry"]["coordinates"]
     assert coords[0] == pytest.approx(1.0, rel=0, abs=1e-6)
     assert coords[1] == pytest.approx(1.0, rel=0, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# _write_managed_zarr — managed IceChunk / pyramid store via save_result
+# ---------------------------------------------------------------------------
+
+
+def _small_dataset() -> xr.Dataset:
+    """A dataset small enough to stay below the pyramid pixel threshold."""
+    t = np.array(["2025-01-01", "2025-01-02", "2025-01-03"], dtype="datetime64[D]")
+    return xr.Dataset(
+        {"precip": (("t", "y", "x"), np.ones((3, 4, 5), dtype=np.float32))},
+        coords={"t": t, "y": [1.0, 2.0, 3.0, 4.0], "x": [1.0, 2.0, 3.0, 4.0, 5.0]},
+    )
+
+
+def test_persist_result_writes_icechunk_when_dataset_id_in_options(
+    job_service: OpenEOJobService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ds = _small_dataset()
+    envelope = SaveResultEnvelope(ds, "Zarr", {"dataset_id": "my_aggregate"})
+
+    monkeypatch.setattr("open_climate_service.data_manager.services.downloader.DOWNLOAD_DIR", tmp_path)
+    registered: list[Any] = []
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.services.register_artifact_record",
+        lambda record, publish: registered.append((record, publish)) or record,
+    )
+
+    result = job_service._persist_result("job-managed", envelope)
+
+    assert result is None
+    assert (tmp_path / "my_aggregate.icechunk").exists()
+    assert len(registered) == 1
+    record, publish_flag = registered[0]
+    assert record.dataset_id == "my_aggregate"
+    assert record.format == ArtifactFormat.ICECHUNK
+    assert publish_flag is False
+
+
+def test_persist_result_does_not_publish_when_publish_false(
+    job_service: OpenEOJobService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    envelope = SaveResultEnvelope(_small_dataset(), "Zarr", {"dataset_id": "ds", "publish": False})
+    monkeypatch.setattr("open_climate_service.data_manager.services.downloader.DOWNLOAD_DIR", tmp_path)
+    registered: list[Any] = []
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.services.register_artifact_record",
+        lambda record, publish: registered.append((record, publish)) or record,
+    )
+
+    job_service._persist_result("job-nopub", envelope)
+
+    _, publish_flag = registered[0]
+    assert publish_flag is False
+
+
+def test_persist_result_publishes_to_stac_when_publish_true(
+    job_service: OpenEOJobService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    envelope = SaveResultEnvelope(_small_dataset(), "Zarr", {"dataset_id": "ds", "publish": True})
+    monkeypatch.setattr("open_climate_service.data_manager.services.downloader.DOWNLOAD_DIR", tmp_path)
+    registered: list[Any] = []
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.services.register_artifact_record",
+        lambda record, publish: registered.append((record, publish)) or record,
+    )
+
+    job_service._persist_result("job-pub", envelope)
+
+    _, publish_flag = registered[0]
+    assert publish_flag is True
+
+
+def test_persist_result_uses_zarr_format_when_pyramid_needed(
+    job_service: OpenEOJobService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "open_climate_service.data_manager.services.downloader._needs_pyramid",
+        lambda ds, x, y: True,
+    )
+    monkeypatch.setattr(
+        "open_climate_service.data_manager.services.downloader._pyramid_levels",
+        lambda ds, x, y: 2,
+    )
+
+    class _FakePyramidDt:
+        attrs: dict[str, Any] = {}
+
+        def to_zarr(self, path: Any, **kwargs: Any) -> None:
+            Path(path).mkdir(parents=True, exist_ok=True)
+            (Path(path) / "zarr.json").write_text("{}")
+
+        def close(self) -> None:
+            pass
+
+    class _FakePyramid:
+        dt = _FakePyramidDt()
+        encoding: dict[str, Any] = {}
+
+    monkeypatch.setattr("topozarr.coarsen.create_pyramid", lambda *a, **kw: _FakePyramid())
+    monkeypatch.setattr(
+        "open_climate_service.data_manager.services.downloader._write_root_time_coordinate",
+        lambda *a, **kw: None,
+    )
+    monkeypatch.setattr("open_climate_service.data_manager.services.downloader.DOWNLOAD_DIR", tmp_path)
+
+    registered: list[Any] = []
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.services.register_artifact_record",
+        lambda record, publish: registered.append((record, publish)) or record,
+    )
+
+    ds = _small_dataset()
+    ds.attrs["proj:code"] = "EPSG:4326"
+    envelope = SaveResultEnvelope(ds, "Zarr", {"dataset_id": "big_dataset"})
+
+    job_service._persist_result("job-pyramid", envelope)
+
+    record, _ = registered[0]
+    assert record.format == ArtifactFormat.ZARR
+    assert record.path == str(tmp_path / "big_dataset.zarr")
+
+
+def test_persist_result_falls_through_to_ephemeral_zarr_without_dataset_id(
+    job_service: OpenEOJobService,
+) -> None:
+    envelope = SaveResultEnvelope(_small_dataset(), "Zarr", {})
+    output_path = job_service._persist_result("job-ephemeral", envelope)
+
+    assert output_path is not None
+    assert output_path.endswith(".zarr")
+
+
+# ---------------------------------------------------------------------------
+# _infer_period_type
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("timedelta_days", "expected"),
+    [
+        (1, "daily"),
+        (7, "weekly"),
+        (30, "monthly"),
+        (365, "yearly"),
+    ],
+)
+def test_infer_period_type(timedelta_days: int, expected: str) -> None:
+    t = np.arange(3).astype("timedelta64[D]") * timedelta_days + np.datetime64("2025-01-01", "D")
+    ds = xr.Dataset({"v": ("t", [1.0, 2.0, 3.0])}, coords={"t": t})
+    assert _infer_period_type(ds, "t") == expected
+
+
+def test_infer_period_type_returns_none_for_single_timestep() -> None:
+    ds = xr.Dataset({"v": ("t", [1.0])}, coords={"t": np.array(["2025-01-01"], dtype="datetime64[D]")})
+    assert _infer_period_type(ds, "t") is None
+
+
+# ---------------------------------------------------------------------------
+# _derive_coverage
+# ---------------------------------------------------------------------------
+
+
+def test_derive_coverage_returns_spatial_and_temporal_from_dataset() -> None:
+    t = np.array(["2025-01-01", "2025-01-03"], dtype="datetime64[D]")
+    ds = xr.Dataset(
+        {"v": (("t", "y", "x"), np.ones((2, 3, 4)))},
+        coords={"t": t, "y": [10.0, 20.0, 30.0], "x": [1.0, 2.0, 3.0, 4.0]},
+    )
+    coverage = _derive_coverage(ds, "x", "y", "t")
+
+    assert coverage.spatial.xmin == pytest.approx(1.0)
+    assert coverage.spatial.xmax == pytest.approx(4.0)
+    assert coverage.spatial.ymin == pytest.approx(10.0)
+    assert coverage.spatial.ymax == pytest.approx(30.0)
+    assert coverage.temporal.start == "2025-01-01"
+    assert coverage.temporal.end == "2025-01-03"
+
+
+# ---------------------------------------------------------------------------
+# _derive_variable
+# ---------------------------------------------------------------------------
+
+
+def test_derive_variable_from_options() -> None:
+    ds = xr.Dataset({"a": ("x", [1.0]), "b": ("x", [2.0])})
+    assert _derive_variable(ds, {"variable": "a"}) == "a"
+
+
+def test_derive_variable_from_sole_data_var() -> None:
+    ds = xr.Dataset({"precip": ("x", [1.0])})
+    assert _derive_variable(ds, {}) == "precip"
+
+
+def test_derive_variable_raises_for_multiple_vars_without_option() -> None:
+    ds = xr.Dataset({"a": ("x", [1.0]), "b": ("x", [2.0])})
+    with pytest.raises(ValueError, match="multiple variables"):
+        _derive_variable(ds, {})

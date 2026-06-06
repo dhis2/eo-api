@@ -416,8 +416,10 @@ class OpenEOJobService:
 
         # Unwrap format envelope from save_result
         fmt = "ZARR"
+        options: dict[str, Any] = {}
         if isinstance(result, SaveResultEnvelope):
             fmt = result.format
+            options = result.options
             result = result.data
 
         # Resolve DataArray → Dataset for raster formats
@@ -425,6 +427,10 @@ class OpenEOJobService:
             result = result.to_dataset(name=result.name or "result")
 
         if isinstance(result, xr.Dataset):
+            # Zarr format with dataset_id → write directly to managed IceChunk/Zarr store
+            if fmt == "ZARR" and options.get("dataset_id"):
+                _write_managed_zarr(result, options)
+                return None
             return _write_raster(result, results_dir, fmt)
 
         # Tabular: resolve dask_geopandas → GeoDataFrame
@@ -449,6 +455,204 @@ class OpenEOJobService:
         raise TypeError(
             f"Unsupported result type '{type(result).__name__}': expected xr.Dataset, xr.DataArray, or GeoDataFrame"
         )
+
+
+def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
+    """Write a computed xr.Dataset to the managed IceChunk/Zarr store and register it."""
+    import uuid
+    from datetime import UTC, datetime
+
+    import xarray as xr
+
+    from open_climate_service.data_manager.services import downloader
+    from open_climate_service.data_manager.services.utils import get_time_dim, get_x_y_dims
+    from open_climate_service.ingestions import services as ingestion_services
+    from open_climate_service.ingestions.schemas import (
+        ArtifactFormat,
+        ArtifactPublication,
+        ArtifactRecord,
+        ArtifactRequestScope,
+    )
+
+    dataset_id: str = options["dataset_id"]
+    dataset_name: str = options.get("dataset_name", dataset_id)
+
+    if not isinstance(ds, xr.Dataset):
+        raise TypeError(f"Managed Zarr write requires an xr.Dataset, got {type(ds).__name__}")
+
+    try:
+        x_dim, y_dim = get_x_y_dims(ds)
+    except ValueError as exc:
+        raise ValueError(f"Cannot write managed dataset '{dataset_id}': {exc}") from exc
+
+    try:
+        t_dim: str | None = get_time_dim(ds)
+    except ValueError:
+        t_dim = None
+
+    coverage = _derive_coverage(ds, x_dim, y_dim, t_dim)
+    variable = _derive_variable(ds, options)
+    period_type: str | None = options.get("period_type") or (
+        _infer_period_type(ds, t_dim) if t_dim is not None else None
+    )
+
+    use_pyramid = downloader._needs_pyramid(ds, x_dim, y_dim)
+
+    if use_pyramid:
+        from geozarr_toolkit import MultiscalesConventionMetadata, create_geozarr_attrs
+        from topozarr.coarsen import create_pyramid
+
+        from open_climate_service import config as api_config
+
+        store_path = downloader.DOWNLOAD_DIR / f"{dataset_id}.zarr"
+        crs: str = ds.attrs.get("proj:code") or api_config.get_crs()
+        levels = downloader._pyramid_levels(ds, x_dim, y_dim)
+        logger.info(
+            "Building %d-level pyramid for managed dataset '%s' (dims %dx%d)",
+            levels,
+            dataset_id,
+            ds.sizes[x_dim],
+            ds.sizes[y_dim],
+        )
+
+        xmin = float(ds[x_dim].min())
+        xmax = float(ds[x_dim].max())
+        ymin = float(ds[y_dim].min())
+        ymax = float(ds[y_dim].max())
+        geozarr_attrs = create_geozarr_attrs(
+            dimensions=[x_dim, y_dim],
+            crs=crs,
+            bbox=[xmin, ymin, xmax, ymax],
+            shape=(ds.sizes[x_dim], ds.sizes[y_dim]),
+        )
+        zarr_conventions = geozarr_attrs.get("zarr_conventions", [])
+        zarr_conventions.append(MultiscalesConventionMetadata().model_dump())
+        geozarr_attrs["zarr_conventions"] = zarr_conventions
+
+        ds_loaded = ds.load()
+        ds_projected = ds_loaded.proj.assign_crs(spatial_ref=crs)
+        pyramid = create_pyramid(ds_projected, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
+        pyramid.dt.attrs.update(geozarr_attrs)
+        pyramid.dt.to_zarr(store_path, mode="w", encoding=pyramid.encoding, zarr_format=3)
+        if t_dim is not None:
+            downloader._write_root_time_coordinate(store_path, ds_loaded, time_dim=t_dim)
+        pyramid.dt.close()
+        artifact_format = ArtifactFormat.ZARR
+    else:
+        import icechunk
+
+        store_path = downloader.DOWNLOAD_DIR / f"{dataset_id}.icechunk"
+        logger.info(
+            "Writing managed IceChunk dataset '%s' (dims %dx%d)",
+            dataset_id,
+            ds.sizes[x_dim],
+            ds.sizes[y_dim],
+        )
+        store_path.parent.mkdir(parents=True, exist_ok=True)
+        storage = icechunk.local_filesystem_storage(str(store_path))
+        if store_path.exists():
+            repo = icechunk.Repository.open(storage)
+        else:
+            repo = icechunk.Repository.create(storage)
+        session = repo.writable_session("main")
+        ds.to_zarr(session.store, mode="w", zarr_format=3)
+        session.commit(f"Published from openEO job: {dataset_id}")
+        artifact_format = ArtifactFormat.ICECHUNK
+
+    record = ArtifactRecord(
+        artifact_id=str(uuid.uuid4()),
+        dataset_id=dataset_id,
+        dataset_name=dataset_name,
+        variable=variable,
+        period_type=period_type,
+        format=artifact_format,
+        path=str(store_path),
+        asset_paths=[str(store_path)],
+        variables=[str(v) for v in ds.data_vars],
+        request_scope=ArtifactRequestScope(
+            start=coverage.temporal.start,
+            end=coverage.temporal.end,
+        ),
+        coverage=coverage,
+        created_at=datetime.now(UTC),
+        publication=ArtifactPublication(),
+    )
+    ingestion_services.register_artifact_record(record, publish=bool(options.get("publish")))
+
+
+def _derive_coverage(ds: Any, x_dim: str, y_dim: str, t_dim: str | None) -> Any:
+    """Derive ArtifactCoverage from an xr.Dataset's coordinates."""
+    import numpy as np
+    import pyproj
+
+    from open_climate_service.ingestions.schemas import (
+        ArtifactCoverage,
+        CoverageSpatial,
+        CoverageTemporal,
+    )
+
+    xmin = float(ds[x_dim].min())
+    xmax = float(ds[x_dim].max())
+    ymin = float(ds[y_dim].min())
+    ymax = float(ds[y_dim].max())
+    spatial = CoverageSpatial(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
+
+    native_crs: str = ds.attrs.get("proj:code", "EPSG:4326")
+    spatial_wgs84: Any = None
+    if native_crs not in ("EPSG:4326", "CRS84", "OGC:CRS84"):
+        try:
+            transformer = pyproj.Transformer.from_crs(native_crs, "EPSG:4326", always_xy=True)
+            wx_min, wy_min = transformer.transform(xmin, ymin)
+            wx_max, wy_max = transformer.transform(xmax, ymax)
+            spatial_wgs84 = CoverageSpatial(xmin=wx_min, ymin=wy_min, xmax=wx_max, ymax=wy_max)
+        except Exception:
+            pass
+
+    if t_dim is not None and t_dim in ds.coords and ds.sizes.get(t_dim, 0) > 0:
+        t_values = ds[t_dim].values
+        t_start = str(np.datetime_as_string(t_values[0], unit="D"))
+        t_end = str(np.datetime_as_string(t_values[-1], unit="D"))
+    else:
+        t_start = ""
+        t_end = ""
+
+    return ArtifactCoverage(
+        spatial=spatial,
+        spatial_wgs84=spatial_wgs84,
+        temporal=CoverageTemporal(start=t_start, end=t_end),
+    )
+
+
+def _infer_period_type(ds: Any, t_dim: str) -> str | None:
+    """Infer period type from the median time step of a dataset."""
+    import numpy as np
+
+    if t_dim not in ds.coords or ds.sizes.get(t_dim, 0) < 2:
+        return None
+
+    t_values = ds[t_dim].values
+    deltas = np.diff(t_values).astype("timedelta64[s]").astype(float)
+    median_seconds = float(np.median(deltas))
+
+    if median_seconds <= 3600:
+        return "hourly"
+    if median_seconds <= 86400:
+        return "daily"
+    if median_seconds <= 8 * 86400:
+        return "weekly"
+    if median_seconds <= 32 * 86400:
+        return "monthly"
+    return "yearly"
+
+
+def _derive_variable(ds: Any, options: dict[str, Any]) -> str:
+    """Return the primary variable name from options or the sole data variable."""
+    if options.get("variable"):
+        return str(options["variable"])
+    vars_list = list(ds.data_vars)
+    if len(vars_list) == 1:
+        return str(vars_list[0])
+    raise ValueError(f"Dataset has multiple variables {vars_list!r}; specify 'variable' in save_result options")
 
 
 def _result_assets(record: OpenEOJobRecord) -> dict[str, Any]:
