@@ -565,8 +565,14 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         zarr_conventions.append(MultiscalesConventionMetadata().model_dump())
         geozarr_attrs["zarr_conventions"] = zarr_conventions
 
+        import rioxarray as _rxr  # noqa: F401 — activates .rio accessor
+
         ds_loaded = _strip_non_serializable_attrs(ds).load()
         ds_projected = ds_loaded.proj.assign_crs(spatial_ref=crs)
+        # proj.assign_crs creates the spatial_ref coordinate but leaves its attrs
+        # empty; write_crs adds the WKT attrs that rioxarray (and aggregate_spatial)
+        # need to read the CRS back after loading.
+        ds_projected = ds_projected.rio.write_crs(crs)
         pyramid = create_pyramid(ds_projected, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
         pyramid.dt.attrs.update(geozarr_attrs)
         pyramid.dt.to_zarr(store_path, mode="w", encoding=pyramid.encoding, zarr_format=3)
@@ -613,7 +619,7 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         created_at=datetime.now(UTC),
         publication=ArtifactPublication(),
     )
-    ingestion_services.register_artifact_record(record, publish=bool(options.get("publish")))
+    ingestion_services.register_artifact_record(record, publish=bool(options.get("publish", True)))
 
 
 def _recover_temporal_from_attrs(ds: Any) -> tuple[str, str]:
