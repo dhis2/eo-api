@@ -38,9 +38,7 @@ def main() -> None:
     id_to_name = {f["properties"]["id"]: f["properties"]["name"] for f in features}
 
     # Discover available temporal extent from the STAC collection
-    coll = requests.get(
-        f"{BASE_URL}/stac/collections/{COLLECTION_ID}", timeout=30
-    ).json()
+    coll = requests.get(f"{BASE_URL}/stac/collections/{COLLECTION_ID}", timeout=30).json()
     interval = coll["extent"]["temporal"]["interval"][0]
     temporal_extent = [interval[0][:10], interval[1][:10]]
 
