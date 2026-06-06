@@ -220,16 +220,22 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
             time_dimension: str | None = get_time_dim(ds)
         except ValueError:
             time_dimension = None  # static dataset with no time dimension
-        result = xarray_to_stac(
-            ds,
-            template,
-            temporal_dimension=time_dimension,
-            x_dimension=x_dimension,
-            y_dimension=y_dimension,
-            reference_system=4326,
-            # Schema validation can trigger outbound fetches for STAC extension schemas.
-            validate=False,
-        )
+        if time_dimension is not None:
+            result = xarray_to_stac(
+                ds,
+                template,
+                temporal_dimension=time_dimension,
+                x_dimension=x_dimension,
+                y_dimension=y_dimension,
+                reference_system=4326,
+                # Schema validation can trigger outbound fetches for STAC extension schemas.
+                validate=False,
+            )
+        else:
+            # xarray_to_stac raises KeyError when temporal_dimension is None and the
+            # dataset has no CF time axis (e.g. after reduce_dimension removes it).
+            # Fall back to the template so the collection is still served.
+            result = template
         # build_collection replaces links from the template after xstac runs, so
         # clear xstac/pystac-owned links before serialization to avoid root-link
         # resolution attempts during to_dict().
