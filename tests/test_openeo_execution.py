@@ -25,6 +25,7 @@ from open_climate_service.openeo.jobs import (
     _derive_coverage,
     _derive_variable,
     _infer_period_type,
+    _recover_temporal_from_attrs,
     _result_assets,
 )
 from open_climate_service.openeo.schemas import OpenEOJobCreate, OpenEOJobRecord, OpenEOJobStatus
@@ -623,6 +624,37 @@ def test_infer_period_type_returns_none_for_single_timestep() -> None:
 # ---------------------------------------------------------------------------
 # _derive_coverage
 # ---------------------------------------------------------------------------
+
+
+def test_derive_coverage_falls_back_to_reduced_dimensions_attrs() -> None:
+    """After reduce_dimension the time dim is gone; recover range from attrs."""
+    ds = xr.Dataset(
+        {"temperature": (("y", "x"), np.ones((3, 4)))},
+        coords={"y": [10.0, 20.0, 30.0], "x": [1.0, 2.0, 3.0, 4.0]},
+    )
+    # Simulate what openeo-processes-dask injects on each variable after reduce_dimension
+    ds["temperature"].attrs["reduced_dimensions_min_values"] = {"t": np.datetime64("2018-01-01")}
+    ds["temperature"].attrs["reduced_dimensions_max_values"] = {"t": np.datetime64("2018-03-01")}
+
+    coverage = _derive_coverage(ds, "x", "y", None)
+    assert coverage.temporal.start == "2018-01-01"
+    assert coverage.temporal.end == "2018-03-01"
+
+
+def test_recover_temporal_from_attrs_returns_empty_when_no_attrs() -> None:
+    ds = xr.Dataset({"v": (("y", "x"), np.ones((2, 2)))})
+    start, end = _recover_temporal_from_attrs(ds)
+    assert start == ""
+    assert end == ""
+
+
+def test_recover_temporal_from_attrs_reads_from_dataset_attrs() -> None:
+    ds = xr.Dataset({"v": (("y", "x"), np.ones((2, 2)))})
+    ds.attrs["reduced_dimensions_min_values"] = {"t": np.datetime64("2020-06-01")}
+    ds.attrs["reduced_dimensions_max_values"] = {"t": np.datetime64("2020-08-31")}
+    start, end = _recover_temporal_from_attrs(ds)
+    assert start == "2020-06-01"
+    assert end == "2020-08-31"
 
 
 def test_derive_coverage_returns_spatial_and_temporal_from_dataset() -> None:
