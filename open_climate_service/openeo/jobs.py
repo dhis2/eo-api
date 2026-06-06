@@ -427,7 +427,7 @@ class OpenEOJobService:
             result = result.to_dataset(name=result.name or "result")
 
         if isinstance(result, xr.Dataset):
-            # Zarr format with dataset_id → write directly to managed IceChunk/Zarr store
+            # Zarr format with dataset_id → write directly to managed Icechunk/Zarr store
             if fmt == "ZARR" and options.get("dataset_id"):
                 _write_managed_zarr(result, options)
                 return None
@@ -457,8 +457,36 @@ class OpenEOJobService:
         )
 
 
+def _strip_non_serializable_attrs(ds: Any) -> Any:
+    """Return a copy of ds with any non-JSON-serializable attrs removed.
+
+    openeo-processes-dask injects numpy scalars and datetime64 values into
+    variable attrs (e.g. reduced_dimensions_min_values) after reduce_dimension.
+    Zarr requires all attrs to be JSON-serializable; strip the offenders so the
+    write succeeds while keeping the data and coordinates intact.
+    """
+    import json
+
+    def _safe(attrs: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for k, v in attrs.items():
+            try:
+                json.dumps(v)
+                out[k] = v
+            except (TypeError, ValueError):
+                pass
+        return out
+
+    ds = ds.copy()
+    ds.attrs = _safe(ds.attrs)
+    for name in list(ds.data_vars) + list(ds.coords):
+        if ds[name].attrs:
+            ds[name].attrs = _safe(ds[name].attrs)
+    return ds
+
+
 def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
-    """Write a computed xr.Dataset to the managed IceChunk/Zarr store and register it."""
+    """Write a computed xr.Dataset to the managed Icechunk/Zarr store and register it."""
     import uuid
     from datetime import UTC, datetime
 
@@ -529,7 +557,7 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         zarr_conventions.append(MultiscalesConventionMetadata().model_dump())
         geozarr_attrs["zarr_conventions"] = zarr_conventions
 
-        ds_loaded = ds.load()
+        ds_loaded = _strip_non_serializable_attrs(ds).load()
         ds_projected = ds_loaded.proj.assign_crs(spatial_ref=crs)
         pyramid = create_pyramid(ds_projected, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
         pyramid.dt.attrs.update(geozarr_attrs)
@@ -543,7 +571,7 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
 
         store_path = downloader.DOWNLOAD_DIR / f"{dataset_id}.icechunk"
         logger.info(
-            "Writing managed IceChunk dataset '%s' (dims %dx%d)",
+            "Writing managed Icechunk dataset '%s' (dims %dx%d)",
             dataset_id,
             ds.sizes[x_dim],
             ds.sizes[y_dim],
@@ -555,7 +583,7 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         else:
             repo = icechunk.Repository.create(storage)
         session = repo.writable_session("main")
-        ds.to_zarr(session.store, mode="w", zarr_format=3)
+        _strip_non_serializable_attrs(ds).to_zarr(session.store, mode="w", zarr_format=3)
         session.commit(f"Published from openEO job: {dataset_id}")
         artifact_format = ArtifactFormat.ICECHUNK
 

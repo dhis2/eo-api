@@ -464,7 +464,7 @@ def test_result_route_reprojects_geojson_payload_to_wgs84(client: TestClient, mo
 
 
 # ---------------------------------------------------------------------------
-# _write_managed_zarr — managed IceChunk / pyramid store via save_result
+# _write_managed_zarr — managed Icechunk / pyramid store via save_result
 # ---------------------------------------------------------------------------
 
 
