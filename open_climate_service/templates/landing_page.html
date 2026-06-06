@@ -213,6 +213,57 @@
         {% endif %}
       </div>
 
+      <!-- Links -->
+      <div class="card">
+        <h2>Explore</h2>
+        <ul class="links-list">
+          <li>
+            <span class="link-label"
+              ><a href="{{ base }}/manage">Manage</a></span
+            >
+            <span class="link-desc"
+              >Ingest and sync datasets without using the API directly</span
+            >
+          </li>
+          <li>
+            <span class="link-label"
+              ><a href="{{ base }}/docs">API documentation</a></span
+            >
+            <span class="link-desc"
+              >Interactive Swagger UI for all endpoints</span
+            >
+          </li>
+          <li>
+            <span class="link-label"
+              ><a href="{{ base }}/map">Map viewer</a></span
+            >
+            <span class="link-desc"
+              >Browse published datasets on an interactive map</span
+            >
+          </li>
+          <li>
+            <span class="link-label"
+              ><a href="{{ base }}/openeo" target="_blank" rel="noopener">openEO Editor</a></span
+            >
+            <span class="link-desc"
+              >Build and run openEO process graphs in the browser</span
+            >
+          </li>
+          <li>
+            <span class="link-label"
+              ><a href="{{ base }}/stac/catalog.json">STAC Catalog</a></span
+            >
+            <span class="link-desc"
+              >SpatioTemporal Asset Catalog of published datasets</span
+            >
+          </li>
+          <li>
+            <span class="link-label"><a href="{{ base }}/?f=json">Root (JSON)</a></span>
+            <span class="link-desc">This page as a JSON navigation object</span>
+          </li>
+        </ul>
+      </div>
+
       <!-- Datasets -->
       <div class="card">
         <h2>Datasets <span class="badge">{{ datasets | length }}</span></h2>
@@ -297,57 +348,6 @@
         {% else %}
         <p class="note">No dataset templates found.</p>
         {% endif %}
-      </div>
-
-      <!-- Links -->
-      <div class="card">
-        <h2>Explore</h2>
-        <ul class="links-list">
-          <li>
-            <span class="link-label"
-              ><a href="{{ base }}/manage">Manage</a></span
-            >
-            <span class="link-desc"
-              >Ingest and sync datasets without using the API directly</span
-            >
-          </li>
-          <li>
-            <span class="link-label"
-              ><a href="{{ base }}/docs">API documentation</a></span
-            >
-            <span class="link-desc"
-              >Interactive Swagger UI for all endpoints</span
-            >
-          </li>
-          <li>
-            <span class="link-label"
-              ><a href="{{ base }}/map">Map viewer</a></span
-            >
-            <span class="link-desc"
-              >Browse published datasets on an interactive map</span
-            >
-          </li>
-          <li>
-            <span class="link-label"
-              ><a href="{{ base }}/openeo" target="_blank" rel="noopener">openEO Editor</a></span
-            >
-            <span class="link-desc"
-              >Build and run openEO process graphs in the browser</span
-            >
-          </li>
-          <li>
-            <span class="link-label"
-              ><a href="{{ base }}/stac/catalog.json">STAC Catalog</a></span
-            >
-            <span class="link-desc"
-              >SpatioTemporal Asset Catalog of published datasets</span
-            >
-          </li>
-          <li>
-            <span class="link-label"><a href="{{ base }}/?f=json">Root (JSON)</a></span>
-            <span class="link-desc">This page as a JSON navigation object</span>
-          </li>
-        </ul>
       </div>
     </main>
 
