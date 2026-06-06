@@ -533,8 +533,8 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     )
 
     import icechunk
-    import zarr as _zarr
     import rioxarray as _rxr  # noqa: F401 — activates .rio accessor
+    import zarr as _zarr
 
     from open_climate_service import config as api_config
 
@@ -556,11 +556,7 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         ds_projected[_var].attrs["grid_mapping"] = "spatial_ref"
 
     storage = icechunk.local_filesystem_storage(str(store_path))
-    repo = (
-        icechunk.Repository.open(storage)
-        if store_path.exists()
-        else icechunk.Repository.create(storage)
-    )
+    repo = icechunk.Repository.open(storage) if store_path.exists() else icechunk.Repository.create(storage)
     session = repo.writable_session("main")
 
     use_pyramid = downloader._needs_pyramid(ds, x_dim, y_dim)

@@ -300,9 +300,7 @@ def _compute_time_space_chunks(
     return chunks
 
 
-def _write_root_time_coordinate(
-    zarr_store: "Path | Any", ds: xr.Dataset, *, time_dim: str
-) -> None:
+def _write_root_time_coordinate(zarr_store: "Path | Any", ds: xr.Dataset, *, time_dim: str) -> None:
     """Expose the time coordinate at the pyramid root with bounded chunking for browser clients.
 
     zarr_store may be a filesystem Path (plain Zarr) or a zarr-compatible store object
