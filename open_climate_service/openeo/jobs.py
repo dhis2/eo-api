@@ -571,9 +571,14 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         # rio.write_crs populates spatial_ref attrs (crs_wkt etc.) for rioxarray,
         # but it destroys xproj's CRS detection (ds.proj.crs → None).
         # Re-calling proj.assign_crs last restores xproj while keeping the WKT attrs.
+        # grid_mapping is added explicitly because rioxarray finds CRS in-memory by
+        # scanning coords, but after zarr round-trip it requires the CF grid_mapping
+        # attribute on each data variable to locate the CRS coordinate.
         ds_projected = ds_loaded.proj.assign_crs(spatial_ref=crs)
         ds_projected = ds_projected.rio.write_crs(crs)
         ds_projected = ds_projected.proj.assign_crs(spatial_ref=crs)
+        for _var in ds_projected.data_vars:
+            ds_projected[_var].attrs["grid_mapping"] = "spatial_ref"
         pyramid = create_pyramid(ds_projected, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
         pyramid.dt.attrs.update(geozarr_attrs)
         pyramid.dt.to_zarr(store_path, mode="w", encoding=pyramid.encoding, zarr_format=3)
