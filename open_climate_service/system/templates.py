@@ -63,11 +63,19 @@ def get_template(name: str) -> jinja2.Template:
 
 
 def _media_type_q(accept: str, media_type: str) -> float:
-    """Return the q-value for media_type in an Accept header, or -1.0 if absent."""
+    """Return the effective q-value for media_type in an Accept header, or -1.0 if absent.
+
+    Handles RFC 7231 wildcards: exact matches beat type/* beats */*. An API client
+    sending Accept: */* (e.g. the requests library default) therefore matches any
+    media type at q=1.0, and JSON wins over HTML when both match equally.
+    """
+    media_type_family = media_type.split("/", 1)[0]
+    exact_q = -1.0
+    family_q = -1.0
+    wildcard_q = -1.0
     for item in accept.split(","):
         parts = item.strip().split(";")
-        if parts[0].strip() != media_type:
-            continue
+        token = parts[0].strip()
         q = 1.0
         for param in parts[1:]:
             param = param.strip()
@@ -76,8 +84,17 @@ def _media_type_q(accept: str, media_type: str) -> float:
                     q = float(param[2:])
                 except ValueError:
                     pass
-        return q
-    return -1.0
+        if token == media_type:
+            exact_q = q
+        elif token == f"{media_type_family}/*":
+            family_q = q
+        elif token == "*/*":
+            wildcard_q = q
+    if exact_q >= 0:
+        return exact_q
+    if family_q >= 0:
+        return family_q
+    return wildcard_q
 
 
 def wants_json(request: Request) -> bool:

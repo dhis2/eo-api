@@ -28,16 +28,24 @@ def main() -> None:
     ds = api.open(first["id"])
     print(ds)
 
-    print(f"\nTime range: {ds.time.values[0]}  →  {ds.time.values[-1]}")
-    print(f"Time steps: {ds.sizes['time']}")
-    print(f"Latitude:  {ds.latitude.min().item()}  →  {ds.latitude.max().item()}")
-    print(f"Longitude: {ds.longitude.min().item()}  →  {ds.longitude.max().item()}")
+    t_dim = next((d for d in ds.dims if d in {"t", "time"}), None)
+    y_dim = next((d for d in ds.dims if d in {"y", "latitude", "lat"}), None)
+    x_dim = next((d for d in ds.dims if d in {"x", "longitude", "lon"}), None)
+
+    if t_dim:
+        print(f"\nTime range: {ds[t_dim].values[0]}  →  {ds[t_dim].values[-1]}")
+        print(f"Time steps: {ds.sizes[t_dim]}")
+    if y_dim:
+        print(f"Latitude:  {ds[y_dim].min().item():.4f}  →  {ds[y_dim].max().item():.4f}")
+    if x_dim:
+        print(f"Longitude: {ds[x_dim].min().item():.4f}  →  {ds[x_dim].max().item():.4f}")
 
     variable = list(ds.data_vars)[0]
-    centre_lat = ds.latitude.mean().item()
-    centre_lon = ds.longitude.mean().item()
-    sample = ds[variable].isel(time=0).sel(latitude=centre_lat, longitude=centre_lon, method="nearest")
-    print(f"\n{variable} at domain centre, t=0: {sample.item()}")
+    if t_dim and y_dim and x_dim:
+        centre_y = ds[y_dim].mean().item()
+        centre_x = ds[x_dim].mean().item()
+        sample = ds[variable].isel({t_dim: 0}).sel({y_dim: centre_y, x_dim: centre_x}, method="nearest")
+        print(f"\n{variable} at domain centre, t=0: {sample.compute().item()}")
 
 
 if __name__ == "__main__":

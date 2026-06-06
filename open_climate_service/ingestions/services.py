@@ -707,7 +707,11 @@ def _icechunk_list_dir(store: _IcechunkReadableStore, prefix: str) -> list[str]:
 
 
 def _icechunk_exists(store: _IcechunkReadableStore, key: str) -> bool:
-    return cast(bool, _run_async(store.exists(key)))
+    try:
+        return cast(bool, _run_async(store.exists(key)))
+    except (KeyError, Exception):
+        # Icechunk raises KeyError for Zarr v2 keys (e.g. .zgroup, .zarray)
+        return False
 
 
 def _icechunk_get(store: _IcechunkReadableStore, key: str) -> bytes | None:
@@ -717,6 +721,26 @@ def _icechunk_get(store: _IcechunkReadableStore, key: str) -> bytes | None:
     if hasattr(buffer, "to_bytes"):
         return cast(bytes, buffer.to_bytes())
     return cast(bytes, buffer)
+
+
+def _build_icechunk_consolidated_metadata(store: _IcechunkReadableStore) -> dict[str, object]:
+    """Build zarr v3 consolidated metadata for the root group of an Icechunk store.
+
+    Returns the ``consolidated_metadata`` dict to inject into the root zarr.json so
+    that xarray/zarr can enumerate variables over HTTP without directory listing.
+    """
+    try:
+        root_children = _icechunk_list_dir(store, "")
+    except Exception:
+        return {"kind": "inline", "must_understand": False, "metadata": {}}
+
+    node_metadata: dict[str, object] = {}
+    for child in sorted(root_children):
+        child_meta_bytes = _icechunk_get(store, f"{child}/zarr.json")
+        if child_meta_bytes is not None:
+            node_metadata[child] = json.loads(child_meta_bytes.decode("utf-8"))
+
+    return {"kind": "inline", "must_understand": False, "metadata": node_metadata}
 
 
 def _icechunk_directory_listing(
@@ -793,11 +817,20 @@ def _get_icechunk_store_path_or_404(
         if payload is None:
             raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
         if target.endswith("zarr.json"):
-            return JSONResponse(content=json.loads(payload.decode("utf-8")))
+            meta = json.loads(payload.decode("utf-8"))
+            # Inject consolidated metadata into the root zarr.json so xarray can
+            # enumerate variables when accessing the store over HTTP, without needing
+            # directory listing or a separate consolidation step.
+            if target == "zarr.json" and meta.get("node_type") == "group":
+                meta["consolidated_metadata"] = _build_icechunk_consolidated_metadata(store)
+            return JSONResponse(content=meta)
         media_type, _ = mimetypes.guess_type(target)
         return Response(content=payload, media_type=media_type or "application/octet-stream")
 
-    child_names = _icechunk_list_dir(store, target)
+    try:
+        child_names = _icechunk_list_dir(store, target)
+    except Exception:
+        raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
     if child_names:
         return _icechunk_directory_listing(dataset_id=dataset_id, store=store, prefix=target, child_names=child_names)
 

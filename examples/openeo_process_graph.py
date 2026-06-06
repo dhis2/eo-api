@@ -11,6 +11,7 @@ Adjust BASE_URL if the API is not on the default local address.
 """
 
 import json
+import tempfile
 
 import openeo
 
@@ -52,9 +53,14 @@ def main() -> None:
 
     print(f"\nProcess graph nodes: {list(cube_max.flat_graph().keys())}")
 
-    # Execute synchronously — mirrors: cube.download("ndvi-max.tiff")
-    result = conn.execute(cube_max)
-    print(f"\nResult:\n{json.dumps(result, indent=2)}")
+    # Download to a temp GeoTIFF — mirrors: cube.download("ndvi-max.tiff")
+    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+        output = tmp.name
+    cube_max.download(output, format="GTiff")
+    print(f"\nDownloaded GeoTIFF: {output}")
+    import os
+    size_kb = os.path.getsize(output) / 1024
+    print(f"File size: {size_kb:.1f} KB")
 
 
 if __name__ == "__main__":
