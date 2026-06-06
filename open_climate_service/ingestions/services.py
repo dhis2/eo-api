@@ -709,7 +709,7 @@ def _icechunk_list_dir(store: _IcechunkReadableStore, prefix: str) -> list[str]:
 def _icechunk_exists(store: _IcechunkReadableStore, key: str) -> bool:
     try:
         return cast(bool, _run_async(store.exists(key)))
-    except (KeyError, Exception):
+    except KeyError:
         # Icechunk raises KeyError for Zarr v2 keys (e.g. .zgroup, .zarray)
         return False
 
@@ -829,7 +829,7 @@ def _get_icechunk_store_path_or_404(
 
     try:
         child_names = _icechunk_list_dir(store, target)
-    except Exception:
+    except KeyError:
         raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
     if child_names:
         return _icechunk_directory_listing(dataset_id=dataset_id, store=store, prefix=target, child_names=child_names)

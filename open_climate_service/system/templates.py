@@ -85,11 +85,11 @@ def _media_type_q(accept: str, media_type: str) -> float:
                 except ValueError:
                     pass
         if token == media_type:
-            exact_q = q
+            exact_q = max(exact_q, q)
         elif token == f"{media_type_family}/*":
-            family_q = q
+            family_q = max(family_q, q)
         elif token == "*/*":
-            wildcard_q = q
+            wildcard_q = max(wildcard_q, q)
     if exact_q >= 0:
         return exact_q
     if family_q >= 0:

@@ -50,7 +50,7 @@ def main() -> None:
 
     print(f"\nProcess graph nodes: {list(cube_max.flat_graph().keys())}")
 
-    # Submit as a batch job — mirrors the production pattern: create → start → wait → results
+    # Submit as a batch job and list result assets — mirrors the production pattern: create → start → wait → get_results
     job = cube_max.create_job(title="max-time-demo", format="GTiff")
     print(f"\nSubmitted batch job: {job.job_id}")
     job.start_and_wait()
