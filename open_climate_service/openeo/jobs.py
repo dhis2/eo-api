@@ -503,6 +503,10 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     )
 
     dataset_id: str = options["dataset_id"]
+    if Path(dataset_id).name != dataset_id:
+        raise ValueError(
+            f"Invalid dataset_id '{dataset_id}': must be a plain name with no path separators or traversal segments"
+        )
     dataset_name: str = options.get("dataset_name", dataset_id)
 
     if not isinstance(ds, xr.Dataset):

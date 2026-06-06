@@ -595,6 +595,13 @@ def test_persist_result_falls_through_to_ephemeral_zarr_without_dataset_id(
     assert output_path.endswith(".zarr")
 
 
+@pytest.mark.parametrize("bad_id", ["../etc/passwd", "a/b", "../../secret", "/abs/path"])
+def test_persist_result_rejects_dataset_id_with_path_separators(job_service: OpenEOJobService, bad_id: str) -> None:
+    envelope = SaveResultEnvelope(_small_dataset(), "Zarr", {"dataset_id": bad_id})
+    with pytest.raises(ValueError, match="Invalid dataset_id"):
+        job_service._persist_result("job-traversal", envelope)
+
+
 # ---------------------------------------------------------------------------
 # _infer_period_type
 # ---------------------------------------------------------------------------
