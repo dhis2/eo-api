@@ -507,6 +507,15 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         raise ValueError(
             f"Invalid dataset_id '{dataset_id}': must be a plain name with no path separators or traversal segments"
         )
+
+    from open_climate_service.data_registry.services import datasets as _reg
+
+    if _reg.get_dataset(dataset_id) is None:
+        raise ValueError(
+            f"No dataset template found for '{dataset_id}'. "
+            "Register the dataset template before writing managed artifacts."
+        )
+
     dataset_name: str = options.get("dataset_name", dataset_id)
 
     if not isinstance(ds, xr.Dataset):
@@ -554,8 +563,9 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     # Note: do NOT also set grid_mapping in attrs — rio.write_crs puts it in
     # variable encoding, and xarray's CF encoder moves it to attrs during
     # serialization; setting it manually in attrs as well causes a conflict.
-    ds_loaded = _strip_non_serializable_attrs(ds).load()
-    ds_projected = ds_loaded.proj.assign_crs(spatial_ref=crs)
+    # .load() is deferred to the pyramid branch — the flat path keeps data lazy so
+    # dask-backed arrays are streamed directly to zarr without a full in-memory copy.
+    ds_projected = _strip_non_serializable_attrs(ds).proj.assign_crs(spatial_ref=crs)
     ds_projected = ds_projected.rio.write_crs(crs)
     ds_projected = ds_projected.proj.assign_crs(spatial_ref=crs)
 
@@ -592,6 +602,9 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         zarr_conventions.append(MultiscalesConventionMetadata().model_dump())
         geozarr_attrs["zarr_conventions"] = zarr_conventions
 
+        # topozarr's create_pyramid requires fully materialised numpy arrays;
+        # load here, inside the pyramid branch, to avoid the cost on the flat path.
+        ds_projected = ds_projected.load()
         pyramid = create_pyramid(ds_projected, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
         pyramid.dt.attrs.update(geozarr_attrs)
         pyramid.dt.to_zarr(session.store, mode="w", encoding=pyramid.encoding, zarr_format=3)
@@ -608,7 +621,7 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
                 _root[_level_key].attrs.update(_attrs)
 
         if t_dim is not None:
-            downloader._write_root_time_coordinate(session.store, ds_loaded, time_dim=t_dim)
+            downloader._write_root_time_coordinate(session.store, ds_projected, time_dim=t_dim)
     else:
         logger.info(
             "Writing managed Icechunk dataset '%s' (dims %dx%d)",
@@ -617,6 +630,14 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
             ds.sizes[y_dim],
         )
         ds_projected.to_zarr(session.store, mode="w", zarr_format=3)
+
+        # xarray's to_zarr demotes scalar coordinates (like spatial_ref) to data
+        # variables in zarr_format=3. Patch the root group attrs so rioxarray can
+        # follow the CF grid_mapping attribute and return the correct CRS on read.
+        _root_flat = _zarr.open_group(session.store, mode="a")
+        _flat_attrs = dict(_root_flat.attrs)
+        _flat_attrs["coordinates"] = "spatial_ref"
+        _root_flat.attrs.update(_flat_attrs)
 
     session.commit(f"Published from openEO job: {dataset_id}")
     artifact_format = ArtifactFormat.ICECHUNK
@@ -639,7 +660,10 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         created_at=datetime.now(UTC),
         publication=ArtifactPublication(),
     )
-    ingestion_services.register_artifact_record(record, publish=bool(options.get("publish", True)))
+    _publish_raw = options.get("publish", True)
+    if not isinstance(_publish_raw, bool):
+        raise ValueError(f"'publish' option must be a boolean, got {type(_publish_raw).__name__!r}: {_publish_raw!r}")
+    ingestion_services.register_artifact_record(record, publish=_publish_raw)
 
 
 def _recover_temporal_from_attrs(ds: Any) -> tuple[str, str]:
@@ -695,8 +719,9 @@ def _derive_coverage(ds: Any, x_dim: str, y_dim: str, t_dim: str | None) -> Any:
     if native_crs not in ("EPSG:4326", "CRS84", "OGC:CRS84"):
         try:
             transformer = pyproj.Transformer.from_crs(native_crs, "EPSG:4326", always_xy=True)
-            wx_min, wy_min = transformer.transform(xmin, ymin)
-            wx_max, wy_max = transformer.transform(xmax, ymax)
+            # transform_bounds is more accurate than transforming individual corners —
+            # it densifies the edges, which matters for non-rectilinear projections.
+            wx_min, wy_min, wx_max, wy_max = transformer.transform_bounds(xmin, ymin, xmax, ymax)
             spatial_wgs84 = CoverageSpatial(xmin=wx_min, ymin=wy_min, xmax=wx_max, ymax=wy_max)
         except Exception:
             pass
@@ -742,7 +767,12 @@ def _infer_period_type(ds: Any, t_dim: str) -> str | None:
 def _derive_variable(ds: Any, options: dict[str, Any]) -> str:
     """Return the primary variable name from options or the sole data variable."""
     if options.get("variable"):
-        return str(options["variable"])
+        name = str(options["variable"])
+        if name not in ds.data_vars:
+            raise ValueError(
+                f"Variable {name!r} specified in options not found in dataset; available: {list(ds.data_vars)!r}"
+            )
+        return name
     vars_list = list(ds.data_vars)
     if len(vars_list) == 1:
         return str(vars_list[0])

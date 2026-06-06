@@ -478,6 +478,11 @@ def _small_dataset() -> xr.Dataset:
     )
 
 
+def _stub_get_dataset(dataset_id: str) -> dict[str, Any]:
+    """Minimal dataset template stub for tests that call _write_managed_zarr."""
+    return {"id": dataset_id}
+
+
 def test_persist_result_writes_icechunk_when_dataset_id_in_options(
     job_service: OpenEOJobService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -485,6 +490,7 @@ def test_persist_result_writes_icechunk_when_dataset_id_in_options(
     envelope = SaveResultEnvelope(ds, "Zarr", {"dataset_id": "my_aggregate"})
 
     monkeypatch.setattr("open_climate_service.data_manager.services.downloader.DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr("open_climate_service.data_registry.services.datasets.get_dataset", _stub_get_dataset)
     registered: list[Any] = []
     monkeypatch.setattr(
         "open_climate_service.ingestions.services.register_artifact_record",
@@ -507,6 +513,7 @@ def test_persist_result_does_not_publish_when_publish_false(
 ) -> None:
     envelope = SaveResultEnvelope(_small_dataset(), "Zarr", {"dataset_id": "ds", "publish": False})
     monkeypatch.setattr("open_climate_service.data_manager.services.downloader.DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr("open_climate_service.data_registry.services.datasets.get_dataset", _stub_get_dataset)
     registered: list[Any] = []
     monkeypatch.setattr(
         "open_climate_service.ingestions.services.register_artifact_record",
@@ -524,6 +531,7 @@ def test_persist_result_publishes_to_stac_when_publish_true(
 ) -> None:
     envelope = SaveResultEnvelope(_small_dataset(), "Zarr", {"dataset_id": "ds", "publish": True})
     monkeypatch.setattr("open_climate_service.data_manager.services.downloader.DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr("open_climate_service.data_registry.services.datasets.get_dataset", _stub_get_dataset)
     registered: list[Any] = []
     monkeypatch.setattr(
         "open_climate_service.ingestions.services.register_artifact_record",
@@ -567,7 +575,7 @@ def test_persist_result_uses_icechunk_when_pyramid_needed(
         lambda *a, **kw: None,
     )
     monkeypatch.setattr("open_climate_service.data_manager.services.downloader.DOWNLOAD_DIR", tmp_path)
-
+    monkeypatch.setattr("open_climate_service.data_registry.services.datasets.get_dataset", _stub_get_dataset)
     registered: list[Any] = []
     monkeypatch.setattr(
         "open_climate_service.ingestions.services.register_artifact_record",
@@ -600,6 +608,52 @@ def test_persist_result_rejects_dataset_id_with_path_separators(job_service: Ope
     envelope = SaveResultEnvelope(_small_dataset(), "Zarr", {"dataset_id": bad_id})
     with pytest.raises(ValueError, match="Invalid dataset_id"):
         job_service._persist_result("job-traversal", envelope)
+
+
+def test_persist_result_rejects_unknown_dataset_id(
+    job_service: OpenEOJobService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("open_climate_service.data_registry.services.datasets.get_dataset", lambda _id: None)
+    envelope = SaveResultEnvelope(_small_dataset(), "Zarr", {"dataset_id": "no_such_dataset"})
+    with pytest.raises(ValueError, match="No dataset template found"):
+        job_service._persist_result("job-unknown", envelope)
+
+
+def test_persist_result_rejects_non_boolean_publish_option(
+    job_service: OpenEOJobService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("open_climate_service.data_manager.services.downloader.DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr("open_climate_service.data_registry.services.datasets.get_dataset", _stub_get_dataset)
+    envelope = SaveResultEnvelope(_small_dataset(), "Zarr", {"dataset_id": "ds", "publish": "false"})
+    with pytest.raises(ValueError, match="'publish' option must be a boolean"):
+        job_service._persist_result("job-bad-publish", envelope)
+
+
+# ---------------------------------------------------------------------------
+# _derive_variable
+# ---------------------------------------------------------------------------
+
+
+def test_derive_variable_from_options() -> None:
+    ds = xr.Dataset({"a": ("x", [1.0]), "b": ("x", [2.0])})
+    assert _derive_variable(ds, {"variable": "a"}) == "a"
+
+
+def test_derive_variable_rejects_nonexistent_variable() -> None:
+    ds = xr.Dataset({"a": ("x", [1.0]), "b": ("x", [2.0])})
+    with pytest.raises(ValueError, match="not found in dataset"):
+        _derive_variable(ds, {"variable": "temperature"})
+
+
+def test_derive_variable_from_sole_data_var() -> None:
+    ds = xr.Dataset({"precip": ("x", [1.0])})
+    assert _derive_variable(ds, {}) == "precip"
+
+
+def test_derive_variable_raises_for_multiple_vars_without_option() -> None:
+    ds = xr.Dataset({"a": ("x", [1.0]), "b": ("x", [2.0])})
+    with pytest.raises(ValueError, match="multiple variables"):
+        _derive_variable(ds, {})
 
 
 # ---------------------------------------------------------------------------
@@ -677,24 +731,3 @@ def test_derive_coverage_returns_spatial_and_temporal_from_dataset() -> None:
     assert coverage.spatial.ymax == pytest.approx(30.0)
     assert coverage.temporal.start == "2025-01-01"
     assert coverage.temporal.end == "2025-01-03"
-
-
-# ---------------------------------------------------------------------------
-# _derive_variable
-# ---------------------------------------------------------------------------
-
-
-def test_derive_variable_from_options() -> None:
-    ds = xr.Dataset({"a": ("x", [1.0]), "b": ("x", [2.0])})
-    assert _derive_variable(ds, {"variable": "a"}) == "a"
-
-
-def test_derive_variable_from_sole_data_var() -> None:
-    ds = xr.Dataset({"precip": ("x", [1.0])})
-    assert _derive_variable(ds, {}) == "precip"
-
-
-def test_derive_variable_raises_for_multiple_vars_without_option() -> None:
-    ds = xr.Dataset({"a": ("x", [1.0]), "b": ("x", [2.0])})
-    with pytest.raises(ValueError, match="multiple variables"):
-        _derive_variable(ds, {})
