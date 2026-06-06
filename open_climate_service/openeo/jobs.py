@@ -597,25 +597,27 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
                 _zj.write_text(_json.dumps(_meta))
         artifact_format = ArtifactFormat.ZARR
     else:
-        import icechunk
+        from open_climate_service import config as api_config
 
-        store_path = downloader.DOWNLOAD_DIR / f"{dataset_id}.icechunk"
+        import rioxarray as _rxr  # noqa: F401 — activates .rio accessor
+
+        store_path = downloader.DOWNLOAD_DIR / f"{dataset_id}.zarr"
+        crs = ds.attrs.get("proj:code") or api_config.get_crs()
         logger.info(
-            "Writing managed Icechunk dataset '%s' (dims %dx%d)",
+            "Writing managed Zarr dataset '%s' (dims %dx%d)",
             dataset_id,
             ds.sizes[x_dim],
             ds.sizes[y_dim],
         )
         store_path.parent.mkdir(parents=True, exist_ok=True)
-        storage = icechunk.local_filesystem_storage(str(store_path))
-        if store_path.exists():
-            repo = icechunk.Repository.open(storage)
-        else:
-            repo = icechunk.Repository.create(storage)
-        session = repo.writable_session("main")
-        _strip_non_serializable_attrs(ds).to_zarr(session.store, mode="w", zarr_format=3)
-        session.commit(f"Published from openEO job: {dataset_id}")
-        artifact_format = ArtifactFormat.ICECHUNK
+        ds_loaded = _strip_non_serializable_attrs(ds).load()
+        ds_projected = ds_loaded.proj.assign_crs(spatial_ref=crs)
+        ds_projected = ds_projected.rio.write_crs(crs)
+        ds_projected = ds_projected.proj.assign_crs(spatial_ref=crs)
+        for _var in ds_projected.data_vars:
+            ds_projected[_var].attrs["grid_mapping"] = "spatial_ref"
+        ds_projected.to_zarr(store_path, mode="w", zarr_format=3)
+        artifact_format = ArtifactFormat.ZARR
 
     record = ArtifactRecord(
         artifact_id=str(uuid.uuid4()),
