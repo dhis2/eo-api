@@ -234,13 +234,19 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
         else:
             # xarray_to_stac raises KeyError when temporal_dimension is None and the
             # dataset has no CF time axis (e.g. after reduce_dimension removes it).
-            # Fall back to the template so the collection is still served.
+            # Fall back to the template and build cube metadata manually so the
+            # map viewer can identify the correct variable and dimensions.
             result = template
         # build_collection replaces links from the template after xstac runs, so
         # clear xstac/pystac-owned links before serialization to avoid root-link
         # resolution attempts during to_dict().
         result.clear_links()
         payload: dict[str, Any] = result.to_dict(include_self_link=False)
+        if time_dimension is None:
+            # xstac was skipped — inject minimal cube:dimensions and cube:variables
+            # so the map viewer can resolve the variable name and spatial axes.
+            payload.setdefault("cube:dimensions", _build_static_cube_dimensions(ds, x_dimension, y_dimension))
+            payload.setdefault("cube:variables", _build_cube_variables(ds))
         _cache_xstac_collection_payload(artifact.artifact_id, payload)
         return deepcopy(payload)
     except HTTPException:
@@ -347,6 +353,44 @@ def _override_time_step(collection: dict[str, Any], step: str | None) -> None:
             value["step"] = step
             dimensions[key] = value
             return
+
+
+def _build_static_cube_dimensions(ds: xr.Dataset, x_dim: str, y_dim: str) -> dict[str, Any]:
+    """Build minimal cube:dimensions for a dataset with no time axis."""
+    crs = ds.attrs.get("proj:code", "EPSG:4326")
+    x_vals = ds[x_dim].values
+    y_vals = ds[y_dim].values
+    x_step = float(x_vals[1] - x_vals[0]) if len(x_vals) > 1 else None
+    y_step = float(y_vals[1] - y_vals[0]) if len(y_vals) > 1 else None
+    return {
+        x_dim: {
+            "type": "spatial",
+            "axis": "x",
+            "extent": [float(x_vals.min()), float(x_vals.max())],
+            **({"step": x_step} if x_step is not None else {}),
+            "reference_system": crs,
+        },
+        y_dim: {
+            "type": "spatial",
+            "axis": "y",
+            "extent": [float(y_vals.min()), float(y_vals.max())],
+            **({"step": y_step} if y_step is not None else {}),
+            "reference_system": crs,
+        },
+    }
+
+
+def _build_cube_variables(ds: xr.Dataset) -> dict[str, Any]:
+    """Build cube:variables from an xr.Dataset's data variables."""
+    result: dict[str, Any] = {}
+    for name in ds.data_vars:
+        var = ds[name]
+        result[str(name)] = {
+            "type": "data",
+            "dimensions": [str(d) for d in var.dims],
+            "unit": var.attrs.get("units"),
+        }
+    return result
 
 
 def _round_spatial_steps(collection: dict[str, Any]) -> None:
