@@ -58,8 +58,8 @@ def main() -> None:
     results = job.get_results()
     assets = results.get_assets()
     print(f"Result assets ({len(assets)}):")
-    for name, asset in assets.items():
-        print(f"  {name}: {asset.href}")
+    for asset in assets:
+        print(f"  {asset.name}: {asset.href}")
 
 
 if __name__ == "__main__":

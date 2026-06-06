@@ -142,10 +142,10 @@ def open_icechunk_dataset(store_path: str | Path) -> xr.Dataset:
     storage = icechunk.local_filesystem_storage(str(path))
     repo = icechunk.Repository.open(storage)
     session = repo.readonly_session("main")
-    ds: xr.Dataset = xr.open_zarr(session.store)
+    ds: xr.Dataset = xr.open_zarr(session.store, zarr_format=3)
     if not ds.data_vars:
         try:
-            level0: xr.Dataset = xr.open_zarr(session.store, group="0")
+            level0: xr.Dataset = xr.open_zarr(session.store, group="0", zarr_format=3)
         except Exception as exc:
             ds.close()
             raise ValueError(
@@ -154,6 +154,11 @@ def open_icechunk_dataset(store_path: str | Path) -> xr.Dataset:
             ) from exc
         ds.close()
         ds = level0
+    try:
+        t_dim = get_time_dim(ds)
+        ds = ds.sortby(t_dim)
+    except ValueError:
+        pass
     return ds
 
 

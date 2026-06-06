@@ -731,7 +731,10 @@ def _build_icechunk_consolidated_metadata(store: _IcechunkReadableStore) -> dict
     """
     try:
         root_children = _icechunk_list_dir(store, "")
+    except KeyError:
+        return {"kind": "inline", "must_understand": False, "metadata": {}}
     except Exception:
+        logger.warning("Failed to list Icechunk store root for consolidated metadata", exc_info=True)
         return {"kind": "inline", "must_understand": False, "metadata": {}}
 
     node_metadata: dict[str, object] = {}
