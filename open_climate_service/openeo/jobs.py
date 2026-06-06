@@ -585,6 +585,16 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         if t_dim is not None:
             downloader._write_root_time_coordinate(store_path, ds_loaded, time_dim=t_dim)
         pyramid.dt.close()
+        # topozarr demotes spatial_ref from coordinate to data variable in the pyramid.
+        # Patch each level's group attrs so xarray reads it back as a coordinate,
+        # which lets rioxarray's da.rio.crs follow the CF grid_mapping attribute.
+        import json as _json
+        for _lvl_dir in store_path.iterdir():
+            _zj = _lvl_dir / "zarr.json"
+            if _zj.exists():
+                _meta = _json.loads(_zj.read_text())
+                _meta.setdefault("attributes", {})["coordinates"] = "spatial_ref"
+                _zj.write_text(_json.dumps(_meta))
         artifact_format = ArtifactFormat.ZARR
     else:
         import icechunk
