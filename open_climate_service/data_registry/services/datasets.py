@@ -150,9 +150,12 @@ def _validate_dataset_template(dataset: object, *, source: str) -> None:
             )
 
     ingestion = dataset.get("ingestion")
-    if not isinstance(ingestion, dict):
-        raise ValueError(f"Dataset template '{dataset_id}' in {source} must define an 'ingestion' block")
-    plugin = ingestion.get("plugin")
-    has_plugin = isinstance(plugin, str) and bool(plugin)
-    if not has_plugin:
-        raise ValueError(f"Dataset template '{dataset_id}' in {source} must define ingestion.plugin")
+    # Static datasets may omit ingestion entirely — they exist as display-metadata
+    # entries for artifacts produced outside the sync pipeline (e.g. openEO jobs).
+    if sync_kind != "static":
+        if not isinstance(ingestion, dict):
+            raise ValueError(f"Dataset template '{dataset_id}' in {source} must define an 'ingestion' block")
+        plugin = ingestion.get("plugin")
+        has_plugin = isinstance(plugin, str) and bool(plugin)
+        if not has_plugin:
+            raise ValueError(f"Dataset template '{dataset_id}' in {source} must define ingestion.plugin")
