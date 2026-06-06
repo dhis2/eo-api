@@ -533,7 +533,7 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     )
 
     import icechunk
-    import rioxarray as _rxr  # noqa: F401 — activates .rio accessor
+    import rioxarray as _rxr  # noqa: F401  # pyright: ignore[reportUnusedImport]  — activates .rio accessor
     import zarr as _zarr
 
     from open_climate_service import config as api_config
