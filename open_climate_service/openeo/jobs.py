@@ -508,6 +508,14 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     if not isinstance(ds, xr.Dataset):
         raise TypeError(f"Managed Zarr write requires an xr.Dataset, got {type(ds).__name__}")
 
+    # Rename the variable in the store to match the user-specified variable name,
+    # so the on-disk name matches what is advertised in the STAC collection.
+    if options.get("variable") and len(ds.data_vars) == 1:
+        current_name = next(iter(ds.data_vars))
+        desired_name = str(options["variable"])
+        if current_name != desired_name:
+            ds = ds.rename({current_name: desired_name})
+
     try:
         x_dim, y_dim = get_x_y_dims(ds)
     except ValueError as exc:
