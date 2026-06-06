@@ -608,6 +608,37 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     ingestion_services.register_artifact_record(record, publish=bool(options.get("publish")))
 
 
+def _recover_temporal_from_attrs(ds: Any) -> tuple[str, str]:
+    """Extract temporal extent from reduce_dimension min/max attrs.
+
+    openeo-processes-dask stores the reduced dimension's value range in
+    ``reduced_dimensions_min_values`` / ``reduced_dimensions_max_values`` on each
+    variable's attrs after ``reduce_dimension``.  Fall back to ("", "") when not found.
+    """
+    import numpy as np
+
+    _TIME_NAMES = ("t", "time", "valid_time")
+    sources: list[dict[str, Any]] = [ds.attrs]
+    for name in list(ds.data_vars) + list(ds.coords):
+        attrs = getattr(ds[name], "attrs", {})
+        if attrs:
+            sources.append(attrs)
+    for attrs in sources:
+        min_vals = attrs.get("reduced_dimensions_min_values", {})
+        max_vals = attrs.get("reduced_dimensions_max_values", {})
+        if not isinstance(min_vals, dict) or not isinstance(max_vals, dict):
+            continue
+        for tname in _TIME_NAMES:
+            if tname in min_vals and tname in max_vals:
+                try:
+                    t_start = str(np.datetime_as_string(np.datetime64(min_vals[tname]), unit="D"))
+                    t_end = str(np.datetime_as_string(np.datetime64(max_vals[tname]), unit="D"))
+                    return t_start, t_end
+                except Exception:
+                    pass
+    return "", ""
+
+
 def _derive_coverage(ds: Any, x_dim: str, y_dim: str, t_dim: str | None) -> Any:
     """Derive ArtifactCoverage from an xr.Dataset's coordinates."""
     import numpy as np
@@ -641,8 +672,9 @@ def _derive_coverage(ds: Any, x_dim: str, y_dim: str, t_dim: str | None) -> Any:
         t_start = str(np.datetime_as_string(t_values[0], unit="D"))
         t_end = str(np.datetime_as_string(t_values[-1], unit="D"))
     else:
-        t_start = ""
-        t_end = ""
+        # Dataset has no time dimension (e.g. after reduce_dimension); recover the
+        # original temporal range from attrs that openeo-processes-dask attaches.
+        t_start, t_end = _recover_temporal_from_attrs(ds)
 
     return ArtifactCoverage(
         spatial=spatial,

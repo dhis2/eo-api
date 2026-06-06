@@ -153,7 +153,12 @@ def _build_collection_template(
         extent=pystac.Extent(
             spatial=pystac.SpatialExtent([[spatial.xmin, spatial.ymin, spatial.xmax, spatial.ymax]]),
             temporal=pystac.TemporalExtent(
-                [[parse_period_string_to_datetime(temporal.start), parse_period_string_to_datetime(temporal.end)]]
+                [
+                    [
+                        parse_period_string_to_datetime(temporal.start) if temporal.start else None,
+                        parse_period_string_to_datetime(temporal.end) if temporal.end else None,
+                    ]
+                ]
             ),
         ),
         title=artifact.dataset_name,
@@ -358,14 +363,13 @@ def _override_spatial_extent_from_artifact(collection: dict[str, Any], artifact:
 
 def _override_temporal_extent_from_artifact(collection: dict[str, Any], artifact: ArtifactRecord) -> None:
     temporal = artifact.coverage.temporal
-    start = parse_period_string_to_datetime(temporal.start).isoformat().replace("+00:00", "Z")
-    end = parse_period_string_to_datetime(temporal.end).isoformat().replace("+00:00", "Z")
-    collection["extent"]["temporal"]["interval"] = [
-        [
-            start,
-            end,
-        ]
-    ]
+
+    def _fmt(v: str) -> str | None:
+        return parse_period_string_to_datetime(v).isoformat().replace("+00:00", "Z") if v else None
+
+    start = _fmt(temporal.start)
+    end = _fmt(temporal.end)
+    collection["extent"]["temporal"]["interval"] = [[start, end]]
     dimensions = collection.setdefault("cube:dimensions", {})
     for key, value in dimensions.items():
         if isinstance(value, dict) and value.get("type") == "temporal":
