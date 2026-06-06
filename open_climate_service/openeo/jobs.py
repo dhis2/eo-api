@@ -544,16 +544,16 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
 
     # Apply CRS metadata before writing. Three calls are needed because:
     # - proj.assign_crs sets xproj CRS (needed by topozarr.create_pyramid)
-    # - rio.write_crs populates spatial_ref attrs (crs_wkt etc.) for rioxarray
+    # - rio.write_crs populates spatial_ref attrs (crs_wkt etc.) and puts
+    #   grid_mapping in each variable's encoding (CF convention)
     # - rio.write_crs destroys xproj CRS detection, so proj.assign_crs is called again last
-    # grid_mapping is added to each data variable so rioxarray can locate the CRS
-    # coordinate after a zarr round-trip via the CF grid_mapping attribute.
+    # Note: do NOT also set grid_mapping in attrs — rio.write_crs puts it in
+    # variable encoding, and xarray's CF encoder moves it to attrs during
+    # serialization; setting it manually in attrs as well causes a conflict.
     ds_loaded = _strip_non_serializable_attrs(ds).load()
     ds_projected = ds_loaded.proj.assign_crs(spatial_ref=crs)
     ds_projected = ds_projected.rio.write_crs(crs)
     ds_projected = ds_projected.proj.assign_crs(spatial_ref=crs)
-    for _var in ds_projected.data_vars:
-        ds_projected[_var].attrs["grid_mapping"] = "spatial_ref"
 
     storage = icechunk.local_filesystem_storage(str(store_path))
     repo = icechunk.Repository.open(storage) if store_path.exists() else icechunk.Repository.create(storage)
@@ -596,7 +596,7 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         # topozarr demotes spatial_ref from coordinate to data variable in the pyramid.
         # Patch each level's group attrs via zarr API so rioxarray reads it back as a
         # coordinate and can follow the CF grid_mapping attribute.
-        _root = _zarr.open_group(session.store, mode="r+")
+        _root = _zarr.open_group(session.store, mode="a")
         for _level_key in _root.keys():
             if isinstance(_root[_level_key], _zarr.Group):
                 _attrs = dict(_root[_level_key].attrs)

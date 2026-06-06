@@ -499,7 +499,7 @@ def test_persist_result_writes_icechunk_when_dataset_id_in_options(
     record, publish_flag = registered[0]
     assert record.dataset_id == "my_aggregate"
     assert record.format == ArtifactFormat.ICECHUNK
-    assert publish_flag is False
+    assert publish_flag is True  # publish defaults to True when key is absent
 
 
 def test_persist_result_does_not_publish_when_publish_false(
@@ -536,7 +536,7 @@ def test_persist_result_publishes_to_stac_when_publish_true(
     assert publish_flag is True
 
 
-def test_persist_result_uses_zarr_format_when_pyramid_needed(
+def test_persist_result_uses_icechunk_when_pyramid_needed(
     job_service: OpenEOJobService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
@@ -552,8 +552,7 @@ def test_persist_result_uses_zarr_format_when_pyramid_needed(
         attrs: dict[str, Any] = {}
 
         def to_zarr(self, path: Any, **kwargs: Any) -> None:
-            Path(path).mkdir(parents=True, exist_ok=True)
-            (Path(path) / "zarr.json").write_text("{}")
+            pass  # path is an IcechunkStore, not a filesystem path
 
         def close(self) -> None:
             pass
@@ -582,8 +581,8 @@ def test_persist_result_uses_zarr_format_when_pyramid_needed(
     job_service._persist_result("job-pyramid", envelope)
 
     record, _ = registered[0]
-    assert record.format == ArtifactFormat.ZARR
-    assert record.path == str(tmp_path / "big_dataset.zarr")
+    assert record.format == ArtifactFormat.ICECHUNK
+    assert record.path == str(tmp_path / "big_dataset.icechunk")
 
 
 def test_persist_result_falls_through_to_ephemeral_zarr_without_dataset_id(
