@@ -532,16 +532,43 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         _infer_period_type(ds, t_dim) if t_dim is not None else None
     )
 
+    import icechunk
+    import zarr as _zarr
+    import rioxarray as _rxr  # noqa: F401 — activates .rio accessor
+
+    from open_climate_service import config as api_config
+
+    crs: str = ds.attrs.get("proj:code") or api_config.get_crs()
+    store_path = downloader.DOWNLOAD_DIR / f"{dataset_id}.icechunk"
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Apply CRS metadata before writing. Three calls are needed because:
+    # - proj.assign_crs sets xproj CRS (needed by topozarr.create_pyramid)
+    # - rio.write_crs populates spatial_ref attrs (crs_wkt etc.) for rioxarray
+    # - rio.write_crs destroys xproj CRS detection, so proj.assign_crs is called again last
+    # grid_mapping is added to each data variable so rioxarray can locate the CRS
+    # coordinate after a zarr round-trip via the CF grid_mapping attribute.
+    ds_loaded = _strip_non_serializable_attrs(ds).load()
+    ds_projected = ds_loaded.proj.assign_crs(spatial_ref=crs)
+    ds_projected = ds_projected.rio.write_crs(crs)
+    ds_projected = ds_projected.proj.assign_crs(spatial_ref=crs)
+    for _var in ds_projected.data_vars:
+        ds_projected[_var].attrs["grid_mapping"] = "spatial_ref"
+
+    storage = icechunk.local_filesystem_storage(str(store_path))
+    repo = (
+        icechunk.Repository.open(storage)
+        if store_path.exists()
+        else icechunk.Repository.create(storage)
+    )
+    session = repo.writable_session("main")
+
     use_pyramid = downloader._needs_pyramid(ds, x_dim, y_dim)
 
     if use_pyramid:
         from geozarr_toolkit import MultiscalesConventionMetadata, create_geozarr_attrs
         from topozarr.coarsen import create_pyramid
 
-        from open_climate_service import config as api_config
-
-        store_path = downloader.DOWNLOAD_DIR / f"{dataset_id}.zarr"
-        crs: str = ds.attrs.get("proj:code") or api_config.get_crs()
         levels = downloader._pyramid_levels(ds, x_dim, y_dim)
         logger.info(
             "Building %d-level pyramid for managed dataset '%s' (dims %dx%d)",
@@ -565,59 +592,34 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         zarr_conventions.append(MultiscalesConventionMetadata().model_dump())
         geozarr_attrs["zarr_conventions"] = zarr_conventions
 
-        import rioxarray as _rxr  # noqa: F401 — activates .rio accessor
-
-        ds_loaded = _strip_non_serializable_attrs(ds).load()
-        # rio.write_crs populates spatial_ref attrs (crs_wkt etc.) for rioxarray,
-        # but it destroys xproj's CRS detection (ds.proj.crs → None).
-        # Re-calling proj.assign_crs last restores xproj while keeping the WKT attrs.
-        # grid_mapping is added explicitly because rioxarray finds CRS in-memory by
-        # scanning coords, but after zarr round-trip it requires the CF grid_mapping
-        # attribute on each data variable to locate the CRS coordinate.
-        ds_projected = ds_loaded.proj.assign_crs(spatial_ref=crs)
-        ds_projected = ds_projected.rio.write_crs(crs)
-        ds_projected = ds_projected.proj.assign_crs(spatial_ref=crs)
-        for _var in ds_projected.data_vars:
-            ds_projected[_var].attrs["grid_mapping"] = "spatial_ref"
         pyramid = create_pyramid(ds_projected, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
         pyramid.dt.attrs.update(geozarr_attrs)
-        pyramid.dt.to_zarr(store_path, mode="w", encoding=pyramid.encoding, zarr_format=3)
-        if t_dim is not None:
-            downloader._write_root_time_coordinate(store_path, ds_loaded, time_dim=t_dim)
+        pyramid.dt.to_zarr(session.store, mode="w", encoding=pyramid.encoding, zarr_format=3)
         pyramid.dt.close()
+
         # topozarr demotes spatial_ref from coordinate to data variable in the pyramid.
-        # Patch each level's group attrs so xarray reads it back as a coordinate,
-        # which lets rioxarray's da.rio.crs follow the CF grid_mapping attribute.
-        import json as _json
-        for _lvl_dir in store_path.iterdir():
-            _zj = _lvl_dir / "zarr.json"
-            if _zj.exists():
-                _meta = _json.loads(_zj.read_text())
-                _meta.setdefault("attributes", {})["coordinates"] = "spatial_ref"
-                _zj.write_text(_json.dumps(_meta))
-        artifact_format = ArtifactFormat.ZARR
+        # Patch each level's group attrs via zarr API so rioxarray reads it back as a
+        # coordinate and can follow the CF grid_mapping attribute.
+        _root = _zarr.open_group(session.store, mode="r+")
+        for _level_key in _root.keys():
+            if isinstance(_root[_level_key], _zarr.Group):
+                _attrs = dict(_root[_level_key].attrs)
+                _attrs["coordinates"] = "spatial_ref"
+                _root[_level_key].attrs.update(_attrs)
+
+        if t_dim is not None:
+            downloader._write_root_time_coordinate(session.store, ds_loaded, time_dim=t_dim)
     else:
-        from open_climate_service import config as api_config
-
-        import rioxarray as _rxr  # noqa: F401 — activates .rio accessor
-
-        store_path = downloader.DOWNLOAD_DIR / f"{dataset_id}.zarr"
-        crs = ds.attrs.get("proj:code") or api_config.get_crs()
         logger.info(
-            "Writing managed Zarr dataset '%s' (dims %dx%d)",
+            "Writing managed Icechunk dataset '%s' (dims %dx%d)",
             dataset_id,
             ds.sizes[x_dim],
             ds.sizes[y_dim],
         )
-        store_path.parent.mkdir(parents=True, exist_ok=True)
-        ds_loaded = _strip_non_serializable_attrs(ds).load()
-        ds_projected = ds_loaded.proj.assign_crs(spatial_ref=crs)
-        ds_projected = ds_projected.rio.write_crs(crs)
-        ds_projected = ds_projected.proj.assign_crs(spatial_ref=crs)
-        for _var in ds_projected.data_vars:
-            ds_projected[_var].attrs["grid_mapping"] = "spatial_ref"
-        ds_projected.to_zarr(store_path, mode="w", zarr_format=3)
-        artifact_format = ArtifactFormat.ZARR
+        ds_projected.to_zarr(session.store, mode="w", zarr_format=3)
+
+    session.commit(f"Published from openEO job: {dataset_id}")
+    artifact_format = ArtifactFormat.ICECHUNK
 
     record = ArtifactRecord(
         artifact_id=str(uuid.uuid4()),

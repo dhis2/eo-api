@@ -300,28 +300,35 @@ def _compute_time_space_chunks(
     return chunks
 
 
-def _write_root_time_coordinate(zarr_path: Path, ds: xr.Dataset, *, time_dim: str) -> None:
-    """Expose the time coordinate at the pyramid root with bounded chunking for browser clients."""
+def _write_root_time_coordinate(
+    zarr_store: "Path | Any", ds: xr.Dataset, *, time_dim: str
+) -> None:
+    """Expose the time coordinate at the pyramid root with bounded chunking for browser clients.
+
+    zarr_store may be a filesystem Path (plain Zarr) or a zarr-compatible store object
+    (e.g. an Icechunk session store).
+    """
     if time_dim not in ds.dims:
-        logger.debug("Skipping root time coordinate write for %s: no %s dimension found", zarr_path, time_dim)
+        logger.debug("Skipping root time coordinate write: no %s dimension found", time_dim)
         return
     if time_dim not in ds.coords or ds.sizes.get(time_dim, 0) == 0:
-        logger.debug("Skipping root time coordinate write for %s: empty or missing %s coordinate", zarr_path, time_dim)
+        logger.debug("Skipping root time coordinate write: empty or missing %s coordinate", time_dim)
         return
 
-    root = zarr.open_group(str(zarr_path), mode="a", zarr_format=3)
+    store_arg = str(zarr_store) if isinstance(zarr_store, Path) else zarr_store
+    root = zarr.open_group(store_arg, mode="a", zarr_format=3)
     root_attrs = dict(root.attrs)
     if time_dim in root:
         del root[time_dim]
     time_coord = xr.Dataset(coords={time_dim: ds[time_dim]})
     time_coord.to_zarr(
-        zarr_path,
+        store_arg,
         mode="a",
         zarr_format=3,
         consolidated=False,
         encoding={time_dim: {"chunks": (min(ds.sizes[time_dim], _ROOT_TIME_COORD_MAX_CHUNK),)}},
     )
-    root = zarr.open_group(str(zarr_path), mode="a", zarr_format=3)
+    root = zarr.open_group(store_arg, mode="a", zarr_format=3)
     root.attrs.update(root_attrs)
 
 
