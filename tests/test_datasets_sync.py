@@ -1176,31 +1176,3 @@ def test_plan_sync_append_for_icechunk_artifact(
     assert result.action == SyncAction.APPEND
 
 
-def test_plan_sync_append_backward_compat_zarr_with_icechunk_companion(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """ZARR artifacts with an Icechunk companion (created before the unified storage model) still support APPEND."""
-    icechunk_path = tmp_path / "dataset.icechunk"
-    icechunk_path.mkdir()
-    zarr_path = tmp_path / "dataset.zarr"
-
-    latest = _artifact(artifact_id="a1", managed_dataset_id="chirps3_precipitation_daily_sle", end="2026-01-15")
-    latest.format = ArtifactFormat.ZARR
-    latest.path = str(zarr_path)
-    latest.asset_paths = [str(icechunk_path), str(zarr_path)]
-
-    monkeypatch.setattr(sync_engine, "read_committed_period_ids", lambda *_a, **_k: {"2026-01-15"})
-
-    result = sync_engine.plan_sync(
-        source_dataset={
-            "id": "chirps3_precipitation_daily",
-            "period_type": "daily",
-            "sync": {"kind": "temporal", "execution": "append"},
-            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
-        },
-        latest_artifact=latest,
-        requested_end="2026-01-31",
-    )
-
-    assert result.action == SyncAction.APPEND
