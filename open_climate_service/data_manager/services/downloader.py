@@ -192,8 +192,18 @@ def write_to_icechunk_store(
         pyramid.dt.close()
 
         # topozarr demotes spatial_ref from coordinate to data variable in the pyramid.
-        # Patch each level so rioxarray can follow the CF grid_mapping attribute.
+        # Patch the root and each level group: add CRS to multiscales datasets entries so
+        # ZarrLayer can detect the coordinate system without guessing (it defaults to
+        # EPSG:3857 when crs is absent from the OME-NGFF datasets array).
         root = zarr.open_group(session.store, mode="a")
+        root_attrs = dict(root.attrs)
+        ms = root_attrs.get("multiscales")
+        if isinstance(ms, list) and ms and isinstance(ms[0], dict) and "datasets" in ms[0]:
+            for ds_entry in ms[0]["datasets"]:
+                if isinstance(ds_entry, dict):
+                    ds_entry.setdefault("crs", crs)
+            root_attrs["multiscales"] = ms
+            root.attrs.update(root_attrs)
         for level_key in root.keys():
             if isinstance(root[level_key], zarr.Group):
                 lvl_attrs = dict(root[level_key].attrs)
