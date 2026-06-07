@@ -482,8 +482,14 @@ def _load_streaming_plugin(plugin_path: str, *, params: dict[str, object]) -> In
 
 
 def register_artifact_record(record: ArtifactRecord, *, publish: bool) -> ArtifactRecord:
-    """Store a pre-built artifact record and optionally publish it to STAC."""
-    stored = _store_artifact_record(record, publish=publish)
+    """Store a pre-built artifact record and optionally publish it to STAC.
+
+    Uses overwrite semantics: re-publishing a managed dataset (e.g. re-running an
+    openEO ``save_result`` for the same ``dataset_id``) replaces the existing
+    record's metadata — name, coverage, paths — rather than silently keeping the
+    stale record, while preserving its artifact id and publication state.
+    """
+    stored = _upsert_artifact_record(record, publish=publish, overwrite=True)
     if publish and stored.publication.status != PublicationStatus.PUBLISHED:
         return publish_artifact_record(stored.artifact_id)
     return stored
