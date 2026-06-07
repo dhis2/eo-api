@@ -543,11 +543,15 @@ def plan_sync_dataset(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def get_dataset_zarr_store_file_or_404(dataset_id: str, relative_path: str) -> Response | dict[str, object]:
+def get_dataset_zarr_store_file_or_404(
+    dataset_id: str, relative_path: str, range_header: str | None = None
+) -> Response | dict[str, object]:
     """Serve a file, metadata document, or directory listing within a dataset Zarr store."""
     artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
     session = _open_icechunk_store_or_404(artifact)
-    return _get_icechunk_store_path_or_404(dataset_id=dataset_id, session=session, relative_path=relative_path)
+    return _get_icechunk_store_path_or_404(
+        dataset_id=dataset_id, session=session, relative_path=relative_path, range_header=range_header
+    )
 
 
 def serve_icechunk_file(dataset_id: str, file_path: str) -> FileResponse:
@@ -732,8 +736,50 @@ def _normalize_icechunk_relative_path(relative_path: str) -> str:
     return target
 
 
+def _serve_bytes_ranged(content: bytes, media_type: str, range_header: str | None) -> Response:
+    """Serve bytes with HTTP range request support (RFC 7233).
+
+    Zarrita's sharding_indexed codec requires range requests to read the shard index
+    suffix and individual inner chunks without downloading the full shard file.
+    """
+    total = len(content)
+    base_headers: dict[str, str] = {"Accept-Ranges": "bytes", "Content-Length": str(total)}
+    if not range_header or not range_header.startswith("bytes="):
+        return Response(content=content, media_type=media_type, headers=base_headers)
+    try:
+        spec = range_header[len("bytes="):].strip()
+        if spec.startswith("-"):
+            suffix_len = int(spec[1:])
+            start = max(0, total - suffix_len)
+            end = total - 1
+        elif spec.endswith("-"):
+            start = int(spec[:-1])
+            end = total - 1
+        else:
+            parts = spec.split("-", 1)
+            start, end = int(parts[0]), int(parts[1])
+        if start > end or start >= total or end >= total:
+            raise ValueError("unsatisfiable range")
+    except (ValueError, IndexError):
+        return Response(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{total}"},
+        )
+    sliced = content[start : end + 1]
+    return Response(
+        content=sliced,
+        status_code=206,
+        media_type=media_type,
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{total}",
+            "Content-Length": str(len(sliced)),
+            "Accept-Ranges": "bytes",
+        },
+    )
+
+
 def _get_icechunk_store_path_or_404(
-    dataset_id: str, session: _IcechunkSession, relative_path: str
+    dataset_id: str, session: _IcechunkSession, relative_path: str, range_header: str | None = None
 ) -> Response | dict[str, object]:
     store = session.store
     target = _normalize_icechunk_relative_path(relative_path)
@@ -754,7 +800,7 @@ def _get_icechunk_store_path_or_404(
                 meta["consolidated_metadata"] = _build_icechunk_consolidated_metadata(session)
             return JSONResponse(content=meta)
         media_type, _ = mimetypes.guess_type(target)
-        return Response(content=payload, media_type=media_type or "application/octet-stream")
+        return _serve_bytes_ranged(payload, media_type or "application/octet-stream", range_header)
 
     raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
 
