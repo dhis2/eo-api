@@ -356,61 +356,107 @@ def get_icechunk_path(dataset: dict[str, Any]) -> Path:
     return DOWNLOAD_DIR / f"{prefix}.icechunk"
 
 
-def get_zarr_path_unconditional(dataset: dict[str, Any]) -> Path:
-    """Return the pyramid Zarr path for a dataset, regardless of whether it exists."""
-    prefix = _get_cache_prefix(dataset)
-    return DOWNLOAD_DIR / f"{prefix}.zarr"
-
-
 def needs_pyramid(ds: xr.Dataset) -> bool:
     """Return True when the dataset is large enough to need a multiscale pyramid."""
     return _needs_pyramid(ds, "x", "y")
 
 
-def build_pyramid_zarr(ds: xr.Dataset, zarr_path: Path) -> None:
-    """Write a multiscale pyramid zarr from an already-loaded xr.Dataset.
+def write_to_icechunk_store(
+    ds: xr.Dataset,
+    store_path: Path,
+    x_dim: str = "x",
+    y_dim: str = "y",
+    t_dim: str | None = "t",
+    *,
+    crs: str | None = None,
+    commit_message: str = "Materialized dataset",
+) -> None:
+    """Write *ds* to an Icechunk store, building a multiscale pyramid when needed.
 
-    The dataset must have canonical ``x``, ``y``, and ``t`` dimension names.
-    Any existing file at *zarr_path* is overwritten.
+    Applies GeoZarr conventions throughout. Creates the store if it does not exist;
+    overwrites any existing content in the new commit.
+
+    Three CRS calls are required: ``proj.assign_crs`` sets the xproj CRS needed by
+    topozarr, ``rio.write_crs`` populates ``spatial_ref`` attrs and encodes
+    ``grid_mapping`` per variable, then ``proj.assign_crs`` again because
+    ``rio.write_crs`` destroys xproj CRS detection.
     """
-    import shutil
+    import icechunk
+    import rioxarray as _rxr  # noqa: F401  # activates .rio accessor
 
-    crs = api_config.get_crs()
-    x_dim, y_dim = "x", "y"
+    if crs is None:
+        crs = api_config.get_crs()
+
     dims = [x_dim, y_dim]
-
-    xmin = ds[x_dim].min().item()
-    xmax = ds[x_dim].max().item()
-    ymin = ds[y_dim].min().item()
-    ymax = ds[y_dim].max().item()
-    bbox = [xmin, ymin, xmax, ymax]
-    shape = (ds.sizes[x_dim], ds.sizes[y_dim])
-
-    geozarr_attrs = create_geozarr_attrs(dimensions=dims, crs=crs, bbox=bbox, shape=shape)
-    zarr_conventions = geozarr_attrs.get("zarr_conventions", [])
-    zarr_conventions.append(MultiscalesConventionMetadata().model_dump())
-    geozarr_attrs["zarr_conventions"] = zarr_conventions
-
-    levels = _pyramid_levels(ds, x_dim, y_dim)
-    logger.info(
-        "Building %d-level pyramid zarr (max dim %d px) → %s",
-        levels,
-        max(ds.sizes[x_dim], ds.sizes[y_dim]),
-        zarr_path,
+    xmin = float(ds[x_dim].min())
+    xmax = float(ds[x_dim].max())
+    ymin = float(ds[y_dim].min())
+    ymax = float(ds[y_dim].max())
+    geozarr_attrs = create_geozarr_attrs(
+        dimensions=dims,
+        crs=crs,
+        bbox=[xmin, ymin, xmax, ymax],
+        shape=(ds.sizes[x_dim], ds.sizes[y_dim]),
     )
 
-    if zarr_path.exists():
-        shutil.rmtree(zarr_path)
-
-    ds.load()
+    ds = ds.proj.assign_crs(spatial_ref=crs)
+    ds = ds.rio.write_crs(crs)
     ds = ds.proj.assign_crs(spatial_ref=crs)
 
-    # https://github.com/carbonplan/topozarr/issues/13
-    pyramid = create_pyramid(ds, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
-    pyramid.dt.attrs.update(geozarr_attrs)
-    pyramid.dt.to_zarr(zarr_path, mode="w", encoding=pyramid.encoding, zarr_format=3)
-    _write_root_time_coordinate(zarr_path, ds, time_dim="t")
-    pyramid.dt.close()
+    storage = icechunk.local_filesystem_storage(str(store_path))
+    repo = icechunk.Repository.open(storage) if store_path.exists() else icechunk.Repository.create(storage)
+    session = repo.writable_session("main")
+
+    if _needs_pyramid(ds, x_dim, y_dim):
+        zarr_conventions = list(geozarr_attrs.get("zarr_conventions", []))
+        zarr_conventions.append(MultiscalesConventionMetadata().model_dump())
+        geozarr_attrs["zarr_conventions"] = zarr_conventions
+
+        levels = _pyramid_levels(ds, x_dim, y_dim)
+        logger.info(
+            "Building %d-level pyramid into Icechunk store '%s' (dims %dx%d)",
+            levels,
+            store_path.name,
+            ds.sizes[x_dim],
+            ds.sizes[y_dim],
+        )
+
+        # topozarr.create_pyramid requires fully materialised numpy arrays.
+        ds = ds.load()
+        pyramid = create_pyramid(ds, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
+        pyramid.dt.attrs.update(geozarr_attrs)
+        pyramid.dt.to_zarr(session.store, mode="w", encoding=pyramid.encoding, zarr_format=3)
+        pyramid.dt.close()
+
+        # topozarr demotes spatial_ref from coordinate to data variable in the pyramid.
+        # Patch each level so rioxarray can follow the CF grid_mapping attribute.
+        root = zarr.open_group(session.store, mode="a")
+        for level_key in root.keys():
+            if isinstance(root[level_key], zarr.Group):
+                lvl_attrs = dict(root[level_key].attrs)
+                lvl_attrs["coordinates"] = "spatial_ref"
+                root[level_key].attrs.update(lvl_attrs)
+
+        if t_dim is not None:
+            _write_root_time_coordinate(session.store, ds, time_dim=t_dim)
+    else:
+        logger.info(
+            "Writing flat Icechunk store '%s' (dims %dx%d)",
+            store_path.name,
+            ds.sizes[x_dim],
+            ds.sizes[y_dim],
+        )
+        ds = ds.assign_attrs({**ds.attrs, **geozarr_attrs})
+        ds.to_zarr(session.store, mode="w", zarr_format=3)
+
+        # xarray demotes scalar coordinates (like spatial_ref) to data variables in zarr v3.
+        # Patch the root group so rioxarray can follow the CF grid_mapping attribute.
+        root_flat = zarr.open_group(session.store, mode="a")
+        flat_attrs = dict(root_flat.attrs)
+        flat_attrs["coordinates"] = "spatial_ref"
+        root_flat.attrs.update(flat_attrs)
+
+    session.commit(commit_message)
 
 
 def _validate_spatial_coverage(dataset: dict[str, Any], bbox: list[float] | None) -> None:

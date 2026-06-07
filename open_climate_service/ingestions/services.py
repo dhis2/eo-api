@@ -355,7 +355,7 @@ def _create_streaming_artifact(
 
         request_scope = request_scope.model_copy(update={"end": coverage.temporal.end})
 
-        artifact_format, artifact_path, asset_paths = _maybe_build_pyramid(store_path, dataset)
+        _maybe_build_pyramid(store_path, dataset)
 
         record = ArtifactRecord(
             artifact_id=str(uuid4()),
@@ -363,9 +363,9 @@ def _create_streaming_artifact(
             dataset_name=str(dataset["name"]),
             variable=str(dataset["variable"]),
             period_type=str(dataset.get("period_type")) if dataset.get("period_type") is not None else None,
-            format=artifact_format,
-            path=str(artifact_path.resolve()),
-            asset_paths=[str(p.resolve()) for p in asset_paths],
+            format=ArtifactFormat.ICECHUNK,
+            path=str(store_path.resolve()),
+            asset_paths=[str(store_path.resolve())],
             variables=[str(dataset["variable"])],
             request_scope=request_scope,
             coverage=coverage,
@@ -384,35 +384,26 @@ def _create_streaming_artifact(
         lock.release()
 
 
-def _maybe_build_pyramid(
-    store_path: Path,
-    dataset: dict[str, object],
-) -> tuple[ArtifactFormat, Path, list[Path]]:
-    """Check whether the committed Icechunk store is large enough to need a pyramid.
+def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
+    """Apply GeoZarr conventions and a multiscale pyramid to the committed Icechunk store.
 
-    If yes, builds a companion pyramid zarr and returns ZARR format with both paths.
-    The Icechunk path is kept as the first asset so the sync engine can still reach it.
-    If no, returns ICECHUNK format with the store path unchanged.
+    Reads the flat store written by streaming ingest, then rewrites it via
+    ``write_to_icechunk_store`` so every Icechunk store follows the same GeoZarr
+    layout regardless of size. Errors are logged and swallowed so that the plain
+    flat artifact is still registered.
     """
     from open_climate_service.data_accessor.services.accessor import open_icechunk_dataset
 
     try:
-        ds = open_icechunk_dataset(store_path)
+        ds = open_icechunk_dataset(store_path).load()
     except Exception:
-        logger.warning("Could not open Icechunk store for pyramid check; skipping", exc_info=True)
-        return ArtifactFormat.ICECHUNK, store_path, [store_path]
+        logger.warning("Could not open Icechunk store for GeoZarr write; skipping", exc_info=True)
+        return
 
     try:
-        if not downloader.needs_pyramid(ds):
-            return ArtifactFormat.ICECHUNK, store_path, [store_path]
-
-        zarr_path = downloader.get_zarr_path_unconditional(dataset)
-        try:
-            downloader.build_pyramid_zarr(ds, zarr_path)
-        except Exception:
-            logger.warning("Pyramid build failed; storing as flat Icechunk artifact", exc_info=True)
-            return ArtifactFormat.ICECHUNK, store_path, [store_path]
-        return ArtifactFormat.ZARR, zarr_path, [store_path, zarr_path]
+        downloader.write_to_icechunk_store(ds, store_path, commit_message="Applied GeoZarr conventions")
+    except Exception:
+        logger.warning("GeoZarr/pyramid write failed; flat Icechunk artifact will be used as-is", exc_info=True)
     finally:
         ds.close()
 
