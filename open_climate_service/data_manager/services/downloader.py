@@ -446,7 +446,7 @@ def write_to_icechunk_store(
         ds = ds.load()
         pyramid = create_pyramid(ds, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
         pyramid.dt.attrs.update(geozarr_attrs)
-        pyramid.dt.to_zarr(session.store, mode="w", encoding=pyramid.encoding, zarr_format=3)
+        pyramid.dt.to_zarr(session.store, mode="w", encoding=_strip_sharding(pyramid.encoding), zarr_format=3)
         pyramid.dt.close()
 
         # topozarr demotes spatial_ref from coordinate to data variable in the pyramid.
