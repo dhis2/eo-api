@@ -191,7 +191,12 @@ def build_dataset_zarr(dataset: dict[str, Any], *, start: str | None = None, end
         pyramid = create_pyramid(ds, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
 
         pyramid.dt.attrs.update(geozarr_attrs)
-        pyramid.dt.to_zarr(zarr_path, mode="w", encoding=pyramid.encoding, zarr_format=3)
+        pyramid.dt.to_zarr(
+            zarr_path,
+            mode="w",
+            encoding=_strip_sharding(pyramid.encoding),
+            zarr_format=3,
+        )
 
         # zarr-layer looks for the time coordinate at the root of the store, not inside each level.
         # Write it as a single root-level chunk so browser clients can discover it without
@@ -224,6 +229,22 @@ _PYRAMID_PIXEL_THRESHOLD = 2048 * 2048
 _PYRAMID_MAX_LEVELS = 8
 _PYRAMID_TARGET_TILE_SIZE = 512
 _ROOT_TIME_COORD_MAX_CHUNK = 4096
+
+
+def _strip_sharding(encoding: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+    """Remove shard-level keys from topozarr pyramid encoding.
+
+    topozarr sets a ``shards`` key alongside ``chunks`` to produce sharding_indexed
+    arrays. Browser zarr clients (zarrita / @carbonplan/zarr-layer) do not support
+    sharding_indexed without a manually registered codec, so we strip the outer shard
+    shape and keep only the inner chunk shape as plain regular chunks + zstd.
+    """
+    stripped: dict[str, dict[str, object]] = {}
+    for level_path, level_enc in encoding.items():
+        stripped[level_path] = {
+            var: {k: v for k, v in var_enc.items() if k != "shards"} for var, var_enc in level_enc.items()
+        }
+    return stripped
 
 
 def _needs_pyramid(ds: xr.Dataset, x_dim: str, y_dim: str) -> bool:
