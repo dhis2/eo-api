@@ -776,6 +776,15 @@ def _get_icechunk_store_path_or_404(
             # per snapshot so repeated requests within a snapshot lifetime are free.
             if target == "zarr.json" and meta.get("node_type") == "group":
                 meta["consolidated_metadata"] = _build_icechunk_consolidated_metadata(session)
+                # Inject OME-NGFF multiscales so @carbonplan/zarr-layer can navigate pyramid
+                # levels. GeoZarr stores pyramid metadata as multiscales.layout[n].asset (dict),
+                # but ZarrLayer expects OME-NGFF format: multiscales[0].datasets[n].path (list).
+                attrs = meta.get("attributes", {})
+                ms = attrs.get("multiscales")
+                if isinstance(ms, dict) and "layout" in ms:
+                    paths = [str(entry["asset"]) for entry in ms["layout"]]
+                    attrs["multiscales"] = [{"datasets": [{"path": p} for p in paths]}]
+                    meta["attributes"] = attrs
             return JSONResponse(content=meta)
         media_type, _ = mimetypes.guess_type(target)
         return Response(content=payload, media_type=media_type or "application/octet-stream")
