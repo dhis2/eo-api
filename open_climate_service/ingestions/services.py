@@ -388,10 +388,10 @@ def _maybe_build_pyramid(
     store_path: Path,
     dataset: dict[str, object],
 ) -> tuple[ArtifactFormat, Path, list[Path]]:
-    """Check whether the committed IceChunk store is large enough to need a pyramid.
+    """Check whether the committed Icechunk store is large enough to need a pyramid.
 
     If yes, builds a companion pyramid zarr and returns ZARR format with both paths.
-    The IceChunk path is kept as the first asset so the sync engine can still reach it.
+    The Icechunk path is kept as the first asset so the sync engine can still reach it.
     If no, returns ICECHUNK format with the store path unchanged.
     """
     from open_climate_service.data_accessor.services.accessor import open_icechunk_dataset
@@ -399,7 +399,7 @@ def _maybe_build_pyramid(
     try:
         ds = open_icechunk_dataset(store_path)
     except Exception:
-        logger.warning("Could not open IceChunk store for pyramid check; skipping", exc_info=True)
+        logger.warning("Could not open Icechunk store for pyramid check; skipping", exc_info=True)
         return ArtifactFormat.ICECHUNK, store_path, [store_path]
 
     try:
@@ -410,7 +410,7 @@ def _maybe_build_pyramid(
         try:
             downloader.build_pyramid_zarr(ds, zarr_path)
         except Exception:
-            logger.warning("Pyramid build failed; storing as flat IceChunk artifact", exc_info=True)
+            logger.warning("Pyramid build failed; storing as flat Icechunk artifact", exc_info=True)
             return ArtifactFormat.ICECHUNK, store_path, [store_path]
         return ArtifactFormat.ZARR, zarr_path, [store_path, zarr_path]
     finally:

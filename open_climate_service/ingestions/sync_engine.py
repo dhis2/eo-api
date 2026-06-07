@@ -407,10 +407,10 @@ def _default_target_end(*, period_type: str) -> str:
 
 
 def _icechunk_path_for(artifact: ArtifactRecord) -> str | None:
-    """Return the IceChunk store path for a plugin-backed artifact.
+    """Return the Icechunk store path for a plugin-backed artifact.
 
-    For plain IceChunk artifacts this is simply ``artifact.path``.
-    For pyramid-upgraded ZARR artifacts the IceChunk companion is stored
+    For plain Icechunk artifacts this is simply ``artifact.path``.
+    For pyramid-upgraded ZARR artifacts the Icechunk companion is stored
     as the first entry in ``asset_paths`` (convention set by the ingestion
     service when it promotes the artifact to ZARR format).
     """
@@ -427,10 +427,10 @@ def _supports_append(source_dataset: dict[str, Any], latest_artifact: ArtifactRe
     """Return whether this template opts into store-based append sync execution."""
     if source_dataset.get("sync", {}).get("execution") != SyncAction.APPEND.value:
         return False
-    # Plain IceChunk artifact — path may not yet be set on first sync plan.
+    # Plain Icechunk artifact — path may not yet be set on first sync plan.
     if latest_artifact.format == ArtifactFormat.ICECHUNK:
         return True
-    # Pyramid-upgraded ZARR artifact — IceChunk companion must be present in asset_paths.
+    # Pyramid-upgraded ZARR artifact — Icechunk companion must be present in asset_paths.
     if latest_artifact.format == ArtifactFormat.ZARR and _icechunk_path_for(latest_artifact) is not None:
         return True
     logger.info(
