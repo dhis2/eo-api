@@ -33,22 +33,6 @@ _PYRAMID_TARGET_TILE_SIZE = 512
 _ROOT_TIME_COORD_MAX_CHUNK = 4096
 
 
-def _strip_sharding(
-    encoding: dict[str, dict[str, dict[str, object]]],
-) -> dict[str, dict[str, dict[str, object]]]:
-    """Remove shard-level keys from topozarr pyramid encoding.
-
-    topozarr sets a ``shards`` key alongside ``chunks`` to produce sharding_indexed
-    arrays. Browser zarr clients (zarrita / @carbonplan/zarr-layer) do not support
-    sharding_indexed without a manually registered codec, so we strip the outer shard
-    shape and keep only the inner chunk shape as plain regular chunks + zstd.
-    """
-    return {
-        level_path: {var: {k: v for k, v in var_enc.items() if k != "shards"} for var, var_enc in level_enc.items()}
-        for level_path, level_enc in encoding.items()
-    }
-
-
 def _needs_pyramid(ds: xr.Dataset, x_dim: str, y_dim: str) -> bool:
     """Return True when the spatial extent is large enough to benefit from a pyramid."""
     return ds.sizes[x_dim] * ds.sizes[y_dim] > _PYRAMID_PIXEL_THRESHOLD
@@ -188,7 +172,7 @@ def write_to_icechunk_store(
         ds = ds.load()
         pyramid = create_pyramid(ds, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
         pyramid.dt.attrs.update(geozarr_attrs)
-        pyramid.dt.to_zarr(session.store, mode="w", encoding=_strip_sharding(pyramid.encoding), zarr_format=3)
+        pyramid.dt.to_zarr(session.store, mode="w", encoding=pyramid.encoding, zarr_format=3)
         pyramid.dt.close()
 
         # topozarr demotes spatial_ref from coordinate to data variable in the pyramid.
