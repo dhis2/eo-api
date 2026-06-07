@@ -242,10 +242,7 @@ def _strip_sharding(
     shape and keep only the inner chunk shape as plain regular chunks + zstd.
     """
     return {
-        level_path: {
-            var: {k: v for k, v in var_enc.items() if k != "shards"}
-            for var, var_enc in level_enc.items()
-        }
+        level_path: {var: {k: v for k, v in var_enc.items() if k != "shards"} for var, var_enc in level_enc.items()}
         for level_path, level_enc in encoding.items()
     }
 
