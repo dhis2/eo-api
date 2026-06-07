@@ -36,10 +36,10 @@ def _build_process_registry() -> Any:
         return _registry
 
     from openeo_pg_parser_networkx.process_registry import Process, ProcessRegistry
-    from openeo_processes_dask.process_implementations.core import process as wrap_fn
+    from openeo_processes_dask_slim.process_implementations.core import process as wrap_fn
 
-    impls_module = importlib.import_module("openeo_processes_dask.process_implementations")
-    specs_module = importlib.import_module("openeo_processes_dask.specs")
+    impls_module = importlib.import_module("openeo_processes_dask_slim.process_implementations")
+    specs_module = importlib.import_module("openeo_processes_dask_slim.specs")
 
     registry = ProcessRegistry(wrap_funcs=[wrap_fn])
 
