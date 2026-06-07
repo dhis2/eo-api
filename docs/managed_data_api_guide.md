@@ -310,25 +310,10 @@ The detailed dataset response is where version history belongs. The ingestion re
 Examples:
 
 ```bash
-curl -s http://127.0.0.1:8000/zarr/chirps3_precipitation_daily | jq
 curl -s http://127.0.0.1:8000/zarr/chirps3_precipitation_daily/zarr.json | jq
 ```
 
-The listing response exposes:
-
-- `kind`
-- `dataset_id`
-- `format`
-- `path`
-- `entries`
-
-What this means:
-
-- `/zarr/{dataset_id}` is for raw native data access from standard zarr clients
-- `zarr.json` responses at the root include dynamically-built consolidated metadata
-- dataset metadata remains under `/datasets`
-- entry links stay inside the canonical `/zarr/{dataset_id}/...` namespace
-- internal artifact ids and local filesystem roots are not exposed
+`/zarr/{dataset_id}` is the store prefix; the root metadata is at `/zarr/{dataset_id}/zarr.json`. `zarr.json` responses include dynamically-built consolidated metadata (per Icechunk snapshot, cached), so clients can call `xr.open_zarr(..., consolidated=True)` without a static `.zmetadata` file. Dataset metadata remains under `/datasets`.
 
 ## 8. Access the Icechunk store natively
 

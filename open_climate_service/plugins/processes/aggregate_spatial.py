@@ -65,8 +65,7 @@ def _dataset_reduce_spatial(
             vname = str(var)
             pixels = masked[vname].values[mask]
             pixels = pixels[~np.isnan(pixels)]
-            val = reducer(data=pixels)
-            result_vars[vname] = xr.DataArray(float(val))
+            result_vars[vname] = xr.DataArray(float(reducer(data=pixels)) if pixels.size else float("nan"))
         return xr.Dataset(result_vars)
 
     t_vals = ds[t_dim].values

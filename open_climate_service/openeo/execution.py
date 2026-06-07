@@ -25,7 +25,7 @@ _registry: Any = None  # lazy singleton
 
 
 @xr.register_dataset_accessor("openeo")
-class _DatasetOpenEOAccessor:
+class _DatasetOpenEOAccessor:  # pyright: ignore[reportUnusedClass]
     """Mirrors the DataArray openeo accessor for xr.Dataset.
 
     openeo-processes-dask-slim only registers the accessor for DataArray.

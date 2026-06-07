@@ -145,7 +145,7 @@ def write_to_icechunk_store(
     ``rio.write_crs`` destroys xproj CRS detection.
     """
     import icechunk
-    import rioxarray as _rxr  # noqa: F401  # activates .rio accessor
+    import rioxarray as _rxr  # noqa: F401  # pyright: ignore[reportUnusedImport]  # activates .rio accessor
 
     if crs is None:
         crs = api_config.get_crs()

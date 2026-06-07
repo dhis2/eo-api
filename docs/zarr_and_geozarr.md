@@ -146,7 +146,7 @@ GET /zarr/{dataset_id}/time/c/0           → time coordinate chunk
 
 `zarr.json` responses at the root group include dynamically-built consolidated metadata (computed per Icechunk snapshot and cached), so clients can call `xr.open_zarr(..., consolidated=True)` without needing a static `.zmetadata` file.
 
-Metadata files (`zarr.json`) are returned as `application/json`. Chunk data is returned as `application/octet-stream`. Directory paths return a JSON listing.
+Metadata files (`zarr.json`) are returned as `application/json`. Chunk data is returned as `application/octet-stream`.
 
 ### `/icechunk/{dataset_id}` — Icechunk SDK clients
 
