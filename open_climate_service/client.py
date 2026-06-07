@@ -91,7 +91,11 @@ class Client:
         open_kwargs = asset.get("xarray:open_kwargs", {})
         if not isinstance(open_kwargs, dict):
             raise ValueError(f"Zarr asset for '{dataset_id}' has a malformed xarray:open_kwargs field")
-        return xr.open_zarr(href, **open_kwargs)  # type: ignore[no-any-return]
+        ds: xr.Dataset = xr.open_zarr(href, **open_kwargs)
+        if not ds.data_vars:
+            ds.close()
+            ds = xr.open_zarr(href, group="0", **open_kwargs)
+        return ds
 
 
 def list_datasets(base_url: str | None = None) -> list[dict]:
@@ -143,4 +147,8 @@ def open_dataset(dataset_id: str, *, base_url: str | None = None) -> xr.Dataset:
     open_kwargs = asset.get("xarray:open_kwargs", {})
     if not isinstance(open_kwargs, dict):
         raise ValueError(f"Zarr asset for '{dataset_id}' has a malformed xarray:open_kwargs field")
-    return xr.open_zarr(href, **open_kwargs)  # type: ignore[no-any-return]
+    ds: xr.Dataset = xr.open_zarr(href, **open_kwargs)
+    if not ds.data_vars:
+        ds.close()
+        ds = xr.open_zarr(href, group="0", **open_kwargs)
+    return ds

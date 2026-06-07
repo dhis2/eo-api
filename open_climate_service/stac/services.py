@@ -185,7 +185,7 @@ def _build_collection_template(
         "zarr",
         pystac.Asset(
             href=zarr_href,
-            media_type="application/vnd+zarr",
+            media_type="application/vnd.zarr; version=3",
             title="Zarr store",
             roles=["data"],
         ),
@@ -484,7 +484,7 @@ def _zarr_asset_metadata(artifact: ArtifactRecord) -> dict[str, object]:
 
 def _zarr_open_kwargs(artifact: ArtifactRecord) -> dict[str, bool | None]:
     if artifact.format == ArtifactFormat.ICECHUNK:
-        return {"consolidated": None}
+        return {"consolidated": True}
     return {"consolidated": _zarr_consolidated_flag(_artifact_store_path(artifact))}
 
 

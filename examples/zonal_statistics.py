@@ -5,7 +5,7 @@ using rename_labels to attach DHIS2 org unit IDs so they survive into the output
 
 Requires:
   pip install openeo requests
-  A running Open Climate Service with chirps3_precipitation_daily ingested.
+  A running Open Climate Service with era5land_precipitation_daily ingested.
   examples/data/sle-districts.geojson (included in this repo)
 
 Adjust BASE_URL if the API is not on the default local address.
@@ -25,7 +25,7 @@ BASE_URL = "http://127.0.0.1:8000"
 DISTRICTS_FILE = Path(__file__).parent / "data" / "sle-districts.geojson"
 
 
-COLLECTION_ID = "chirps3_precipitation_daily"
+COLLECTION_ID = "era5land_precipitation_daily"
 
 
 def main() -> None:
@@ -118,11 +118,14 @@ def main() -> None:
     )
     resp.raise_for_status()
 
-    # Parse CSV — rows are (t, geometry=org_unit_id, precip)
+    # Parse CSV — rows are (geometry=org_unit_id, t, tp)
     rows = list(csv.DictReader(io.StringIO(resp.text)))
+    # Find the precipitation variable column (first non-index column)
+    index_cols = {"geometry", "t"}
+    precip_col = next((c for c in (rows[0] if rows else {}) if c not in index_cols), "tp")
     by_id: dict[str, dict[str, str]] = defaultdict(dict)
     for row in rows:
-        by_id[row["geometry"]][row["t"][:7]] = f"{float(row['precip']):.1f}"
+        by_id[row["geometry"]][row["t"][:7]] = f"{float(row[precip_col]):.1f}"
 
     months = sorted({row["t"][:7] for row in rows})
 

@@ -714,25 +714,35 @@ def _icechunk_get(store: _IcechunkReadableStore, key: str) -> bytes | None:
 
 
 def _build_icechunk_consolidated_metadata(store: _IcechunkReadableStore) -> dict[str, object]:
-    """Build zarr v3 consolidated metadata for the root group of an Icechunk store.
+    """Recursively build zarr v3 consolidated metadata for all groups and arrays in the store.
 
-    Returns the ``consolidated_metadata`` dict to inject into the root zarr.json so
-    that xarray/zarr can enumerate variables over HTTP without directory listing.
+    Icechunk explicitly blocks ``zarr.consolidate_metadata()`` because its transactional
+    snapshot system makes a static .zmetadata incompatible with multi-writer safety.
+    We generate equivalent consolidated metadata dynamically at serve time so that HTTP
+    clients can open the store with a single request (``consolidated=True``) without
+    needing server-side directory enumeration.
+
+    For pyramid stores the traversal recurses into each group level (``0/``, ``1/``, …)
+    so that the arrays inside each level are included in the metadata.
     """
-    try:
-        root_children = _icechunk_list_dir(store, "")
-    except KeyError:
-        return {"kind": "inline", "must_understand": False, "metadata": {}}
-    except Exception:
-        logger.warning("Failed to list Icechunk store root for consolidated metadata", exc_info=True)
-        return {"kind": "inline", "must_understand": False, "metadata": {}}
-
     node_metadata: dict[str, object] = {}
-    for child in sorted(root_children):
-        child_meta_bytes = _icechunk_get(store, f"{child}/zarr.json")
-        if child_meta_bytes is not None:
-            node_metadata[child] = json.loads(child_meta_bytes.decode("utf-8"))
 
+    def traverse(prefix: str) -> None:
+        try:
+            children = _icechunk_list_dir(store, prefix)
+        except Exception:
+            logger.warning("Failed to list Icechunk store prefix '%s' for consolidated metadata", prefix, exc_info=True)
+            return
+        for child in sorted(children):
+            path = f"{prefix}/{child}" if prefix else child
+            meta_bytes = _icechunk_get(store, f"{path}/zarr.json")
+            if meta_bytes is not None:
+                meta: dict[str, object] = json.loads(meta_bytes.decode("utf-8"))
+                node_metadata[path] = meta
+                if meta.get("node_type") == "group":
+                    traverse(path)
+
+    traverse("")
     return {"kind": "inline", "must_understand": False, "metadata": node_metadata}
 
 
