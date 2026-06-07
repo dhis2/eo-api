@@ -8,7 +8,8 @@ The current public story is:
 - discover the configured extent with `/extent`
 - discover managed datasets with `/datasets`
 - discover published GeoZarr datasets with `/stac/catalog.json`
-- access raw Zarr data with `/zarr/{dataset_id}`
+- access raw Zarr data with `/zarr/{dataset_id}` (vanilla zarr clients, web maps)
+- access the native Icechunk store with `/icechunk/{dataset_id}` (Icechunk SDK)
 - access standards-facing publication with `/ogcapi/...`
 
 Internal artifacts still exist as a storage and provenance model, but they are not part of the public API contract.
@@ -32,6 +33,7 @@ Operational note:
 - `GET /stac/collections/{dataset_id}`
 - `GET /zarr/{dataset_id}`
 - `GET /zarr/{dataset_id}/{relative_path}`
+- `GET /icechunk/{dataset_id}/{path}`
 - `GET /sync/{dataset_id}/plan`
 - `POST /sync/{dataset_id}`
 - `GET /ogcapi/collections`
@@ -71,10 +73,9 @@ The public ingestion contract takes:
 - `start`
 - optional `end`
 - `overwrite`
-- `prefer_zarr`
 - `publish`
 
-Raw `bbox` and `country_code` are not part of the public ingestion payload — the API resolves them from the configured extent.
+Raw `bbox` and `country_code` are not part of the public ingestion payload — the API resolves them from the configured extent. All datasets are stored as Icechunk stores; there is no format selection parameter.
 
 ### Example: CHIRPS3
 
@@ -86,7 +87,6 @@ curl -s -X POST http://127.0.0.1:8000/ingestions \
     "start": "2024-01-01",
     "end": "2024-01-31",
     "overwrite": false,
-    "prefer_zarr": true,
     "publish": true
   }' | jq
 ```
@@ -101,7 +101,6 @@ curl -s -X POST http://127.0.0.1:8000/ingestions \
     "start": "2020",
     "end": "2020",
     "overwrite": false,
-    "prefer_zarr": true,
     "publish": true
   }' | jq
 ```
@@ -306,7 +305,7 @@ The detailed dataset response is where version history belongs. The ingestion re
 
 ## 7. Access raw Zarr data
 
-If the latest managed dataset version is Zarr-backed, the canonical native raw-data route is `/zarr/{dataset_id}`.
+`/zarr/{dataset_id}` bridges the Icechunk store into standard zarr HTTP semantics. It works with any vanilla zarr client including web maps (`@carbonplan/zarr-layer`) and xarray.
 
 Examples:
 
@@ -325,12 +324,43 @@ The listing response exposes:
 
 What this means:
 
-- `/zarr/{dataset_id}` is for raw native data access
+- `/zarr/{dataset_id}` is for raw native data access from standard zarr clients
+- `zarr.json` responses at the root include dynamically-built consolidated metadata
 - dataset metadata remains under `/datasets`
 - entry links stay inside the canonical `/zarr/{dataset_id}/...` namespace
 - internal artifact ids and local filesystem roots are not exposed
 
-## 8. Access published STAC and OGC collections
+## 8. Access the Icechunk store natively
+
+`/icechunk/{dataset_id}/{path}` serves raw Icechunk store files for native SDK access. Use this when you need versioning or want to avoid the zarr proxy layer.
+
+```python
+import icechunk, xarray as xr
+
+repo = icechunk.Repository.open(
+    icechunk.http_storage("http://127.0.0.1:8000/icechunk/chirps3_precipitation_daily")
+)
+ds = xr.open_zarr(repo.readonly_session("main").store, zarr_format=3, consolidated=False)
+```
+
+Both endpoints are advertised as `assets` in the STAC collection:
+
+```json
+"assets": {
+  "zarr": {
+    "href": "https://host/zarr/chirps3_precipitation_daily",
+    "type": "application/vnd.zarr; version=3",
+    "xarray:open_kwargs": { "consolidated": true }
+  },
+  "icechunk": {
+    "href": "https://host/icechunk/chirps3_precipitation_daily",
+    "type": "application/octet-stream",
+    "xarray:open_kwargs": { "zarr_format": 3, "consolidated": false }
+  }
+}
+```
+
+## 10. Access published STAC and OGC collections
 
 Published Zarr-backed datasets are exposed through `/stac` for discovery and `/ogcapi` for OGC collection and coverage access.
 
@@ -356,7 +386,7 @@ What this means:
 - native FastAPI no longer exposes `/collections`
 - dataset responses can include both `/stac/collections/{dataset_id}` and `/ogcapi/collections/{dataset_id}`
 
-## 9. `/sync`
+## 11. `/sync`
 
 `/sync` advances an existing managed dataset from its latest local coverage toward a requested upstream period.
 
@@ -399,7 +429,7 @@ Example execution:
 ```bash
 curl -s -X POST "http://127.0.0.1:8000/sync/chirps3_precipitation_daily" \
   -H "Content-Type: application/json" \
-  -d '{"end":"2024-02-10","prefer_zarr":true,"publish":true}' | jq
+  -d '{"end":"2024-02-10","publish":true}' | jq
 ```
 
 ## Manual Test Sequence
@@ -422,7 +452,6 @@ curl -s -X POST "http://127.0.0.1:8000/ingestions" \
     "dataset_id": "chirps3_precipitation_daily",
     "start": "2024-01-01",
     "end": "2024-01-31",
-    "prefer_zarr": true,
     "publish": true
   }' | jq
 ```
@@ -506,7 +535,6 @@ curl -s -X POST "http://127.0.0.1:8000/sync/chirps3_precipitation_daily" \
   -H "Content-Type: application/json" \
   -d '{
     "end": "2024-02-10",
-    "prefer_zarr": true,
     "publish": true
   }' | jq
 ```
@@ -530,7 +558,6 @@ curl -s -X POST "http://127.0.0.1:8000/sync/chirps3_precipitation_daily" \
   -H "Content-Type: application/json" \
   -d '{
     "end": "2024-02-20",
-    "prefer_zarr": true,
     "publish": true
   }' | jq
 ```
@@ -568,7 +595,6 @@ curl -s -X POST "http://127.0.0.1:8000/ingestions" \
     "dataset_id": "worldpop_population_yearly",
     "start": "2020",
     "end": "2020",
-    "prefer_zarr": true,
     "publish": true
   }' | jq
 ```
@@ -593,7 +619,6 @@ curl -s -X POST "http://127.0.0.1:8000/sync/worldpop_population_yearly" \
   -H "Content-Type: application/json" \
   -d '{
     "end": "2021",
-    "prefer_zarr": true,
     "publish": true
   }' | jq
 ```

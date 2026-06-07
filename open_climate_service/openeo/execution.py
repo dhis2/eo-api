@@ -42,8 +42,8 @@ class _DatasetOpenEOAccessor:
             Y_GUESSES,
         )
 
-        dim_names = list(ds.dims)  # Dataset.dims is a mapping; list() gives ordered dim names
-        lower_dims = [str(d).casefold() for d in dim_names]
+        dim_names = [str(d) for d in ds.dims]
+        lower_dims = [d.casefold() for d in dim_names]
         self._ds = ds
         self._temporal = [dim_names[lower_dims.index(g)] for g in TEMPORAL_GUESSES if g in lower_dims]
         self._spatial = [dim_names[lower_dims.index(g)] for g in X_GUESSES + Y_GUESSES if g in lower_dims]

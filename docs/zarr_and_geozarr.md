@@ -49,10 +49,12 @@ The Open Climate Service targets the same access pattern at country scale for ar
 
 ## Store layout on disk
 
-Each managed dataset has exactly one Zarr store on disk, stored under `{data_dir}/downloads/{dataset_id}.zarr`. The store is either:
+Each managed dataset has exactly one store on disk, under `{data_dir}/downloads/{dataset_id}.icechunk`. All stores use the [Icechunk](https://icechunk.io) versioned Zarr v3 format.
 
-- **Flat** — a single-resolution Zarr store with dimensions `(time, x, y)`
-- **Pyramid** — a multi-resolution Zarr store with levels `0/`, `1/`, `2/`, … where `0/` is the full resolution
+Inside the store, the layout is either:
+
+- **Flat** — a single-resolution Zarr group with dimensions `(time, x, y)`
+- **Pyramid** — a multi-resolution Zarr group with levels `0/`, `1/`, `2/`, … where `0/` is full resolution
 
 The flat vs. pyramid decision is made at build time based on spatial size (see [Multiscale pyramids](#multiscale-pyramids) below).
 
@@ -90,7 +92,7 @@ levels = ceil(log2(max_dim / 512))   # clamped to [2, 8]
 
 Where 512 is the target tile size in pixels. Each level halves the resolution in both spatial dimensions using mean downsampling. Level `0/` is always the full resolution.
 
-Both flat and pyramid stores are written in **Zarr v3** format.
+Both flat and pyramid stores are written in **Zarr v3** format using regular chunks. topozarr's default sharding codec (`sharding_indexed`) is stripped before writing — browser zarr clients such as zarrita (used by `@carbonplan/zarr-layer`) cannot decode sharding without manual codec registration, so all stores use plain regular chunks with zstd compression.
 
 ---
 
@@ -106,7 +108,9 @@ A plain Zarr store has no concept of spatial coordinates. A map viewer opening i
 
 These attributes are computed from the actual coordinate bounds of the written data and the instance CRS. They are always written by the framework after transforms and reprojection have run. This guarantees they always reflect the final stored data.
 
-`zarr_conventions` for a flat store contains the base GeoZarr convention declaration. For pyramid stores it also includes a multiscales entry that declares the level structure.
+`zarr_conventions` for a flat store contains the base GeoZarr convention declaration. For pyramid stores it also includes a `multiscales` entry that declares the level structure.
+
+The pyramid metadata follows the **GeoZarr `multiscales.layout` format** (not OME-NGFF). Each level is described as a `layout` entry with an `asset` key pointing to the level path, plus `transform.scale` and `transform.translation` values for that level. `@carbonplan/zarr-layer` 0.5.0+ understands this format natively via its `_parseUntiledMultiscale` path, and uses the per-level transform to position tiles at the correct scale and offset on the map.
 
 ---
 
@@ -128,17 +132,45 @@ STAC metadata also stores the WGS84 bounding box alongside the native bbox, so c
 
 ## How Zarr stores are served
 
-The `/zarr/{dataset_id}/` endpoint serves individual files from the Zarr store directory using FastAPI's `FileResponse`. The ZarrLayer client issues one HTTP request per chunk file it needs.
+The Open Climate Service provides two endpoints for accessing the same Icechunk store:
+
+### `/zarr/{dataset_id}` — vanilla zarr clients (web maps, xarray)
+
+This endpoint bridges Icechunk's snapshot model into standard zarr HTTP semantics. It reads directly from the Icechunk store and serves zarr-compatible responses that any plain zarr client can consume.
 
 ```
-GET /zarr/{dataset_id}/zarr.json          → root metadata (JSON)
+GET /zarr/{dataset_id}/zarr.json          → root metadata with consolidated metadata injected
 GET /zarr/{dataset_id}/precip/c/0/0/0     → chunk at time=0, x=0, y=0
 GET /zarr/{dataset_id}/time/c/0           → time coordinate chunk
 ```
 
-Metadata files (`zarr.json`) are returned as `application/json`. All other files — chunk data — are returned as `application/octet-stream`. Directory paths return a JSON listing of their contents.
+`zarr.json` responses at the root group include dynamically-built consolidated metadata (computed per Icechunk snapshot and cached), so clients can call `xr.open_zarr(..., consolidated=True)` without needing a static `.zmetadata` file.
 
-This design means the zarr store is served by ordinary file serving — there is no zarr-specific server middleware.
+Metadata files (`zarr.json`) are returned as `application/json`. Chunk data is returned as `application/octet-stream`. Directory paths return a JSON listing.
+
+### `/icechunk/{dataset_id}` — Icechunk SDK clients
+
+This endpoint serves raw Icechunk store files for native SDK access. The Icechunk SDK uses HTTP range requests to fetch only the byte ranges it needs from manifests and chunks.
+
+```
+GET /icechunk/{dataset_id}/repo              → store configuration
+GET /icechunk/{dataset_id}/snapshots/...     → snapshot metadata
+GET /icechunk/{dataset_id}/manifests/...     → chunk manifests (HTTP range requests)
+GET /icechunk/{dataset_id}/chunks/...        → chunk data (HTTP range requests)
+```
+
+SDK usage:
+
+```python
+import icechunk, xarray as xr
+
+repo = icechunk.Repository.open(
+    icechunk.http_storage("https://host/icechunk/era5land_precipitation_daily")
+)
+ds = xr.open_zarr(repo.readonly_session("main").store, zarr_format=3, consolidated=False)
+```
+
+Both endpoints are advertised as assets in the STAC collection so clients can choose the appropriate one. Use `/zarr` for web maps and standard xarray workflows; use `/icechunk` when you need versioning or SDK-level access.
 
 ---
 

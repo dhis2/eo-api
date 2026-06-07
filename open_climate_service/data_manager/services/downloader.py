@@ -231,7 +231,9 @@ _PYRAMID_TARGET_TILE_SIZE = 512
 _ROOT_TIME_COORD_MAX_CHUNK = 4096
 
 
-def _strip_sharding(encoding: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+def _strip_sharding(
+    encoding: dict[str, dict[str, dict[str, object]]],
+) -> dict[str, dict[str, dict[str, object]]]:
     """Remove shard-level keys from topozarr pyramid encoding.
 
     topozarr sets a ``shards`` key alongside ``chunks`` to produce sharding_indexed
@@ -239,12 +241,13 @@ def _strip_sharding(encoding: dict[str, dict[str, object]]) -> dict[str, dict[st
     sharding_indexed without a manually registered codec, so we strip the outer shard
     shape and keep only the inner chunk shape as plain regular chunks + zstd.
     """
-    stripped: dict[str, dict[str, object]] = {}
-    for level_path, level_enc in encoding.items():
-        stripped[level_path] = {
-            var: {k: v for k, v in var_enc.items() if k != "shards"} for var, var_enc in level_enc.items()
+    return {
+        level_path: {
+            var: {k: v for k, v in var_enc.items() if k != "shards"}
+            for var, var_enc in level_enc.items()
         }
-    return stripped
+        for level_path, level_enc in encoding.items()
+    }
 
 
 def _needs_pyramid(ds: xr.Dataset, x_dim: str, y_dim: str) -> bool:

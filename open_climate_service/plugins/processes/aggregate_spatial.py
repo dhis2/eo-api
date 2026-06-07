@@ -55,10 +55,11 @@ def _dataset_reduce_spatial(
         # No temporal dimension — reduce directly
         result_vars: dict[str, Any] = {}
         for var in ds.data_vars:
-            pixels = masked[var].values[mask]
+            vname = str(var)
+            pixels = masked[vname].values[mask]
             pixels = pixels[~np.isnan(pixels)]
             val = reducer(data=pixels)
-            result_vars[var] = xr.DataArray(float(val))
+            result_vars[vname] = xr.DataArray(float(val))
         return xr.Dataset(result_vars)
 
     t_vals = ds[t_dim].values
@@ -66,14 +67,16 @@ def _dataset_reduce_spatial(
     for t_val in t_vals:
         row: dict[str, float] = {}
         for var in ds.data_vars:
-            slice_2d = masked[var].sel({t_dim: t_val}).values
+            vname = str(var)
+            slice_2d = masked[vname].sel({t_dim: t_val}).values
             pixels = slice_2d[mask]
             pixels = pixels[~np.isnan(pixels)]
-            row[var] = float(reducer(data=pixels)) if pixels.size else float("nan")
+            row[vname] = float(reducer(data=pixels)) if pixels.size else float("nan")
         rows.append(row)
 
+    var_names = [str(v) for v in ds.data_vars]
     return xr.Dataset(
-        {var: xr.DataArray([row[var] for row in rows], coords={t_dim: t_vals}, dims=[t_dim]) for var in ds.data_vars}
+        {v: xr.DataArray([row[v] for row in rows], coords={t_dim: t_vals}, dims=[t_dim]) for v in var_names}
     )
 
 
