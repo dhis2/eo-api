@@ -92,7 +92,7 @@ levels = ceil(log2(max_dim / 512))   # clamped to [2, 8]
 
 Where 512 is the target tile size in pixels. Each level halves the resolution in both spatial dimensions using mean downsampling. Level `0/` is always the full resolution.
 
-Both flat and pyramid stores are written in **Zarr v3** format using regular chunks. topozarr's default sharding codec (`sharding_indexed`) is stripped before writing — browser zarr clients such as zarrita (used by `@carbonplan/zarr-layer`) cannot decode sharding without manual codec registration, so all stores use plain regular chunks with zstd compression.
+Both flat and pyramid stores are written in **Zarr v3** format using regular chunks with zstd compression.
 
 ---
 
@@ -110,7 +110,7 @@ These attributes are computed from the actual coordinate bounds of the written d
 
 `zarr_conventions` for a flat store contains the base GeoZarr convention declaration. For pyramid stores it also includes a `multiscales` entry that declares the level structure.
 
-The pyramid metadata follows the **GeoZarr `multiscales.layout` format** (not OME-NGFF). Each level is described as a `layout` entry with an `asset` key pointing to the level path, plus `transform.scale` and `transform.translation` values for that level. `@carbonplan/zarr-layer` 0.5.0+ understands this format natively via its `_parseUntiledMultiscale` path, and uses the per-level transform to position tiles at the correct scale and offset on the map.
+The pyramid metadata follows the **GeoZarr `multiscales.layout` format** (not OME-NGFF). Each level is described as a `layout` entry with an `asset` key pointing to the level path, plus `transform.scale` and `transform.translation` values for that level.
 
 ---
 
@@ -136,15 +136,11 @@ The Open Climate Service provides two endpoints for accessing the same Icechunk 
 
 ### `/zarr/{dataset_id}` — vanilla zarr clients (web maps, xarray)
 
-This endpoint bridges Icechunk's snapshot model into standard zarr HTTP semantics. It reads directly from the Icechunk store and serves zarr-compatible responses that any plain zarr client can consume.
-
 ```
 GET /zarr/{dataset_id}/zarr.json          → root metadata with consolidated metadata injected
 GET /zarr/{dataset_id}/precip/c/0/0/0     → chunk at time=0, x=0, y=0
 GET /zarr/{dataset_id}/time/c/0           → time coordinate chunk
 ```
-
-`zarr.json` responses at the root group include dynamically-built consolidated metadata (computed per Icechunk snapshot and cached), so clients can call `xr.open_zarr(..., consolidated=True)` without needing a static `.zmetadata` file.
 
 Metadata files (`zarr.json`) are returned as `application/json`. Chunk data is returned as `application/octet-stream`.
 

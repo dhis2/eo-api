@@ -305,7 +305,7 @@ The detailed dataset response is where version history belongs. The ingestion re
 
 ## 7. Access raw Zarr data
 
-`/zarr/{dataset_id}` bridges the Icechunk store into standard zarr HTTP semantics. It works with any vanilla zarr client including web maps (`@carbonplan/zarr-layer`) and xarray.
+`/zarr/{dataset_id}` bridges the Icechunk store into standard zarr HTTP semantics. It works with any vanilla zarr client including xarray.
 
 Examples:
 
@@ -313,7 +313,7 @@ Examples:
 curl -s http://127.0.0.1:8000/zarr/chirps3_precipitation_daily/zarr.json | jq
 ```
 
-`/zarr/{dataset_id}` is the store prefix; the root metadata is at `/zarr/{dataset_id}/zarr.json`. `zarr.json` responses include dynamically-built consolidated metadata (per Icechunk snapshot, cached), so clients can call `xr.open_zarr(..., consolidated=True)` without a static `.zmetadata` file. Dataset metadata remains under `/datasets`.
+`/zarr/{dataset_id}` is the store prefix; the root metadata is at `/zarr/{dataset_id}/zarr.json`.
 
 ## 8. Access the Icechunk store natively
 
