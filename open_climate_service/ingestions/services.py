@@ -18,7 +18,7 @@ from uuid import uuid4
 import portalocker
 import pyproj
 from fastapi import HTTPException
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from starlette.responses import Response
 from zarr.core.buffer import default_buffer_prototype
 
@@ -569,33 +569,14 @@ def plan_sync_dataset(
 def get_dataset_zarr_store_info_or_404(dataset_id: str) -> dict[str, object]:
     """Return a public Zarr store listing for a managed dataset."""
     artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
-    if artifact.format == ArtifactFormat.ICECHUNK:
-        store = _open_icechunk_store_or_404(artifact)
-        entries = _icechunk_entries(dataset_id=dataset_id, store=store, prefix="")
-        store_attrs = _read_icechunk_attrs(store)
-        store_crs = store_attrs.get("proj:code") if store_attrs else None
-        crs = store_crs if isinstance(store_crs, str) and store_crs else api_config.get_crs()
-        return {
-            "kind": "ZarrListing",
-            "dataset_id": dataset_id,
-            "format": artifact.format,
-            "path": ".",
-            "crs": crs,
-            "proj4": _crs_to_proj4(crs),
-            "bounds": _read_zarr_bounds(store_attrs),
-            "entries": entries,
-        }
-
-    store_root = _get_zarr_root_or_409(artifact)
-
-    entries = _zarr_entries(dataset_id=dataset_id, store_root=store_root, directory=store_root)
-    store_attrs = _read_zarr_attrs(store_root)
+    store = _open_icechunk_store_or_404(artifact)
+    entries = _icechunk_entries(dataset_id=dataset_id, store=store, prefix="")
+    store_attrs = _read_icechunk_attrs(store)
     store_crs = store_attrs.get("proj:code") if store_attrs else None
     crs = store_crs if isinstance(store_crs, str) and store_crs else api_config.get_crs()
     return {
         "kind": "ZarrListing",
         "dataset_id": dataset_id,
-        "format": artifact.format,
         "path": ".",
         "crs": crs,
         "proj4": _crs_to_proj4(crs),
@@ -615,16 +596,6 @@ def _crs_to_proj4(crs: str) -> str | None:
     except Exception:
         return None
 
-
-def _read_zarr_attrs(store_root: Path) -> dict[str, object] | None:
-    """Read the root attributes from a Zarr store, normalising v2/v3 layout differences."""
-    for attrs_file in (store_root / "zarr.json", store_root / ".zattrs"):
-        if attrs_file.exists():
-            attrs: dict[str, object] = json.loads(attrs_file.read_text(encoding="utf-8"))
-            if attrs_file.name == "zarr.json":
-                attrs = attrs.get("attributes", attrs)  # type: ignore[assignment]
-            return attrs
-    return None
 
 
 def _read_zarr_bounds(store_attrs: dict[str, object] | None) -> list[float] | None:
@@ -652,26 +623,11 @@ def _read_zarr_bounds(store_attrs: dict[str, object] | None) -> list[float] | No
 
 def get_dataset_zarr_store_file_or_404(
     dataset_id: str, relative_path: str
-) -> FileResponse | Response | dict[str, object]:
+) -> Response | dict[str, object]:
     """Serve a file, metadata document, or directory listing within a dataset Zarr store."""
     artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
-    if artifact.format == ArtifactFormat.ICECHUNK:
-        store = _open_icechunk_store_or_404(artifact)
-        return _get_icechunk_store_path_or_404(dataset_id=dataset_id, store=store, relative_path=relative_path)
-
-    store_root = _get_zarr_root_or_409(artifact)
-    target = _resolve_zarr_path(store_root, relative_path)
-    if not target.exists():
-        raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
-    if target.is_dir():
-        return _zarr_directory_listing(dataset_id=dataset_id, store_root=store_root, directory=target)
-    if target.name in {".zarray", ".zattrs", ".zgroup", "zarr.json"}:
-        return JSONResponse(content=json.loads(target.read_text(encoding="utf-8")))
-
-    media_type, _ = mimetypes.guess_type(target.name)
-    if media_type is None:
-        media_type = "application/octet-stream"
-    return FileResponse(target, media_type=media_type, filename=target.name)
+    store = _open_icechunk_store_or_404(artifact)
+    return _get_icechunk_store_path_or_404(dataset_id=dataset_id, store=store, relative_path=relative_path)
 
 
 def _open_icechunk_store_or_404(artifact: ArtifactRecord) -> _IcechunkReadableStore:
@@ -964,50 +920,6 @@ def _mutate_records(mutation: Callable[[list[ArtifactRecord]], ArtifactRecord]) 
         portalocker.unlock(handle)
         return result
 
-
-def _get_zarr_root_or_409(artifact: ArtifactRecord) -> Path:
-    """Return the Zarr root path for an artifact or raise a 409 if it is not Zarr-backed."""
-    if artifact.format != ArtifactFormat.ZARR:
-        raise HTTPException(status_code=409, detail="Artifact is not a Zarr store")
-
-    store_root = Path(artifact.path or artifact.asset_paths[0]).resolve()
-    if not store_root.exists() or not store_root.is_dir():
-        raise HTTPException(status_code=404, detail="Zarr store path does not exist on disk")
-    return store_root
-
-
-def _resolve_zarr_path(store_root: Path, relative_path: str) -> Path:
-    """Resolve a requested Zarr path without allowing traversal outside the store root."""
-    candidate = (store_root / relative_path).resolve()
-    try:
-        candidate.relative_to(store_root)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Requested Zarr path is outside the artifact store") from exc
-    return candidate
-
-
-def _zarr_directory_listing(*, dataset_id: str, store_root: Path, directory: Path) -> dict[str, object]:
-    """Return a browseable directory listing for a Zarr path."""
-    relative_directory = "." if directory == store_root else directory.relative_to(store_root).as_posix()
-    entries = _zarr_entries(dataset_id=dataset_id, store_root=store_root, directory=directory)
-    return {
-        "kind": "ZarrListing",
-        "dataset_id": dataset_id,
-        "path": relative_directory,
-        "entries": entries,
-    }
-
-
-def _zarr_entries(*, dataset_id: str, store_root: Path, directory: Path) -> list[dict[str, str]]:
-    """Build directory entries for a Zarr store namespace."""
-    return [
-        {
-            "name": child.name,
-            "kind": "directory" if child.is_dir() else "file",
-            "href": f"/zarr/{dataset_id}/{child.relative_to(store_root).as_posix()}",
-        }
-        for child in sorted(directory.iterdir(), key=lambda child: child.name)
-    ]
 
 
 def _find_existing_artifact(

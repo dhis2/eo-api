@@ -175,8 +175,8 @@ def test_get_dataset_zarr_store_info_reads_icechunk_listing(tmp_path: Path, monk
 
     listing = services.get_dataset_zarr_store_info_or_404("chirps3_precipitation_daily")
 
-    assert listing["format"] == ArtifactFormat.ICECHUNK
     assert listing["path"] == "."
+    assert "format" not in listing
     names = {entry["name"] for entry in listing["entries"]}  # type: ignore[index]
     assert {"zarr.json", "precip", "t", "x", "y"} <= names
 
