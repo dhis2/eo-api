@@ -414,21 +414,40 @@ def _create_streaming_artifact(
 def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
     """Apply GeoZarr conventions and a multiscale pyramid to the committed Icechunk store.
 
-    Reads the flat store written by streaming ingest, then rewrites it via
-    ``write_to_icechunk_store`` so every Icechunk store follows the same GeoZarr
-    layout regardless of size. Errors are logged and swallowed so that the plain
-    flat artifact is still registered.
+    Streaming ingest writes a flat store with root GeoZarr attrs but no
+    ``spatial_ref`` CRS coordinate or pyramid levels. This rewrites the store via
+    ``write_to_icechunk_store`` to add them, so every Icechunk store follows the
+    same GeoZarr layout regardless of size.
+
+    The rewrite must materialise the whole store in memory first, because
+    ``write_to_icechunk_store`` overwrites the very store it is reading from. That
+    is unavoidable on the initial ingest and whenever a pyramid must be rebuilt,
+    but a *temporal append* to an already-normalised flat store produces nothing
+    new: ``spatial_ref`` is a scalar that survives the append and streaming
+    refreshes the root attrs on every commit. We detect that case and skip the
+    read-rewrite, avoiding both the full in-memory load and the write
+    amplification of re-emitting the entire store on every sync.
+
+    Errors are logged and swallowed so that the plain flat artifact is still
+    registered.
     """
     from open_climate_service.data_accessor.services.accessor import open_icechunk_dataset
 
     try:
-        ds = open_icechunk_dataset(store_path).load()
+        ds = open_icechunk_dataset(store_path)
     except Exception:
         logger.warning("Could not open Icechunk store for GeoZarr write; skipping", exc_info=True)
         return
 
     try:
-        downloader.write_to_icechunk_store(ds, store_path, commit_message="Applied GeoZarr conventions")
+        already_normalized = "spatial_ref" in ds.coords or "spatial_ref" in ds.variables
+        if already_normalized and "x" in ds.sizes and "y" in ds.sizes and not downloader.needs_pyramid(ds):
+            logger.info(
+                "Store '%s' is already GeoZarr-normalized and flat; skipping read-rewrite",
+                store_path.name,
+            )
+            return
+        downloader.write_to_icechunk_store(ds.load(), store_path, commit_message="Applied GeoZarr conventions")
     except Exception:
         logger.error(
             "GeoZarr/pyramid write failed for '%s'; flat Icechunk artifact will be used as-is",
@@ -698,7 +717,9 @@ def _build_icechunk_consolidated_metadata(session: _IcechunkSession) -> dict[str
     if len(_consolidated_metadata_cache) >= _MAX_CONSOLIDATED_CACHE_ENTRIES:
         evict_count = _MAX_CONSOLIDATED_CACHE_ENTRIES // 2
         for key in list(_consolidated_metadata_cache)[:evict_count]:
-            del _consolidated_metadata_cache[key]
+            # pop(..., None) rather than del: this can run in a worker thread, so a
+            # concurrent request may have already evicted the same key.
+            _consolidated_metadata_cache.pop(key, None)
 
     node_metadata: dict[str, object] = {}
 
@@ -747,7 +768,7 @@ def _serve_bytes_ranged(content: bytes, media_type: str, range_header: str | Non
     if not range_header or not range_header.startswith("bytes="):
         return Response(content=content, media_type=media_type, headers=base_headers)
     try:
-        spec = range_header[len("bytes="):].strip()
+        spec = range_header[len("bytes=") :].strip()
         if spec.startswith("-"):
             suffix_len = int(spec[1:])
             start = max(0, total - suffix_len)

@@ -75,7 +75,7 @@ def test_zarr_route_echoes_origin_for_browser_access(client: TestClient, monkeyp
     monkeypatch.setattr(
         ingestion_services,
         "get_dataset_zarr_store_file_or_404",
-        lambda _id, _path: {"zarr_format": 3, "node_type": "group", "attributes": {}},
+        lambda _id, _path, range_header=None: {"zarr_format": 3, "node_type": "group", "attributes": {}},
     )
 
     response = client.get("/zarr/dataset-1/zarr.json", headers={"Origin": "https://inspect.geozarr.org"})
@@ -88,7 +88,7 @@ def test_zarr_route_does_not_allow_unconfigured_origin(client: TestClient, monke
     monkeypatch.setattr(
         ingestion_services,
         "get_dataset_zarr_store_file_or_404",
-        lambda _id, _path: {"zarr_format": 3, "node_type": "group", "attributes": {}},
+        lambda _id, _path, range_header=None: {"zarr_format": 3, "node_type": "group", "attributes": {}},
     )
 
     response = client.get("/zarr/dataset-1/zarr.json", headers={"Origin": "https://example.org"})
@@ -101,7 +101,7 @@ def test_zarr_route_allows_private_network_preflight(client: TestClient, monkeyp
     monkeypatch.setattr(
         ingestion_services,
         "get_dataset_zarr_store_file_or_404",
-        lambda _id, _path: {"zarr_format": 3, "node_type": "group", "attributes": {}},
+        lambda _id, _path, range_header=None: {"zarr_format": 3, "node_type": "group", "attributes": {}},
     )
 
     response = client.options(
@@ -122,7 +122,7 @@ def test_zarr_route_preserves_existing_vary_values(client: TestClient, monkeypat
     monkeypatch.setattr(
         ingestion_services,
         "get_dataset_zarr_store_file_or_404",
-        lambda _id, _path: {"zarr_format": 3, "node_type": "group", "attributes": {}},
+        lambda _id, _path, range_header=None: {"zarr_format": 3, "node_type": "group", "attributes": {}},
     )
 
     response = client.options(

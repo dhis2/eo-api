@@ -1124,6 +1124,43 @@ def test_maybe_build_pyramid_calls_write_to_icechunk_store(tmp_path: Path, monke
     assert written[0][1] == icechunk_path
 
 
+def test_maybe_build_pyramid_skips_rewrite_for_normalized_flat_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A temporal append to an already-normalized flat store needs no read-rewrite."""
+    import numpy as np
+    import xarray as xr
+
+    from open_climate_service.data_manager.services import downloader
+    from open_climate_service.ingestions.services import _maybe_build_pyramid
+
+    icechunk_path = tmp_path / "dataset.icechunk"
+    icechunk_path.mkdir()
+
+    # Small flat store that already carries the spatial_ref CRS coordinate, i.e.
+    # the output of a prior write_to_icechunk_store normalization.
+    ds = xr.Dataset(
+        {"precip": (("t", "y", "x"), np.ones((2, 4, 5), dtype="float32"))},
+        coords={
+            "t": np.array(["2026-01-01", "2026-01-02"], dtype="datetime64[D]"),
+            "y": [1.0, 2.0, 3.0, 4.0],
+            "x": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "spatial_ref": 0,
+        },
+    )
+    monkeypatch.setattr(
+        "open_climate_service.data_accessor.services.accessor.open_icechunk_dataset",
+        lambda _: ds,
+    )
+
+    written: list[tuple] = []
+    monkeypatch.setattr(downloader, "write_to_icechunk_store", lambda *a, **kw: written.append(a))
+
+    _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "precip"})
+
+    assert written == []  # already GeoZarr-normalized and flat → no rewrite
+
+
 def test_maybe_build_pyramid_falls_back_on_build_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import xarray as xr
 

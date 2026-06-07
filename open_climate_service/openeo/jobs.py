@@ -502,7 +502,9 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         ArtifactRequestScope,
     )
 
-    dataset_id: str = options["dataset_id"]
+    dataset_id = options["dataset_id"]
+    if not isinstance(dataset_id, str) or not dataset_id:
+        raise ValueError(f"'dataset_id' option must be a non-empty string, got {type(dataset_id).__name__}")
     if Path(dataset_id).name != dataset_id:
         raise ValueError(
             f"Invalid dataset_id '{dataset_id}': must be a plain name with no path separators or traversal segments"
@@ -510,13 +512,17 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
 
     from open_climate_service.data_registry.services import datasets as _reg
 
-    if _reg.get_dataset(dataset_id) is None:
+    template = _reg.get_dataset(dataset_id)
+    if template is None:
         raise ValueError(
             f"No dataset template found for '{dataset_id}'. "
             "Register the dataset template before writing managed artifacts."
         )
 
-    dataset_name: str = options.get("dataset_name", dataset_id)
+    # Prefer an explicit option, then the registered template's display name, and
+    # only fall back to the raw id so published collections read as e.g.
+    # "Mosquito hotspots (Rwanda 2018 Q1)" rather than "mosquito_hotspots".
+    dataset_name: str = options.get("dataset_name") or template.get("name") or dataset_id
 
     if not isinstance(ds, xr.Dataset):
         raise TypeError(f"Managed Zarr write requires an xr.Dataset, got {type(ds).__name__}")
@@ -646,9 +652,10 @@ def _derive_coverage(ds: Any, x_dim: str, y_dim: str, t_dim: str | None) -> Any:
             pass
 
     if t_dim is not None and t_dim in ds.coords and ds.sizes.get(t_dim, 0) > 0:
+        # min/max rather than first/last so coverage is correct for a non-monotonic time axis.
         t_values = ds[t_dim].values
-        t_start = str(np.datetime_as_string(t_values[0], unit="D"))
-        t_end = str(np.datetime_as_string(t_values[-1], unit="D"))
+        t_start = str(np.datetime_as_string(t_values.min(), unit="D"))
+        t_end = str(np.datetime_as_string(t_values.max(), unit="D"))
     else:
         # Dataset has no time dimension (e.g. after reduce_dimension); recover the
         # original temporal range from attrs that openeo-processes-dask attaches.
@@ -668,7 +675,9 @@ def _infer_period_type(ds: Any, t_dim: str) -> str | None:
     if t_dim not in ds.coords or ds.sizes.get(t_dim, 0) < 2:
         return None
 
-    t_values = ds[t_dim].values
+    # Sort first: streaming/append can leave a non-monotonic time axis, and an
+    # unsorted np.diff yields negative/irregular steps that skew the median.
+    t_values = np.sort(ds[t_dim].values)
     deltas = np.diff(t_values).astype("timedelta64[s]").astype(float)
     median_seconds = float(np.median(deltas))
 

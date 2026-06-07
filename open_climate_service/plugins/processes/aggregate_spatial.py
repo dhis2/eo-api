@@ -39,6 +39,31 @@ def _find_dim(data: xr.Dataset | xr.DataArray, candidates: list[str]) -> str | N
     return None
 
 
+def _make_reducer_caller(reducer: Callable, context: Any) -> Callable[[np.ndarray], float]:
+    """Return a function that applies the reducer, forwarding ``context`` when supported.
+
+    openEO reducers may or may not accept a ``context`` keyword; we inspect the
+    signature once so context-aware reducers receive it without breaking the
+    common array-only reducers (mean, median, ...).
+    """
+    import inspect
+
+    pass_context = False
+    if context is not None:
+        try:
+            params = inspect.signature(reducer).parameters
+            pass_context = "context" in params or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        except (TypeError, ValueError):
+            pass_context = False
+
+    def _call(pixels: np.ndarray) -> float:
+        if not pixels.size:
+            return float("nan")
+        return float(reducer(data=pixels, context=context) if pass_context else reducer(data=pixels))
+
+    return _call
+
+
 def _dataset_reduce_spatial(
     ds: xr.Dataset,
     mask: np.ndarray,
@@ -46,26 +71,30 @@ def _dataset_reduce_spatial(
     y_dim: str,
     x_dim: str,
     t_dim: str | None,
+    context: Any = None,
 ) -> xr.Dataset:
     """Apply spatial mask and reducer to each variable in a Dataset.
 
     Iterates over time steps so the reducer receives a 1-D array of pixel values
     (matching the OpenEO reducer contract: array-in, scalar-out).
+
+    Pixels are selected by boolean-indexing the raw arrays with ``mask`` directly
+    rather than materialising ``ds.where(mask)`` — the latter allocates a full
+    NaN-filled copy of the cube just to throw most of it away.
     """
-    # Build mask DataArray aligned to y/x coords
-    y_coords = ds[y_dim].values
-    x_coords = ds[x_dim].values
-    mask_da = xr.DataArray(mask, dims=[y_dim, x_dim], coords={y_dim: y_coords, x_dim: x_coords})
-    masked = ds.where(mask_da)
+    reduce = _make_reducer_caller(reducer, context)
+
+    def _drop_nan(pixels: np.ndarray) -> np.ndarray:
+        # Only floating arrays can carry NaN; np.isnan raises on integer dtypes.
+        return pixels[~np.isnan(pixels)] if np.issubdtype(pixels.dtype, np.floating) else pixels
 
     if t_dim is None or t_dim not in ds.dims:
         # No temporal dimension — reduce directly
         result_vars: dict[str, Any] = {}
         for var in ds.data_vars:
             vname = str(var)
-            pixels = masked[vname].values[mask]
-            pixels = pixels[~np.isnan(pixels)]
-            result_vars[vname] = xr.DataArray(float(reducer(data=pixels)) if pixels.size else float("nan"))
+            pixels = _drop_nan(ds[vname].values[mask])
+            result_vars[vname] = xr.DataArray(reduce(pixels))
         return xr.Dataset(result_vars)
 
     t_vals = ds[t_dim].values
@@ -76,8 +105,8 @@ def _dataset_reduce_spatial(
     mask_flat = mask.ravel()
     var_arrs: dict[str, np.ndarray] = {}
     for vname in var_names:
-        arr = masked[vname].values
-        t_axis = list(masked[vname].dims).index(t_dim)
+        arr = ds[vname].values
+        t_axis = list(ds[vname].dims).index(t_dim)
         if t_axis != 0:
             arr = np.moveaxis(arr, t_axis, 0)
         var_arrs[vname] = arr.reshape(len(t_vals), -1)
@@ -86,9 +115,8 @@ def _dataset_reduce_spatial(
     for t_idx in range(len(t_vals)):
         row: dict[str, float] = {}
         for vname in var_names:
-            pixels = var_arrs[vname][t_idx][mask_flat]
-            pixels = pixels[~np.isnan(pixels)]
-            row[vname] = float(reducer(data=pixels)) if pixels.size else float("nan")
+            pixels = _drop_nan(var_arrs[vname][t_idx][mask_flat])
+            row[vname] = reduce(pixels)
         rows.append(row)
 
     return xr.Dataset(
@@ -160,7 +188,7 @@ def aggregate_spatial(
         if height > 1 and float(y_coords[1]) > float(y_coords[0]):
             mask = mask[::-1]
 
-        geom_ds = _dataset_reduce_spatial(data, mask, reducer, y_dim, x_dim, t_dim)
+        geom_ds = _dataset_reduce_spatial(data, mask, reducer, y_dim, x_dim, t_dim, context)
         results.append(geom_ds)
 
     combined = xr.concat(results, dim=geom_dim)
