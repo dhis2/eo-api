@@ -428,7 +428,7 @@ def write_to_icechunk_store(
     ds = ds.proj.assign_crs(spatial_ref=crs)
 
     storage = icechunk.local_filesystem_storage(str(store_path))
-    repo = icechunk.Repository.open(storage) if store_path.exists() else icechunk.Repository.create(storage)
+    repo = icechunk.Repository.open_or_create(storage)
     session = repo.writable_session("main")
 
     if _needs_pyramid(ds, x_dim, y_dim):

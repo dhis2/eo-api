@@ -10,18 +10,25 @@ import xarray as xr
 from open_climate_service.process import process
 
 
-def _parse_geometries(geometries: Any) -> list[Any]:
-    """Extract a flat list of Shapely geometries from GeoJSON input."""
+def _parse_geometries(geometries: Any) -> tuple[list[Any], list[str]]:
+    """Extract Shapely geometries and stable string labels from GeoJSON input.
+
+    Labels use the feature ``id`` when present, otherwise a sequential integer.
+    """
     from shapely.geometry import shape
 
     if isinstance(geometries, dict):
         gtype = geometries.get("type", "")
         if gtype == "FeatureCollection":
-            return [shape(f["geometry"]) for f in geometries.get("features", [])]
+            features = geometries.get("features", [])
+            geoms = [shape(f["geometry"]) for f in features]
+            labels = [str(f.get("id", i)) for i, f in enumerate(features)]
+            return geoms, labels
         if gtype == "Feature":
-            return [shape(geometries["geometry"])]
-        return [shape(geometries)]
-    return [shape(g) if isinstance(g, dict) else g for g in geometries]
+            return [shape(geometries["geometry"])], [str(geometries.get("id", 0))]
+        return [shape(geometries)], ["0"]
+    items = [shape(g) if isinstance(g, dict) else g for g in geometries]
+    return items, [str(i) for i in range(len(items))]
 
 
 def _find_dim(data: xr.Dataset | xr.DataArray, candidates: list[str]) -> str | None:
@@ -63,18 +70,28 @@ def _dataset_reduce_spatial(
         return xr.Dataset(result_vars)
 
     t_vals = ds[t_dim].values
+    var_names = [str(v) for v in ds.data_vars]
+
+    # Pre-extract numpy arrays with the time axis first so each time step is a
+    # simple row index rather than an xarray label lookup (O(1) vs O(log N)).
+    mask_flat = mask.ravel()
+    var_arrs: dict[str, np.ndarray] = {}
+    for vname in var_names:
+        arr = masked[vname].values
+        t_axis = list(masked[vname].dims).index(t_dim)
+        if t_axis != 0:
+            arr = np.moveaxis(arr, t_axis, 0)
+        var_arrs[vname] = arr.reshape(len(t_vals), -1)
+
     rows: list[dict[str, float]] = []
-    for t_val in t_vals:
+    for t_idx in range(len(t_vals)):
         row: dict[str, float] = {}
-        for var in ds.data_vars:
-            vname = str(var)
-            slice_2d = masked[vname].sel({t_dim: t_val}).values
-            pixels = slice_2d[mask]
+        for vname in var_names:
+            pixels = var_arrs[vname][t_idx][mask_flat]
             pixels = pixels[~np.isnan(pixels)]
             row[vname] = float(reducer(data=pixels)) if pixels.size else float("nan")
         rows.append(row)
 
-    var_names = [str(v) for v in ds.data_vars]
     return xr.Dataset(
         {v: xr.DataArray([row[v] for row in rows], coords={t_dim: t_vals}, dims=[t_dim]) for v in var_names}
     )
@@ -102,7 +119,7 @@ def aggregate_spatial(
     from rasterio.transform import from_bounds
     from shapely.geometry import mapping
 
-    geom_shapes = _parse_geometries(geometries)
+    geom_shapes, geom_labels = _parse_geometries(geometries)
     if not geom_shapes:
         raise ValueError("aggregate_spatial: geometries contains no shapes")
 
@@ -132,7 +149,6 @@ def aggregate_spatial(
 
     geom_dim = target_dimension or "geometry"
     results: list[xr.Dataset] = []
-    geom_labels: list[str] = []
 
     for geom in geom_shapes:
         mask = rasterio.features.geometry_mask(
@@ -147,7 +163,6 @@ def aggregate_spatial(
 
         geom_ds = _dataset_reduce_spatial(data, mask, reducer, y_dim, x_dim, t_dim)
         results.append(geom_ds)
-        geom_labels.append(str(mapping(geom)))
 
     combined = xr.concat(results, dim=geom_dim)
     combined[geom_dim] = geom_labels

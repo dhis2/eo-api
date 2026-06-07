@@ -63,9 +63,16 @@ _store_locks_mutex = threading.Lock()
 # Consolidated zarr metadata cache: (store_path, snapshot_id) → metadata dict.
 # Building consolidated metadata requires reading every zarr.json from the store;
 # the result is stable for the lifetime of a snapshot, so we cache it keyed to
-# the Icechunk branch tip.  No eviction is needed — OCS instances are short-lived
-# and the number of stores is small.
+# the Icechunk branch tip.  Capped at 512 entries; the oldest half is evicted when
+# the limit is hit (one entry per ingest per dataset, so 512 entries ≈ 85 ingests
+# across 6 datasets before any eviction occurs).
 _consolidated_metadata_cache: dict[str, dict[str, object]] = {}
+_MAX_CONSOLIDATED_CACHE_ENTRIES = 512
+
+# Icechunk artifact path cache: dataset_id → (records_mtime, artifact).
+# Avoids reading and deserializing the full artifact index on every chunk request
+# from the /icechunk/ endpoint.  Invalidated when records.json changes on disk.
+_icechunk_artifact_cache: dict[str, tuple[float, "ArtifactRecord"]] = {}
 
 
 def _acquire_store_lock(store_path: Path) -> threading.Lock:
@@ -423,7 +430,11 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
     try:
         downloader.write_to_icechunk_store(ds, store_path, commit_message="Applied GeoZarr conventions")
     except Exception:
-        logger.warning("GeoZarr/pyramid write failed; flat Icechunk artifact will be used as-is", exc_info=True)
+        logger.error(
+            "GeoZarr/pyramid write failed for '%s'; flat Icechunk artifact will be used as-is",
+            store_path.name,
+            exc_info=True,
+        )
     finally:
         ds.close()
 
@@ -589,13 +600,15 @@ def plan_sync_dataset(
 def get_dataset_zarr_store_file_or_404(dataset_id: str, relative_path: str) -> Response | dict[str, object]:
     """Serve a file, metadata document, or directory listing within a dataset Zarr store."""
     artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
+    if artifact.format == ArtifactFormat.ZARR:
+        return _get_zarr_filesystem_file_or_404(dataset_id=dataset_id, artifact=artifact, relative_path=relative_path)
     session = _open_icechunk_store_or_404(artifact)
     return _get_icechunk_store_path_or_404(dataset_id=dataset_id, session=session, relative_path=relative_path)
 
 
 def serve_icechunk_file(dataset_id: str, file_path: str) -> FileResponse:
     """Serve a raw Icechunk store file for native SDK access via icechunk.http_storage()."""
-    artifact = _get_latest_published_icechunk_artifact(dataset_id)
+    artifact = _get_latest_published_icechunk_artifact_cached(dataset_id)
     store_root = Path(artifact.path or artifact.asset_paths[0]).resolve()
 
     full_path = (store_root / file_path).resolve()
@@ -607,6 +620,20 @@ def serve_icechunk_file(dataset_id: str, file_path: str) -> FileResponse:
     return FileResponse(full_path, media_type="application/octet-stream")
 
 
+def _get_latest_published_icechunk_artifact_cached(dataset_id: str) -> ArtifactRecord:
+    """Return the latest published Icechunk artifact, cached by records.json mtime."""
+    try:
+        mtime = ARTIFACTS_INDEX_PATH.stat().st_mtime if ARTIFACTS_INDEX_PATH.exists() else 0.0
+    except OSError:
+        mtime = 0.0
+    cached = _icechunk_artifact_cache.get(dataset_id)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    artifact = _get_latest_published_icechunk_artifact(dataset_id)
+    _icechunk_artifact_cache[dataset_id] = (mtime, artifact)
+    return artifact
+
+
 def _get_latest_published_icechunk_artifact(dataset_id: str) -> ArtifactRecord:
     """Return the latest published Icechunk artifact for dataset_id, or raise 404/409."""
     artifacts = latest_published_zarr_artifacts_by_dataset()
@@ -616,6 +643,37 @@ def _get_latest_published_icechunk_artifact(dataset_id: str) -> ArtifactRecord:
     if artifact.format != ArtifactFormat.ICECHUNK:
         raise HTTPException(status_code=409, detail=f"Dataset '{dataset_id}' is not Icechunk-backed")
     return artifact
+
+
+def _get_zarr_filesystem_file_or_404(
+    dataset_id: str, artifact: ArtifactRecord, relative_path: str
+) -> Response | dict[str, object]:
+    """Serve a file directly from a vanilla-zarr filesystem store."""
+    store_path_str = artifact.path or (artifact.asset_paths[0] if artifact.asset_paths else None)
+    if store_path_str is None:
+        raise HTTPException(status_code=409, detail=f"Dataset '{dataset_id}' has no resolvable store path")
+    store_root = Path(store_path_str).resolve()
+    if not store_root.exists():
+        raise HTTPException(status_code=404, detail="Zarr store path does not exist on disk")
+
+    target = _normalize_icechunk_relative_path(relative_path)
+    if target == "":
+        raise HTTPException(status_code=404, detail="Not found")
+
+    full_path = (store_root / target).resolve()
+    if not full_path.is_relative_to(store_root):
+        raise HTTPException(status_code=404, detail="Not found")
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
+
+    if full_path.is_file():
+        if target.endswith("zarr.json"):
+            meta = json.loads(full_path.read_bytes().decode("utf-8"))
+            return JSONResponse(content=meta)
+        media_type, _ = mimetypes.guess_type(target)
+        return Response(content=full_path.read_bytes(), media_type=media_type or "application/octet-stream")
+
+    raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
 
 
 def _open_icechunk_store_or_404(artifact: ArtifactRecord) -> _IcechunkSession:
@@ -719,6 +777,11 @@ def _build_icechunk_consolidated_metadata(session: _IcechunkSession) -> dict[str
     cached = _consolidated_metadata_cache.get(session.cache_key)
     if cached is not None:
         return cached
+
+    if len(_consolidated_metadata_cache) >= _MAX_CONSOLIDATED_CACHE_ENTRIES:
+        evict_count = _MAX_CONSOLIDATED_CACHE_ENTRIES // 2
+        for key in list(_consolidated_metadata_cache)[:evict_count]:
+            del _consolidated_metadata_cache[key]
 
     node_metadata: dict[str, object] = {}
 
