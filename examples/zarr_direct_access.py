@@ -24,27 +24,27 @@ def main() -> None:
     print(ds)
 
     print(f"\nDimensions:  {dict(ds.sizes)}")
-    print(f"Time range:  {ds.time.values[0]}  →  {ds.time.values[-1]}")
-    print(f"Latitude:    {ds.latitude.min().item()}  →  {ds.latitude.max().item()}")
-    print(f"Longitude:   {ds.longitude.min().item()}  →  {ds.longitude.max().item()}")
+    print(f"Time range:  {ds['t'].values[0]}  →  {ds['t'].values[-1]}")
+    print(f"Latitude:    {ds['y'].min().item():.4f}  →  {ds['y'].max().item():.4f}")
+    print(f"Longitude:   {ds['x'].min().item():.4f}  →  {ds['x'].max().item():.4f}")
 
     variable = list(ds.data_vars)[0]
 
     # Select a single time step
-    t0 = ds.time.values[0]
-    snapshot = ds[variable].sel(time=t0)
+    t0 = ds["t"].values[0]
+    snapshot = ds[variable].isel(t=0).compute()
     print(f"\n{variable} snapshot at {t0}:")
     print(f"  shape: {snapshot.shape},  min: {snapshot.min().item()},  max: {snapshot.max().item()}")
 
     # Select the point closest to the spatial centre of the domain
-    centre_lat = ds.latitude.mean().item()
-    centre_lon = ds.longitude.mean().item()
-    point = ds[variable].sel(latitude=centre_lat, longitude=centre_lon, method="nearest")
-    print(f"\n{variable} at domain centre ({centre_lat:.2f}, {centre_lon:.2f}):")
+    centre_y = ds["y"].mean().item()
+    centre_x = ds["x"].mean().item()
+    point = ds[variable].sel(y=centre_y, x=centre_x, method="nearest")
+    print(f"\n{variable} at domain centre ({centre_y:.2f}, {centre_x:.2f}):")
     print(point.to_dataframe()[[variable]].head(10))
 
     # Spatial mean over the full domain — first 10 time steps
-    spatial_mean = ds[variable].isel(time=slice(10)).mean(dim=["latitude", "longitude"])
+    spatial_mean = ds[variable].isel(t=slice(10)).mean(dim=["y", "x"])
     print(f"\nSpatial mean {variable} time series (first 10 steps):")
     print(spatial_mean.to_dataframe()[[variable]])
 

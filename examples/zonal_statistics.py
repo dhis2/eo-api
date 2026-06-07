@@ -25,6 +25,9 @@ BASE_URL = "http://127.0.0.1:8000"
 DISTRICTS_FILE = Path(__file__).parent / "data" / "sle-districts.geojson"
 
 
+COLLECTION_ID = "chirps3_precipitation_daily"
+
+
 def main() -> None:
     """Run load → monthly sum → zonal mean per district → CSV."""
     geojson = json.loads(DISTRICTS_FILE.read_text())
@@ -34,8 +37,15 @@ def main() -> None:
     district_ids = [f["properties"]["id"] for f in features]
     id_to_name = {f["properties"]["id"]: f["properties"]["name"] for f in features}
 
+    # Discover available temporal extent from the STAC collection
+    coll = requests.get(f"{BASE_URL}/stac/collections/{COLLECTION_ID}", timeout=30)
+    coll.raise_for_status()
+    coll = coll.json()
+    interval = coll["extent"]["temporal"]["interval"][0]
+    temporal_extent = [interval[0][:10], interval[1][:10]]
+
     print(f"Districts  : {len(features)}")
-    print("Period     : 2026-01 – 2026-03")
+    print(f"Period     : {temporal_extent[0]} – {temporal_extent[1]}")
     print()
 
     process_graph = {
@@ -43,8 +53,8 @@ def main() -> None:
         "load": {
             "process_id": "load_collection",
             "arguments": {
-                "id": "chirps3_precipitation_daily",
-                "temporal_extent": ["2026-01-01", "2026-03-31"],
+                "id": COLLECTION_ID,
+                "temporal_extent": temporal_extent,
             },
         },
         # 2. Sum daily values into monthly totals
