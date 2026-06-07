@@ -22,11 +22,6 @@ jobs:
       - name: Create .env from example
         run: cp .env.example .env
 
-      - name: Install GDAL system library
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libgdal-dev gdal-bin
-
       - name: Install uv
         uses: astral-sh/setup-uv@v4
         with:
@@ -36,12 +31,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-
-      - name: Pin GDAL Python binding to system libgdal version
-        run: |
-          GDAL_VERSION=$(gdal-config --version)
-          echo "System GDAL: $GDAL_VERSION"
-          sed -i "s/\"gdal==[^\"]*\"/\"gdal==$GDAL_VERSION\"/" pyproject.toml
 
       - name: Install dependencies
         run: uv sync
