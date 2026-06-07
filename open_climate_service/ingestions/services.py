@@ -145,7 +145,7 @@ def latest_published_zarr_artifacts_by_dataset() -> dict[str, ArtifactRecord]:
         latest = max(artifacts, key=lambda artifact: artifact.created_at)
         if latest.publication.status != PublicationStatus.PUBLISHED:
             continue
-        if latest.format not in {ArtifactFormat.ZARR, ArtifactFormat.ICECHUNK}:
+        if latest.format != ArtifactFormat.ICECHUNK:
             continue
         result[dataset_id] = latest
     return dict(sorted(result.items()))
@@ -485,60 +485,6 @@ def publish_artifact_record(artifact_id: str) -> ArtifactRecord:
     return _mutate_records(mutate)
 
 
-def store_materialized_zarr_artifact(
-    *,
-    dataset: dict[str, object],
-    start: str,
-    end: str | None,
-    bbox: list[float] | None,
-    zarr_path: Path,
-    overwrite: bool,
-    publish: bool,
-) -> ArtifactRecord:
-    """Store metadata for a locally materialized Zarr artifact."""
-    period_type = str(dataset["period_type"])
-    normalized_start = _normalize_request_period(start, period_type=period_type, field_name="start")
-    normalized_end = _normalize_optional_request_period(end, period_type=period_type, field_name="end")
-    request_scope = ArtifactRequestScope(
-        start=normalized_start,
-        end=normalized_end,
-        bbox=(bbox[0], bbox[1], bbox[2], bbox[3]) if bbox is not None else None,
-    )
-    coverage_data = get_data_coverage_for_paths(dataset, zarr_path=str(zarr_path.resolve()))
-    if not coverage_data.get("has_data", True):
-        raise HTTPException(status_code=409, detail="Materialized artifact contains no data for the requested scope")
-    _spatial_wgs84_data = coverage_data["coverage"].get("spatial_wgs84")
-    coverage = ArtifactCoverage(
-        temporal=CoverageTemporal(**coverage_data["coverage"]["temporal"]),
-        spatial=CoverageSpatial(**coverage_data["coverage"]["spatial"]),
-        spatial_wgs84=CoverageSpatial(**_spatial_wgs84_data) if _spatial_wgs84_data else None,
-    )
-    request_scope = request_scope.model_copy(update={"end": coverage.temporal.end})
-
-    record = ArtifactRecord(
-        artifact_id=str(uuid4()),
-        dataset_id=str(dataset["id"]),
-        source_dataset_id=(
-            str(dataset.get("source_dataset_id")) if dataset.get("source_dataset_id") is not None else None
-        ),
-        dataset_name=str(dataset["name"]),
-        variable=str(dataset["variable"]),
-        period_type=str(dataset.get("period_type")) if dataset.get("period_type") is not None else None,
-        format=ArtifactFormat.ZARR,
-        path=str(zarr_path.resolve()),
-        asset_paths=[str(zarr_path.resolve())],
-        variables=[str(dataset["variable"])],
-        request_scope=request_scope,
-        coverage=coverage,
-        created_at=datetime.now(UTC),
-        publication=ArtifactPublication(),
-    )
-    stored_record = _upsert_artifact_record(record, publish=publish, overwrite=overwrite)
-    if publish and stored_record.publication.status != PublicationStatus.PUBLISHED:
-        return publish_artifact_record(stored_record.artifact_id)
-    return stored_record
-
-
 def sync_dataset(
     *,
     dataset_id: str,
@@ -600,8 +546,6 @@ def plan_sync_dataset(
 def get_dataset_zarr_store_file_or_404(dataset_id: str, relative_path: str) -> Response | dict[str, object]:
     """Serve a file, metadata document, or directory listing within a dataset Zarr store."""
     artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
-    if artifact.format == ArtifactFormat.ZARR:
-        return _get_zarr_filesystem_file_or_404(dataset_id=dataset_id, artifact=artifact, relative_path=relative_path)
     session = _open_icechunk_store_or_404(artifact)
     return _get_icechunk_store_path_or_404(dataset_id=dataset_id, session=session, relative_path=relative_path)
 
@@ -643,37 +587,6 @@ def _get_latest_published_icechunk_artifact(dataset_id: str) -> ArtifactRecord:
     if artifact.format != ArtifactFormat.ICECHUNK:
         raise HTTPException(status_code=409, detail=f"Dataset '{dataset_id}' is not Icechunk-backed")
     return artifact
-
-
-def _get_zarr_filesystem_file_or_404(
-    dataset_id: str, artifact: ArtifactRecord, relative_path: str
-) -> Response | dict[str, object]:
-    """Serve a file directly from a vanilla-zarr filesystem store."""
-    store_path_str = artifact.path or (artifact.asset_paths[0] if artifact.asset_paths else None)
-    if store_path_str is None:
-        raise HTTPException(status_code=409, detail=f"Dataset '{dataset_id}' has no resolvable store path")
-    store_root = Path(store_path_str).resolve()
-    if not store_root.exists():
-        raise HTTPException(status_code=404, detail="Zarr store path does not exist on disk")
-
-    target = _normalize_icechunk_relative_path(relative_path)
-    if target == "":
-        raise HTTPException(status_code=404, detail="Not found")
-
-    full_path = (store_root / target).resolve()
-    if not full_path.is_relative_to(store_root):
-        raise HTTPException(status_code=404, detail="Not found")
-    if not full_path.exists():
-        raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
-
-    if full_path.is_file():
-        if target.endswith("zarr.json"):
-            meta = json.loads(full_path.read_bytes().decode("utf-8"))
-            return JSONResponse(content=meta)
-        media_type, _ = mimetypes.guess_type(target)
-        return Response(content=full_path.read_bytes(), media_type=media_type or "application/octet-stream")
-
-    raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
 
 
 def _open_icechunk_store_or_404(artifact: ArtifactRecord) -> _IcechunkSession:
@@ -1156,12 +1069,9 @@ def _build_dataset_detail_record(dataset_id: str, artifacts: list[ArtifactRecord
 
 def _dataset_links(dataset_id: str, latest: ArtifactRecord) -> list[DatasetAccessLink]:
     links = [DatasetAccessLink(href=f"/datasets/{dataset_id}", rel="self", title="Dataset detail")]
-    if latest.format in {ArtifactFormat.ZARR, ArtifactFormat.ICECHUNK}:
+    if latest.format == ArtifactFormat.ICECHUNK:
         links.append(DatasetAccessLink(href=f"/zarr/{dataset_id}", rel="zarr", title="Zarr store"))
-    if latest.publication.status == PublicationStatus.PUBLISHED and latest.format in {
-        ArtifactFormat.ZARR,
-        ArtifactFormat.ICECHUNK,
-    }:
+    if latest.publication.status == PublicationStatus.PUBLISHED and latest.format == ArtifactFormat.ICECHUNK:
         links.append(DatasetAccessLink(href=f"/stac/collections/{dataset_id}", rel="stac", title="STAC collection"))
     if latest.format == ArtifactFormat.NETCDF:
         links.append(

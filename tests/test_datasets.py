@@ -40,9 +40,9 @@ def _artifact(
         dataset_id=source_dataset_id,
         dataset_name="CHIRPS3 precipitation",
         variable="precip",
-        format=ArtifactFormat.ZARR,
-        path="/tmp/chirps3_precipitation_daily.zarr",
-        asset_paths=["/tmp/chirps3_precipitation_daily.zarr"],
+        format=ArtifactFormat.ICECHUNK,
+        path="/tmp/chirps3_precipitation_daily.icechunk",
+        asset_paths=["/tmp/chirps3_precipitation_daily.icechunk"],
         variables=["precip"],
         request_scope=ArtifactRequestScope(
             start="2026-01-01",
@@ -122,7 +122,7 @@ def test_list_datasets_groups_artifacts_by_managed_dataset_id(monkeypatch: pytes
     assert any(link.href == f"/stac/collections/{dataset.dataset_id}" for link in dataset.links)
 
 
-def test_dataset_links_include_stac_for_published_zarr() -> None:
+def test_dataset_links_include_stac_for_published_icechunk() -> None:
     links = services._dataset_links("chirps3_precipitation_daily", _artifact(artifact_id="a1"))
 
     assert any(link.rel == "stac" and link.href == "/stac/collections/chirps3_precipitation_daily" for link in links)
@@ -141,12 +141,11 @@ def test_dataset_links_omit_stac_for_unpublished_or_netcdf() -> None:
     assert all(link.rel != "stac" for link in netcdf_links)
 
 
-def test_dataset_links_omit_zarr_for_icechunk_artifacts() -> None:
-    icechunk = _artifact(artifact_id="a3")
-    icechunk.format = ArtifactFormat.ICECHUNK
-    icechunk.publication.pygeoapi_path = None
+def test_dataset_links_include_zarr_and_stac_for_icechunk_without_pygeoapi() -> None:
+    artifact = _artifact(artifact_id="a3")
+    artifact.publication.pygeoapi_path = None
 
-    links = services._dataset_links("chirps3_precipitation_daily", icechunk)
+    links = services._dataset_links("chirps3_precipitation_daily", artifact)
 
     assert any(link.rel == "zarr" for link in links)
     assert any(link.rel == "stac" for link in links)

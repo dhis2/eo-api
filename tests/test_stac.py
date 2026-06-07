@@ -49,8 +49,8 @@ def _artifact(
     variable: str = "precip",
     managed_dataset_id: str = "chirps3_precipitation_daily",
     status: PublicationStatus = PublicationStatus.PUBLISHED,
-    format: ArtifactFormat = ArtifactFormat.ZARR,
-    path: str | None = "/tmp/chirps3_precipitation_daily.zarr",
+    format: ArtifactFormat = ArtifactFormat.ICECHUNK,
+    path: str | None = "/tmp/chirps3_precipitation_daily.icechunk",
     asset_paths: list[str] | None = None,
     temporal_start: str = "2026-01-01",
     temporal_end: str = "2026-01-10",
@@ -354,44 +354,6 @@ def test_collection_sets_hourly_step_to_pt1h(client: TestClient, monkeypatch: py
     assert payload["cube:dimensions"]["t"]["step"] == "PT1H"
 
 
-def test_collection_uses_root_href_for_pyramid_zarr_store(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
-    (zarr_path / "0").mkdir(parents=True)
-    artifact = _artifact(artifact_id="a1", path=str(zarr_path))
-    monkeypatch.setattr(
-        ingestion_services,
-        "list_artifacts",
-        lambda: SimpleNamespace(items=[artifact]),
-    )
-    monkeypatch.setattr(
-        stac_services.registry_datasets,
-        "get_dataset",
-        lambda _: {"period_type": "daily", "source": "CHIRPS v3", "ingestion": {}},
-    )
-    monkeypatch.setattr(
-        stac_services,
-        "_build_collection_with_xstac",
-        lambda **_: {
-            "type": "Collection",
-            "id": "chirps3_precipitation_daily",
-            "extent": {"spatial": {"bbox": [[0, 0, 0, 0]]}, "temporal": {"interval": [[None, None]]}},
-            "cube:dimensions": {"time": {"type": "temporal", "extent": ["2026-01-01", "2026-01-10"]}},
-            "cube:variables": {"precip": {"type": "data", "dimensions": ["time", "y", "x"]}},
-            "assets": {"zarr": {}},
-        },
-    )
-    monkeypatch.setattr(stac_services, "_zarr_asset_metadata", lambda _: {"zarr:consolidated": True})
-    monkeypatch.setattr(stac_services, "_zarr_open_kwargs", lambda _: {"consolidated": None})
-
-    response = client.get("/collections/chirps3_precipitation_daily")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["assets"]["zarr"]["href"].endswith("/zarr/chirps3_precipitation_daily")
-
-
 def test_collection_uses_root_href_for_icechunk_store(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ICECHUNK, path="/tmp/chirps3.icechunk")
     monkeypatch.setattr(
@@ -424,42 +386,6 @@ def test_collection_uses_root_href_for_icechunk_store(client: TestClient, monkey
     assert payload["assets"]["zarr"]["href"].endswith("/zarr/chirps3_precipitation_daily")
     assert payload["assets"]["zarr"]["xarray:open_kwargs"] == {"consolidated": True}
     assert payload["assets"]["zarr"]["zarr:zarr_format"] == 3
-
-
-def test_collection_uses_root_href_for_remote_pyramid_zarr_store(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    artifact = _artifact(artifact_id="a1", path="s3://example-bucket/chirps3_precipitation_daily.zarr")
-    monkeypatch.setattr(
-        ingestion_services,
-        "list_artifacts",
-        lambda: SimpleNamespace(items=[artifact]),
-    )
-    monkeypatch.setattr(
-        stac_services.registry_datasets,
-        "get_dataset",
-        lambda _: {"period_type": "daily", "source": "CHIRPS v3", "ingestion": {}},
-    )
-    monkeypatch.setattr(
-        stac_services,
-        "_build_collection_with_xstac",
-        lambda **_: {
-            "type": "Collection",
-            "id": "chirps3_precipitation_daily",
-            "extent": {"spatial": {"bbox": [[0, 0, 0, 0]]}, "temporal": {"interval": [[None, None]]}},
-            "cube:dimensions": {"time": {"type": "temporal", "extent": ["2026-01-01", "2026-01-10"]}},
-            "cube:variables": {"precip": {"type": "data", "dimensions": ["time", "y", "x"]}},
-            "assets": {"zarr": {}},
-        },
-    )
-    monkeypatch.setattr(stac_services, "_zarr_asset_metadata", lambda _: {"zarr:consolidated": True})
-    monkeypatch.setattr(stac_services, "_zarr_open_kwargs", lambda _: {"consolidated": None})
-
-    response = client.get("/collections/chirps3_precipitation_daily")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["assets"]["zarr"]["href"].endswith("/zarr/chirps3_precipitation_daily")
 
 
 def test_collection_returns_404_for_unknown_dataset(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -550,7 +476,7 @@ def test_build_collection_with_xstac_normalizes_pystac_collection(
         license="proprietary",
     )
     template.add_asset("zarr", pystac.Asset(href="http://example.test/zarr"))
-    monkeypatch.setattr(stac_services, "open_zarr_dataset", lambda _: DummyDataset())
+    monkeypatch.setattr(stac_services, "open_icechunk_dataset", lambda _: DummyDataset())
     monkeypatch.setattr(stac_services, "get_x_y_dims", lambda _: ("x", "y"))
     monkeypatch.setattr(stac_services, "get_time_dim", lambda _: "time")
     monkeypatch.setattr(stac_services, "xarray_to_stac", lambda *args, **kwargs: template)
@@ -594,7 +520,7 @@ def test_collection_reuses_cached_xstac_payload(
         lambda: SimpleNamespace(items=[_artifact(artifact_id="a1")]),
     )
     monkeypatch.setattr(stac_services.registry_datasets, "get_dataset", lambda _: {"period_type": "daily"})
-    monkeypatch.setattr(stac_services, "open_zarr_dataset", fake_open)
+    monkeypatch.setattr(stac_services, "open_icechunk_dataset", fake_open)
     monkeypatch.setattr(stac_services, "get_x_y_dims", lambda _: ("x", "y"))
     monkeypatch.setattr(stac_services, "get_time_dim", lambda _: "time")
     monkeypatch.setattr(stac_services, "xarray_to_stac", fake_xarray_to_stac)
@@ -645,7 +571,7 @@ def test_collection_preserves_template_links_when_xstac_mutates_template(
         lambda: SimpleNamespace(items=[_artifact(artifact_id="a1")]),
     )
     monkeypatch.setattr(stac_services.registry_datasets, "get_dataset", lambda _: {"period_type": "daily"})
-    monkeypatch.setattr(stac_services, "open_zarr_dataset", lambda _: DummyDataset())
+    monkeypatch.setattr(stac_services, "open_icechunk_dataset", lambda _: DummyDataset())
     monkeypatch.setattr(stac_services, "get_x_y_dims", lambda _: ("x", "y"))
     monkeypatch.setattr(stac_services, "get_time_dim", lambda _: "time")
 
@@ -701,7 +627,7 @@ def test_collection_returns_503_when_zarr_store_cannot_be_opened(
     monkeypatch.setattr(stac_services.registry_datasets, "get_dataset", lambda _: {"period_type": "daily"})
     monkeypatch.setattr(
         stac_services,
-        "open_zarr_dataset",
+        "open_icechunk_dataset",
         raise_file_not_found,
     )
 
@@ -724,7 +650,7 @@ def test_build_collection_with_xstac_reads_normalised_zarr_coordinates(tmp_path:
     )
     ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
 
-    artifact = _artifact(artifact_id="a1", path=str(zarr_path))
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ZARR, path=str(zarr_path))
 
     template = pystac.Collection(
         id="chirps3_precipitation_daily",
