@@ -10,7 +10,7 @@ module-name = "open_climate_service"
 override-dependencies = [
     # openeo-pg-parser-networkx requires geojson-pydantic<2.0.0; our project uses >=2.1.0 which is compatible at runtime
     "geojson-pydantic>=2.1.0",
-    # openeo-processes-dask has stale constraints; all safe to override (library doesn't use these directly)
+    # openeo-processes-dask-slim has stale constraints; all safe to override (library doesn't use these directly)
     "zarr>=3.1.6",
     "pyarrow>=19.0",
     "xarray>=2025.12.0",
@@ -21,14 +21,10 @@ override-dependencies = [
     "xvec>=0.3",
     "rioxarray>=0.17",
     "pystac>=1.10",
-    # gdal Python bindings must match system libgdal.
-    # Update this version when your system libgdal changes: gdal-config --version
-    # CI rewrites this line dynamically before uv sync (see .github/workflows/ci.yml).
-    "gdal==3.12.2",
 ]
 
 [tool.uv.sources]
-openeo-processes-dask = { git = "https://github.com/dhis2/openeo-processes-dask", branch = "python313-arm64-compat" }
+openeo-processes-dask-slim = { git = "https://github.com/dhis2/openeo-processes-dask-slim", branch = "main" }
 
 [project]
 name = "open-climate-service"
@@ -64,7 +60,7 @@ dependencies = [
     "portalocker>=3.2.0",
     "dhis2eo>=1.2.1",
     "openeo-pg-parser-networkx>=2026.3.3",
-    "openeo-processes-dask[implementations]",
+    "openeo-processes-dask-slim[implementations]",
     "python-multipart>=0.0.29",
     "xclim>=0.61.1",
 ]
@@ -120,7 +116,7 @@ module = "tests.*"
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-module = ["pygeoapi.*", "rasterio.*", "pygeofilter.*", "requests.*", "geopandas.*", "earthkit.*", "metpy.*", "matplotlib.*", "yaml", "xproj", "topozarr.*", "geozarr_toolkit", "xstac", "openeo_pg_parser_networkx", "openeo_pg_parser_networkx.*", "openeo_processes_dask", "openeo_processes_dask.*", "dask_geopandas", "dask_geopandas.*", "xclim", "xclim.*"]
+module = ["pygeoapi.*", "rasterio.*", "pygeofilter.*", "requests.*", "geopandas.*", "earthkit.*", "metpy.*", "matplotlib.*", "yaml", "xproj", "topozarr.*", "geozarr_toolkit", "xstac", "openeo_pg_parser_networkx", "openeo_pg_parser_networkx.*", "openeo_processes_dask_slim", "openeo_processes_dask_slim.*", "dask_geopandas", "dask_geopandas.*", "xclim", "xclim.*"]
 ignore_missing_imports = true
 
 [tool.pyright]
