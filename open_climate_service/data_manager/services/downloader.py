@@ -356,6 +356,63 @@ def get_icechunk_path(dataset: dict[str, Any]) -> Path:
     return DOWNLOAD_DIR / f"{prefix}.icechunk"
 
 
+def get_zarr_path_unconditional(dataset: dict[str, Any]) -> Path:
+    """Return the pyramid Zarr path for a dataset, regardless of whether it exists."""
+    prefix = _get_cache_prefix(dataset)
+    return DOWNLOAD_DIR / f"{prefix}.zarr"
+
+
+def needs_pyramid(ds: xr.Dataset) -> bool:
+    """Return True when the dataset is large enough to need a multiscale pyramid."""
+    return _needs_pyramid(ds, "x", "y")
+
+
+def build_pyramid_zarr(ds: xr.Dataset, zarr_path: Path) -> None:
+    """Write a multiscale pyramid zarr from an already-loaded xr.Dataset.
+
+    The dataset must have canonical ``x``, ``y``, and ``t`` dimension names.
+    Any existing file at *zarr_path* is overwritten.
+    """
+    import shutil
+
+    crs = api_config.get_crs()
+    x_dim, y_dim = "x", "y"
+    dims = [x_dim, y_dim]
+
+    xmin = ds[x_dim].min().item()
+    xmax = ds[x_dim].max().item()
+    ymin = ds[y_dim].min().item()
+    ymax = ds[y_dim].max().item()
+    bbox = [xmin, ymin, xmax, ymax]
+    shape = (ds.sizes[x_dim], ds.sizes[y_dim])
+
+    geozarr_attrs = create_geozarr_attrs(dimensions=dims, crs=crs, bbox=bbox, shape=shape)
+    zarr_conventions = geozarr_attrs.get("zarr_conventions", [])
+    zarr_conventions.append(MultiscalesConventionMetadata().model_dump())
+    geozarr_attrs["zarr_conventions"] = zarr_conventions
+
+    levels = _pyramid_levels(ds, x_dim, y_dim)
+    logger.info(
+        "Building %d-level pyramid zarr (max dim %d px) → %s",
+        levels,
+        max(ds.sizes[x_dim], ds.sizes[y_dim]),
+        zarr_path,
+    )
+
+    if zarr_path.exists():
+        shutil.rmtree(zarr_path)
+
+    ds.load()
+    ds = ds.proj.assign_crs(spatial_ref=crs)
+
+    # https://github.com/carbonplan/topozarr/issues/13
+    pyramid = create_pyramid(ds, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
+    pyramid.dt.attrs.update(geozarr_attrs)
+    pyramid.dt.to_zarr(zarr_path, mode="w", encoding=pyramid.encoding, zarr_format=3)
+    _write_root_time_coordinate(zarr_path, ds, time_dim="t")
+    pyramid.dt.close()
+
+
 def _validate_spatial_coverage(dataset: dict[str, Any], bbox: list[float] | None) -> None:
     """Raise HTTP 400 if the request bbox falls outside the dataset's declared extents."""
     extents = dataset.get("extents")

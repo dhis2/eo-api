@@ -322,19 +322,7 @@ def _public_zarr_asset_href(
     artifact: ArtifactRecord,
     source_dataset: dict[str, Any],
 ) -> str:
-    artifact_path = _artifact_store_path(artifact)
-    if artifact.format == ArtifactFormat.ICECHUNK:
-        return _abs_url(request, f"/zarr/{dataset_id}")
-    if _is_pyramid_zarr(artifact_path):
-        return _abs_url(request, f"/zarr/{dataset_id}/0")
     return _abs_url(request, f"/zarr/{dataset_id}")
-
-
-def _is_pyramid_zarr(artifact_path: str) -> bool:
-    """Return True if artifact_path is a multiscale pyramid zarr store."""
-    if "://" in artifact_path:
-        return False
-    return (Path(artifact_path) / "0").is_dir()
 
 
 def _abs_url(request: Request, path: str) -> str:

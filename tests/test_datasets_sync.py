@@ -1088,3 +1088,98 @@ def test_sync_dataset_forwards_country_code_from_extent(monkeypatch: pytest.Monk
     services.sync_dataset(dataset_id=dataset_id, end="2021", publish=True)
 
     assert captured["country_code"] == "SLE"
+
+
+# ---------------------------------------------------------------------------
+# Pyramid promotion tests
+# ---------------------------------------------------------------------------
+
+
+def test_maybe_build_pyramid_promotes_to_zarr_when_large(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from open_climate_service.data_manager.services import downloader
+    from open_climate_service.ingestions.services import _maybe_build_pyramid
+
+    icechunk_path = tmp_path / "dataset.icechunk"
+    icechunk_path.mkdir()
+    zarr_path = tmp_path / "dataset.zarr"
+
+    import numpy as np
+    import xarray as xr
+
+    big = np.zeros((3000, 3000), dtype="float32")
+    ds = xr.Dataset({"precip": xr.DataArray(big, dims=["y", "x"])})
+
+    monkeypatch.setattr(
+        "open_climate_service.data_accessor.services.accessor.open_icechunk_dataset",
+        lambda _: ds,
+    )
+    monkeypatch.setattr(downloader, "needs_pyramid", lambda _: True)
+
+    built: list[tuple] = []
+
+    def fake_build(ds_arg: xr.Dataset, path: Path) -> None:
+        built.append((ds_arg, path))
+
+    monkeypatch.setattr(downloader, "build_pyramid_zarr", fake_build)
+    monkeypatch.setattr(downloader, "get_zarr_path_unconditional", lambda _: zarr_path)
+
+    dataset: dict = {"id": "ds1", "variable": "precip"}
+    fmt, path, asset_paths = _maybe_build_pyramid(icechunk_path, dataset)
+
+    assert fmt == ArtifactFormat.ZARR
+    assert path == zarr_path
+    assert str(icechunk_path.resolve()) in [str(p.resolve()) for p in asset_paths]
+    assert len(built) == 1
+
+
+def test_maybe_build_pyramid_falls_back_on_build_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from open_climate_service.data_manager.services import downloader
+    from open_climate_service.ingestions.services import _maybe_build_pyramid
+
+    icechunk_path = tmp_path / "dataset.icechunk"
+    icechunk_path.mkdir()
+
+    import xarray as xr
+
+    ds = xr.Dataset()
+    monkeypatch.setattr(
+        "open_climate_service.data_accessor.services.accessor.open_icechunk_dataset",
+        lambda _: ds,
+    )
+    monkeypatch.setattr(downloader, "needs_pyramid", lambda _: True)
+    monkeypatch.setattr(downloader, "build_pyramid_zarr", lambda *_: (_ for _ in ()).throw(RuntimeError("fail")))
+    monkeypatch.setattr(downloader, "get_zarr_path_unconditional", lambda _: tmp_path / "dataset.zarr")
+
+    fmt, path, _ = _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "v"})
+
+    assert fmt == ArtifactFormat.ICECHUNK
+    assert path == icechunk_path
+
+
+def test_plan_sync_append_for_pyramid_zarr_artifact_with_icechunk_companion(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    icechunk_path = tmp_path / "dataset.icechunk"
+    icechunk_path.mkdir()
+    zarr_path = tmp_path / "dataset.zarr"
+
+    latest = _artifact(artifact_id="a1", managed_dataset_id="chirps3_precipitation_daily_sle", end="2026-01-15")
+    latest.format = ArtifactFormat.ZARR
+    latest.path = str(zarr_path)
+    latest.asset_paths = [str(icechunk_path), str(zarr_path)]
+
+    monkeypatch.setattr(sync_engine, "read_committed_period_ids", lambda *_a, **_k: {"2026-01-15"})
+
+    result = sync_engine.plan_sync(
+        source_dataset={
+            "id": "chirps3_precipitation_daily",
+            "period_type": "daily",
+            "sync": {"kind": "temporal", "execution": "append"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
+        },
+        latest_artifact=latest,
+        requested_end="2026-01-31",
+    )
+
+    assert result.action == SyncAction.APPEND
