@@ -121,6 +121,14 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
         "roles": template_asset.get("roles"),
         "xarray:open_kwargs": xarray_open_kwargs,
     }
+    if artifact.format == ArtifactFormat.ICECHUNK:
+        collection_payload["assets"]["icechunk"] = {
+            "href": _abs_url(request, f"/icechunk/{dataset_id}"),
+            "type": "application/octet-stream",
+            "title": "Icechunk store (native SDK access)",
+            "roles": ["data"],
+            "xarray:open_kwargs": {"zarr_format": 3, "consolidated": False},
+        }
     collection_payload["license"] = template.license
     _remove_helper_variables(collection_payload)
     _round_spatial_steps(collection_payload)

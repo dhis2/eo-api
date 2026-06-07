@@ -422,7 +422,7 @@ def test_collection_uses_root_href_for_icechunk_store(client: TestClient, monkey
     assert response.status_code == 200
     payload = response.json()
     assert payload["assets"]["zarr"]["href"].endswith("/zarr/chirps3_precipitation_daily")
-    assert payload["assets"]["zarr"]["xarray:open_kwargs"] == {"consolidated": None}
+    assert payload["assets"]["zarr"]["xarray:open_kwargs"] == {"consolidated": True}
     assert payload["assets"]["zarr"]["zarr:zarr_format"] == 3
 
 

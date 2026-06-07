@@ -23,6 +23,7 @@ from open_climate_service.jobs.service import get_job_service
 ingestions_router = APIRouter()
 datasets_router = APIRouter()
 zarr_router = APIRouter()
+icechunk_router = APIRouter()
 sync_router = APIRouter()
 
 INGESTION_JOB_HREF_BASE = "/ingestions/jobs"
@@ -145,16 +146,24 @@ def download_artifact_file(dataset_id: str) -> FileResponse:
     return FileResponse(artifact.path, media_type=media_type, filename=filename)
 
 
-@zarr_router.api_route("/{dataset_id}", methods=["GET", "HEAD"])
-def get_canonical_zarr_store_info(dataset_id: str) -> dict[str, object]:
-    """Return canonical Zarr store listing for a managed dataset."""
-    return services.get_dataset_zarr_store_info_or_404(dataset_id)
-
-
 @zarr_router.api_route("/{dataset_id}/{relative_path:path}", methods=["GET", "HEAD"], response_model=None)
 def get_canonical_zarr_store_file(dataset_id: str, relative_path: str) -> FileResponse | Response | dict[str, object]:
     """Serve canonical Zarr store content for a managed dataset."""
     return services.get_dataset_zarr_store_file_or_404(dataset_id, relative_path)
+
+
+@icechunk_router.api_route("/{dataset_id}/{file_path:path}", methods=["GET", "HEAD"], response_model=None)
+def serve_icechunk_store_file(dataset_id: str, file_path: str) -> FileResponse:
+    """Serve a raw Icechunk store file for native SDK access.
+
+    Enables clients to open the store directly with::
+
+        import icechunk, zarr
+
+        repo = icechunk.Repository.open(icechunk.http_storage("http://<host>/icechunk/<dataset_id>/"))
+        ds = zarr.open(repo.readonly_session("main").store, zarr_format=3)
+    """
+    return services.serve_icechunk_file(dataset_id, file_path)
 
 
 @sync_router.post("/{dataset_id}")

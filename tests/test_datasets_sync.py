@@ -1174,5 +1174,3 @@ def test_plan_sync_append_for_icechunk_artifact(
     )
 
     assert result.action == SyncAction.APPEND
-
-

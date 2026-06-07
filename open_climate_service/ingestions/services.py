@@ -16,9 +16,8 @@ from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import portalocker
-import pyproj
 from fastapi import HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.responses import Response
 from zarr.core.buffer import default_buffer_prototype
 
@@ -100,7 +99,6 @@ class _IcechunkSession:
 
 
 def _resolve_artifacts_dir() -> Path:
-    from open_climate_service import config as api_config
 
     data_dir = api_config.get_data_dir()
     if data_dir is not None:
@@ -588,68 +586,36 @@ def plan_sync_dataset(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def get_dataset_zarr_store_info_or_404(dataset_id: str) -> dict[str, object]:
-    """Return a public Zarr store listing for a managed dataset."""
-    artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
-    session = _open_icechunk_store_or_404(artifact)
-    entries = _icechunk_entries(dataset_id=dataset_id, store=session.store, prefix="")
-    store_attrs = _read_icechunk_attrs(session.store)
-    store_crs = store_attrs.get("proj:code") if store_attrs else None
-    crs = store_crs if isinstance(store_crs, str) and store_crs else api_config.get_crs()
-    return {
-        "kind": "ZarrListing",
-        "dataset_id": dataset_id,
-        "path": ".",
-        "crs": crs,
-        "proj4": _crs_to_proj4(crs),
-        "bounds": _read_zarr_bounds(store_attrs),
-        "entries": entries,
-    }
-
-
-def _crs_to_proj4(crs: str) -> str | None:
-    """Convert an EPSG code or WKT string to a proj4 definition string, or None on failure."""
-    import warnings
-
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            return pyproj.CRS.from_user_input(crs).to_proj4()
-    except Exception:
-        return None
-
-
-
-def _read_zarr_bounds(store_attrs: dict[str, object] | None) -> list[float] | None:
-    """Extract the spatial:bbox from pre-read zarr store attributes, reprojected to WGS84.
-
-    Map clients (zarr-layer) expect bounds in geographic coordinates regardless of the
-    store's native CRS, so we reproject here when the store CRS is not WGS84/CRS84.
-    """
-    if store_attrs is None:
-        return None
-    bbox = store_attrs.get("spatial:bbox")
-    if not (isinstance(bbox, list) and len(bbox) == 4):
-        return None
-    xmin, ymin, xmax, ymax = (float(v) for v in bbox)
-    native_crs = store_attrs.get("proj:code")
-    if isinstance(native_crs, str) and native_crs not in ("EPSG:4326", "CRS84", "OGC:CRS84"):
-        try:
-            transformer = pyproj.Transformer.from_crs(native_crs, "EPSG:4326", always_xy=True)
-            xmin, ymin = transformer.transform(xmin, ymin)
-            xmax, ymax = transformer.transform(xmax, ymax)
-        except Exception:
-            pass
-    return [xmin, ymin, xmax, ymax]
-
-
-def get_dataset_zarr_store_file_or_404(
-    dataset_id: str, relative_path: str
-) -> Response | dict[str, object]:
+def get_dataset_zarr_store_file_or_404(dataset_id: str, relative_path: str) -> Response | dict[str, object]:
     """Serve a file, metadata document, or directory listing within a dataset Zarr store."""
     artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
     session = _open_icechunk_store_or_404(artifact)
     return _get_icechunk_store_path_or_404(dataset_id=dataset_id, session=session, relative_path=relative_path)
+
+
+def serve_icechunk_file(dataset_id: str, file_path: str) -> FileResponse:
+    """Serve a raw Icechunk store file for native SDK access via icechunk.http_storage()."""
+    artifact = _get_latest_published_icechunk_artifact(dataset_id)
+    store_root = Path(artifact.path or artifact.asset_paths[0]).resolve()
+
+    full_path = (store_root / file_path).resolve()
+    if not full_path.is_relative_to(store_root):
+        raise HTTPException(status_code=404, detail="Not found")
+    if not full_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Icechunk store file not found: {file_path}")
+
+    return FileResponse(full_path, media_type="application/octet-stream")
+
+
+def _get_latest_published_icechunk_artifact(dataset_id: str) -> ArtifactRecord:
+    """Return the latest published Icechunk artifact for dataset_id, or raise 404/409."""
+    artifacts = latest_published_zarr_artifacts_by_dataset()
+    artifact = artifacts.get(dataset_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+    if artifact.format != ArtifactFormat.ICECHUNK:
+        raise HTTPException(status_code=409, detail=f"Dataset '{dataset_id}' is not Icechunk-backed")
+    return artifact
 
 
 def _open_icechunk_store_or_404(artifact: ArtifactRecord) -> _IcechunkSession:
@@ -777,55 +743,6 @@ def _build_icechunk_consolidated_metadata(session: _IcechunkSession) -> dict[str
     return result
 
 
-def _icechunk_directory_listing(
-    *,
-    dataset_id: str,
-    store: _IcechunkReadableStore,
-    prefix: str,
-    child_names: list[str] | None = None,
-) -> dict[str, object]:
-    entries = _icechunk_entries(dataset_id=dataset_id, store=store, prefix=prefix, child_names=child_names)
-    return {
-        "kind": "ZarrListing",
-        "dataset_id": dataset_id,
-        "path": "." if prefix == "" else prefix,
-        "entries": entries,
-    }
-
-
-def _icechunk_entries(
-    *,
-    dataset_id: str,
-    store: _IcechunkReadableStore,
-    prefix: str,
-    child_names: list[str] | None = None,
-) -> list[dict[str, str]]:
-    base = "" if prefix == "" else prefix.rstrip("/") + "/"
-    names = child_names if child_names is not None else _icechunk_list_dir(store, prefix)
-
-    async def collect_entries() -> list[dict[str, str]]:
-        sem = asyncio.Semaphore(16)
-
-        async def probe(name: str) -> dict[str, str]:
-            async with sem:
-                relative_path = f"{base}{name}" if base else name
-                href = f"/zarr/{dataset_id}/{relative_path}" if relative_path else f"/zarr/{dataset_id}"
-                children = [item async for item in store.list_dir(relative_path)]
-                return {"name": name, "kind": "directory" if children else "file", "href": href}
-
-        return list(await asyncio.gather(*[probe(name) for name in sorted(names)]))
-
-    return cast(list[dict[str, str]], _run_async(collect_entries()))
-
-
-def _read_icechunk_attrs(store: _IcechunkReadableStore) -> dict[str, object] | None:
-    payload = _icechunk_get(store, "zarr.json")
-    if payload is None:
-        return None
-    attrs: dict[str, object] = json.loads(payload.decode("utf-8"))
-    return attrs.get("attributes", attrs)  # type: ignore[return-value]
-
-
 def _normalize_icechunk_relative_path(relative_path: str) -> str:
     """Normalize a requested Icechunk key path and reject unsafe segments."""
     if "\\" in relative_path:
@@ -845,7 +762,7 @@ def _get_icechunk_store_path_or_404(
     store = session.store
     target = _normalize_icechunk_relative_path(relative_path)
     if target == "":
-        return _icechunk_directory_listing(dataset_id=dataset_id, store=store, prefix="")
+        raise HTTPException(status_code=404, detail="Not found")
 
     if _icechunk_exists(store, target):
         payload = _icechunk_get(store, target)
@@ -862,13 +779,6 @@ def _get_icechunk_store_path_or_404(
             return JSONResponse(content=meta)
         media_type, _ = mimetypes.guess_type(target)
         return Response(content=payload, media_type=media_type or "application/octet-stream")
-
-    try:
-        child_names = _icechunk_list_dir(store, target)
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
-    if child_names:
-        return _icechunk_directory_listing(dataset_id=dataset_id, store=store, prefix=target, child_names=child_names)
 
     raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
 
@@ -962,7 +872,6 @@ def _mutate_records(mutation: Callable[[list[ArtifactRecord]], ArtifactRecord]) 
         os.fsync(handle.fileno())
         portalocker.unlock(handle)
         return result
-
 
 
 def _find_existing_artifact(
