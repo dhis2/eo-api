@@ -361,6 +361,7 @@
             style: "https://tiles.openfreemap.org/styles/positron",
             center: [20, 20],
             zoom: 1.5,
+            projection: { type: "globe" },
             fitBoundsOptions: { padding: 40 },
             attributionControl: { compact: true },
           });
@@ -371,6 +372,7 @@
         }
 
         map.on("load", () => {
+          map.setProjection({ type: "globe" });
           fitToExtent();
         });
 
