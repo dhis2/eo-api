@@ -61,6 +61,13 @@ logger = logging.getLogger(__name__)
 _store_locks: dict[str, threading.Lock] = {}
 _store_locks_mutex = threading.Lock()
 
+# Consolidated zarr metadata cache: (store_path, snapshot_id) → metadata dict.
+# Building consolidated metadata requires reading every zarr.json from the store;
+# the result is stable for the lifetime of a snapshot, so we cache it keyed to
+# the Icechunk branch tip.  No eviction is needed — OCS instances are short-lived
+# and the number of stores is small.
+_consolidated_metadata_cache: dict[str, dict[str, object]] = {}
+
 
 def _acquire_store_lock(store_path: Path) -> threading.Lock:
     """Return the exclusive lock for store_path, creating it if needed."""
@@ -75,6 +82,21 @@ class _IcechunkReadableStore(Protocol):
     def list_dir(self, prefix: str) -> AsyncIterator[str]: ...
     def exists(self, key: str) -> Awaitable[bool]: ...
     def get(self, key: str, prototype: Any) -> Awaitable[Any]: ...
+
+
+class _IcechunkSession:
+    """Thin holder for a readonly Icechunk session and its branch-tip snapshot id."""
+
+    __slots__ = ("store", "snapshot_id", "store_path")
+
+    def __init__(self, store: _IcechunkReadableStore, snapshot_id: str, store_path: str) -> None:
+        self.store = store
+        self.snapshot_id = snapshot_id
+        self.store_path = store_path
+
+    @property
+    def cache_key(self) -> str:
+        return f"{self.store_path}:{self.snapshot_id}"
 
 
 def _resolve_artifacts_dir() -> Path:
@@ -569,9 +591,9 @@ def plan_sync_dataset(
 def get_dataset_zarr_store_info_or_404(dataset_id: str) -> dict[str, object]:
     """Return a public Zarr store listing for a managed dataset."""
     artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
-    store = _open_icechunk_store_or_404(artifact)
-    entries = _icechunk_entries(dataset_id=dataset_id, store=store, prefix="")
-    store_attrs = _read_icechunk_attrs(store)
+    session = _open_icechunk_store_or_404(artifact)
+    entries = _icechunk_entries(dataset_id=dataset_id, store=session.store, prefix="")
+    store_attrs = _read_icechunk_attrs(session.store)
     store_crs = store_attrs.get("proj:code") if store_attrs else None
     crs = store_crs if isinstance(store_crs, str) and store_crs else api_config.get_crs()
     return {
@@ -626,11 +648,11 @@ def get_dataset_zarr_store_file_or_404(
 ) -> Response | dict[str, object]:
     """Serve a file, metadata document, or directory listing within a dataset Zarr store."""
     artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
-    store = _open_icechunk_store_or_404(artifact)
-    return _get_icechunk_store_path_or_404(dataset_id=dataset_id, store=store, relative_path=relative_path)
+    session = _open_icechunk_store_or_404(artifact)
+    return _get_icechunk_store_path_or_404(dataset_id=dataset_id, session=session, relative_path=relative_path)
 
 
-def _open_icechunk_store_or_404(artifact: ArtifactRecord) -> _IcechunkReadableStore:
+def _open_icechunk_store_or_404(artifact: ArtifactRecord) -> _IcechunkSession:
     """Open the readonly Icechunk session store for a published artifact."""
     if artifact.format != ArtifactFormat.ICECHUNK:
         raise HTTPException(status_code=409, detail="Artifact is not an Icechunk-backed Zarr store")
@@ -645,7 +667,9 @@ def _open_icechunk_store_or_404(artifact: ArtifactRecord) -> _IcechunkReadableSt
 
     storage = icechunk.local_filesystem_storage(str(path))
     repo = icechunk.Repository.open(storage)
-    return cast(_IcechunkReadableStore, repo.readonly_session("main").store)
+    snapshot_id = repo.lookup_branch("main")
+    session_store = cast(_IcechunkReadableStore, repo.readonly_session("main").store)
+    return _IcechunkSession(store=session_store, snapshot_id=snapshot_id, store_path=str(path))
 
 
 def _run_async(awaitable: Any) -> Any:
@@ -713,7 +737,7 @@ def _icechunk_get(store: _IcechunkReadableStore, key: str) -> bytes | None:
     return cast(bytes, buffer)
 
 
-def _build_icechunk_consolidated_metadata(store: _IcechunkReadableStore) -> dict[str, object]:
+def _build_icechunk_consolidated_metadata(session: _IcechunkSession) -> dict[str, object]:
     """Recursively build zarr v3 consolidated metadata for all groups and arrays in the store.
 
     Icechunk explicitly blocks ``zarr.consolidate_metadata()`` because its transactional
@@ -722,20 +746,25 @@ def _build_icechunk_consolidated_metadata(store: _IcechunkReadableStore) -> dict
     clients can open the store with a single request (``consolidated=True``) without
     needing server-side directory enumeration.
 
-    For pyramid stores the traversal recurses into each group level (``0/``, ``1/``, …)
-    so that the arrays inside each level are included in the metadata.
+    Results are cached per (store_path, snapshot_id) so repeated requests within the
+    lifetime of a snapshot — which is the common case between ingests — read once and
+    serve many times.
     """
+    cached = _consolidated_metadata_cache.get(session.cache_key)
+    if cached is not None:
+        return cached
+
     node_metadata: dict[str, object] = {}
 
     def traverse(prefix: str) -> None:
         try:
-            children = _icechunk_list_dir(store, prefix)
+            children = _icechunk_list_dir(session.store, prefix)
         except Exception:
             logger.warning("Failed to list Icechunk store prefix '%s' for consolidated metadata", prefix, exc_info=True)
             return
         for child in sorted(children):
             path = f"{prefix}/{child}" if prefix else child
-            meta_bytes = _icechunk_get(store, f"{path}/zarr.json")
+            meta_bytes = _icechunk_get(session.store, f"{path}/zarr.json")
             if meta_bytes is not None:
                 meta: dict[str, object] = json.loads(meta_bytes.decode("utf-8"))
                 node_metadata[path] = meta
@@ -743,7 +772,9 @@ def _build_icechunk_consolidated_metadata(store: _IcechunkReadableStore) -> dict
                     traverse(path)
 
     traverse("")
-    return {"kind": "inline", "must_understand": False, "metadata": node_metadata}
+    result: dict[str, object] = {"kind": "inline", "must_understand": False, "metadata": node_metadata}
+    _consolidated_metadata_cache[session.cache_key] = result
+    return result
 
 
 def _icechunk_directory_listing(
@@ -809,8 +840,9 @@ def _normalize_icechunk_relative_path(relative_path: str) -> str:
 
 
 def _get_icechunk_store_path_or_404(
-    dataset_id: str, store: _IcechunkReadableStore, relative_path: str
+    dataset_id: str, session: _IcechunkSession, relative_path: str
 ) -> Response | dict[str, object]:
+    store = session.store
     target = _normalize_icechunk_relative_path(relative_path)
     if target == "":
         return _icechunk_directory_listing(dataset_id=dataset_id, store=store, prefix="")
@@ -823,9 +855,10 @@ def _get_icechunk_store_path_or_404(
             meta = json.loads(payload.decode("utf-8"))
             # Inject consolidated metadata into the root zarr.json so xarray can
             # enumerate variables when accessing the store over HTTP, without needing
-            # directory listing or a separate consolidation step.
+            # directory listing or a separate consolidation step.  Result is cached
+            # per snapshot so repeated requests within a snapshot lifetime are free.
             if target == "zarr.json" and meta.get("node_type") == "group":
-                meta["consolidated_metadata"] = _build_icechunk_consolidated_metadata(store)
+                meta["consolidated_metadata"] = _build_icechunk_consolidated_metadata(session)
             return JSONResponse(content=meta)
         media_type, _ = mimetypes.guess_type(target)
         return Response(content=payload, media_type=media_type or "application/octet-stream")
