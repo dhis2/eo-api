@@ -382,8 +382,8 @@ def _ensure_crs(ds: xr.Dataset) -> xr.Dataset:
         crs = ds.attrs.get("proj:code") or ds.attrs.get("proj:epsg") or api_config.get_crs()
         tagged: xr.Dataset = ds.rio.write_crs(crs)
         return tagged
-    except Exception as exc:  # pragma: no cover - defensive; resampling will surface a clearer error
-        logger.warning("Could not attach CRS to collection: %s", exc)
+    except Exception:  # pragma: no cover - defensive; resampling will surface a clearer error
+        logger.warning("Could not attach CRS to collection; leaving untagged", exc_info=True)
         return ds
 
 
