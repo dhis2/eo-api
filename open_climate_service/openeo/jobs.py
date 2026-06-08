@@ -10,7 +10,6 @@ import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from decimal import Decimal
-from numbers import Real
 from pathlib import Path
 from typing import Any, TypeVar
 from uuid import uuid4
@@ -455,7 +454,12 @@ class OpenEOJobService:
 
             if isinstance(result, gpd.GeoDataFrame):
                 if fmt in _TABULAR_EXPORT_FORMATS:
-                    return _write_tabular_export(result, results_dir, fmt, options)
+                    return _write_tabular_export(
+                        result.drop(columns="geometry", errors="ignore"),
+                        results_dir,
+                        fmt,
+                        options,
+                    )
                 return _write_vector(result, results_dir, fmt)
         except ImportError:
             pass
@@ -699,7 +703,11 @@ def _infer_period_type(ds: Any, t_dim: str) -> str | None:
         return "weekly"
     if median_seconds <= 32 * 86400:
         return "monthly"
-    return "yearly"
+    if 80 * 86400 <= median_seconds <= 100 * 86400:
+        return "quarterly"
+    if 330 * 86400 <= median_seconds <= 370 * 86400:
+        return "yearly"
+    return None
 
 
 def _derive_variable(ds: Any, options: dict[str, Any]) -> str:
@@ -819,6 +827,7 @@ _VECTOR_FORMATS: dict[str, tuple[str, str]] = {
 }
 
 _TABULAR_EXPORT_FORMATS: dict[str, tuple[str, str]] = {
+    "CHAPCSV": (".csv", "text/csv"),
     "DHIS2JSON": (".json", "application/json"),
 }
 
@@ -911,20 +920,92 @@ def _write_vector(gdf: Any, results_dir: Any, fmt: str) -> str | None:
 def _write_dataset_tabular_export(ds: Any, results_dir: Any, fmt: str, options: dict[str, Any]) -> str | None:
     import pandas as pd
 
+    inferred_options = dict(options)
+    period_field = _optional_str_option(inferred_options, "period_field") or "t"
+    period_type = _optional_str_option(inferred_options, "period_type")
+    if period_type is None and period_field in getattr(ds, "coords", {}):
+        inferred = _infer_period_type(ds, period_field)
+        if inferred in {"daily", "weekly", "monthly", "quarterly", "yearly"}:
+            inferred_options["period_type"] = inferred
     if hasattr(ds, "to_dataframe"):
         df = ds.to_dataframe().reset_index()
     elif isinstance(ds, pd.DataFrame):
         df = ds
     else:
         raise TypeError(f"Unsupported data type for tabular export: {type(ds).__name__}")
-    return _write_tabular_export(df, results_dir, fmt, options)
+    return _write_tabular_export(df, results_dir, fmt, inferred_options)
 
 
 def _write_tabular_export(df: Any, results_dir: Any, fmt: str, options: dict[str, Any]) -> str | None:
+    if fmt == "CHAPCSV":
+        return _write_chap_csv(df, results_dir, options)
     if fmt == "DHIS2JSON":
         return _write_dhis2_json(df, results_dir, options)
     known = ", ".join(sorted(_TABULAR_EXPORT_FORMATS))
     raise ValueError(f"Unsupported tabular export format '{fmt}'. Known formats: {known}")
+
+
+def _write_chap_csv(df: Any, results_dir: Any, options: dict[str, Any]) -> str:
+    frame = _build_chap_csv_frame(df, options)
+    path = str(results_dir / "result.csv")
+    frame.to_csv(path, index=False)
+    return path
+
+
+def _build_chap_csv_frame(df: Any, options: dict[str, Any]) -> Any:
+    import pandas as pd
+
+    period_field = _optional_str_option(options, "period_field") or "t"
+    location_field = _optional_str_option(options, "location_field") or "geometry"
+    period_type = _optional_str_option(options, "period_type")
+
+    frame = pd.DataFrame(df).copy()
+    if location_field not in frame.columns:
+        if location_field == "geometry":
+            raise ValueError(
+                "Missing location field 'geometry' in aggregated result; "
+                "for GeoDataFrame inputs set save_result option 'location_field' explicitly"
+            )
+        raise ValueError(f"Missing location field '{location_field}' in aggregated result")
+    if period_field not in frame.columns:
+        raise ValueError(f"Missing period field '{period_field}' in aggregated result")
+
+    value_fields = _select_chap_value_fields(frame, location_field, period_field)
+    rows: list[dict[str, str]] = []
+    for row_index, record in enumerate(frame.to_dict(orient="records")):
+        period_value = record.get(period_field)
+        if _is_nullish(period_value):
+            raise ValueError(f"Null period value in field '{period_field}' at row {row_index}")
+        location = record.get(location_field)
+        if _is_nullish(location):
+            raise ValueError(f"Null location value in field '{location_field}' at row {row_index}")
+
+        row: dict[str, str] = {
+            "time_period": _to_dhis2_period_string(period_value, period_type),
+            "location": str(location),
+        }
+        for value_field in value_fields:
+            value = record.get(value_field)
+            row[value_field] = "" if _is_nullish(value) else _to_dhis2_value_string(value)
+        rows.append(row)
+
+    return pd.DataFrame(rows, columns=["time_period", "location", *value_fields])
+
+
+def _select_chap_value_fields(frame: Any, location_field: str, period_field: str) -> list[str]:
+    excluded = {
+        location_field,
+        period_field,
+        "geometry",
+        "spatial_ref",
+        "index",
+        "band",
+        "bands",
+    }
+    candidates = [str(c) for c in frame.columns if c not in excluded and not str(c).startswith("level_")]
+    if not candidates:
+        raise ValueError("CHAPCSV export requires at least one value column")
+    return candidates
 
 
 def _write_dhis2_json(df: Any, results_dir: Any, options: dict[str, Any]) -> str:
@@ -1020,14 +1101,14 @@ def _is_nullish(value: Any) -> bool:
     if isinstance(result, (bool, np.bool_)):
         return bool(result)
     if isinstance(result, np.ndarray):
-        return bool(result.all())
-    if hasattr(result, "all"):
-        reduced = result.all()
-        if isinstance(reduced, (bool, np.bool_)):
-            return bool(reduced)
-    if value is None:
-        return value is None
-    raise TypeError(f"Unsupported null-check value type '{type(value).__name__}'")
+        if result.ndim == 0:
+            return bool(result.item())
+        raise ValueError("Array-like values are not supported in tabular export cells")
+    if hasattr(result, "shape") and getattr(result, "shape", ()) not in [(), None]:
+        raise ValueError("Array-like values are not supported in tabular export cells")
+    if hasattr(result, "item"):
+        return bool(result.item())
+    return bool(result)
 
 
 def _normalise_period_type(period_type: str | None) -> str | None:
@@ -1054,13 +1135,13 @@ def _normalise_period_type(period_type: str | None) -> str | None:
 
 def _direct_dhis2_period_string(value: str) -> str | None:
     patterns = (
-        r"^\d{8}$",
-        r"^\d{6}$",
-        r"^\d{4}$",
-        r"^\d{4}W\d{2}$",
-        r"^\d{4}Q[1-4]$",
+        re.compile(r"^\d{8}$"),
+        re.compile(r"^\d{6}$"),
+        re.compile(r"^\d{4}$"),
+        re.compile(r"^\d{4}W\d{2}$"),
+        re.compile(r"^\d{4}Q[1-4]$"),
     )
-    if any(re.fullmatch(pattern, value) for pattern in patterns):
+    if any(pattern.fullmatch(value) for pattern in patterns):
         return value
     return None
 
@@ -1078,19 +1159,41 @@ def _to_dhis2_period_string(value: Any, period_type: str | None = None) -> str:
             raise ValueError("Cannot serialize blank period value")
         direct = _direct_dhis2_period_string(stripped)
         if direct is not None:
-            return direct
+            if kind is None:
+                return direct
+            pattern_map = {
+                "daily": re.compile(r"^\d{8}$"),
+                "weekly": re.compile(r"^\d{4}W\d{2}$"),
+                "monthly": re.compile(r"^\d{6}$"),
+                "quarterly": re.compile(r"^\d{4}Q[1-4]$"),
+                "yearly": re.compile(r"^\d{4}$"),
+            }
+            if pattern_map[kind].fullmatch(stripped):
+                return direct
+            for known_type, pattern in pattern_map.items():
+                if known_type != kind and pattern.fullmatch(stripped):
+                    raise ValueError(f"Period value appears to be {known_type}, but period_type={kind}")
         if kind is None:
             raise ValueError(
                 "Ambiguous period value; provide save_result option 'period_type' "
                 "for date-like values that are not already in DHIS2 format"
             )
-        timestamp = pd.Timestamp(stripped)
+        try:
+            timestamp = pd.Timestamp(stripped)
+        except Exception as exc:
+            raise ValueError(f"Could not parse period value {stripped!r} for period_type={kind}") from exc
         return _format_dhis2_timestamp(timestamp, kind)
 
     if kind is None:
-        raise ValueError("Missing required export option 'period_type' for non-string period values")
+        raise ValueError(
+            "Ambiguous period value; provide save_result option 'period_type' "
+            "for date-like values that are not already in DHIS2 format"
+        )
 
-    timestamp = pd.Timestamp(value)
+    try:
+        timestamp = pd.Timestamp(value)
+    except Exception as exc:
+        raise ValueError(f"Could not parse period value {value!r} for period_type={kind}") from exc
     return _format_dhis2_timestamp(timestamp, kind)
 
 
@@ -1115,13 +1218,20 @@ def _to_dhis2_value_string(value: Any) -> str:
     if _is_nullish(value):
         raise ValueError("Cannot serialize null value")
     if isinstance(value, (bool, np.bool_)):
-        return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
+        return "true" if bool(value) else "false"
+    if isinstance(value, (int, np.integer)) and not isinstance(value, bool):
+        return str(int(value))
+    if isinstance(value, (float, np.floating)):
+        as_float = float(value)
+        as_float32 = float(np.float32(as_float))
+        if as_float == as_float32:
+            return np.format_float_positional(np.float32(as_float), trim="-")
+        return np.format_float_positional(as_float, trim="-")
     if isinstance(value, Decimal):
-        return format(value.normalize(), "f").rstrip("0").rstrip(".") or "0"
-    if isinstance(value, Real):
-        return format(Decimal(str(value)).normalize(), "f").rstrip("0").rstrip(".") or "0"
+        normalized = format(value, "f")
+        if "." in normalized:
+            normalized = normalized.rstrip("0").rstrip(".")
+        return normalized or "0"
     return str(value)
 
 

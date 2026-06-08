@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Callable
 
 from fastapi import APIRouter, Body, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
@@ -117,6 +117,19 @@ def file_formats() -> dict[str, Any]:
             "gis_data_types": ["vector"],
             "parameters": {},
             "links": [{"rel": "about", "href": "https://geoparquet.org"}],
+        },
+        "CHAPCSV": {
+            "title": "CHAP CSV",
+            "description": (
+                "Wide-format CSV for CHAP imports with one row per location-period and one column per variable."
+            ),
+            "gis_data_types": ["table"],
+            "parameters": {
+                "period_field": {"type": "string", "default": "t"},
+                "location_field": {"type": "string", "default": "geometry"},
+                "period_type": {"type": "string"},
+            },
+            "links": [],
         },
         "DHIS2JSON": {
             "title": "DHIS2 JSON",
@@ -329,6 +342,27 @@ def download_result_file(job_id: str, filename: str) -> FileResponse:
     return FileResponse(str(path), media_type=media_type, filename=filename)
 
 
+def _sync_export_response(
+    write_output: Callable[[Any], str | None],
+    fmt: str,
+    media_type: str | None = None,
+) -> Response:
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            output = write_output(Path(tmp))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if output is None:
+            raise HTTPException(status_code=500, detail=f"Format '{fmt}' produced no output")
+        path = Path(output)
+        data = path.read_bytes()
+        resolved_media_type = media_type or _RESULT_MEDIA_TYPES.get(path.suffix.lower(), "application/octet-stream")
+        return Response(content=data, media_type=resolved_media_type)
+
+
 # ---------------------------------------------------------------------------
 # Synchronous result  POST /result
 # ---------------------------------------------------------------------------
@@ -364,9 +398,10 @@ def execute_synchronous(
 
     from open_climate_service.openeo.execution import SaveResultEnvelope
     from open_climate_service.openeo.jobs import (
-        _TABULAR_EXPORT_FORMATS,
         _VECTOR_FORMATS,
+        _write_dataset_tabular_export,
         _write_raster,
+        _write_tabular_export,
         _write_vector,
     )
 
@@ -382,7 +417,7 @@ def execute_synchronous(
         result = result.to_dataset(name=result.name or "result")
 
     if isinstance(result, xr.Dataset):
-        if fmt in _TABULAR_EXPORT_FORMATS:
+        if fmt == "DHIS2JSON":
             return _json_tabular_payload_response(result.to_dataframe().reset_index(), options)
         if fmt == "ZARR":
             raise HTTPException(
@@ -392,19 +427,16 @@ def execute_synchronous(
                     "use a non-ZARR format or submit a batch job"
                 ),
             )
-        with tempfile.TemporaryDirectory() as tmp:
-            from pathlib import Path
-
-            output = _write_raster(result, Path(tmp), fmt)
-            if output is None:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Format '{fmt}' produced no output",
-                )
-            data = Path(output).read_bytes()
-            suffix = Path(output).suffix.lower()
-            media_type = _RESULT_MEDIA_TYPES.get(suffix, "application/octet-stream")
-            return Response(content=data, media_type=media_type)
+        if fmt == "CHAPCSV":
+            return _sync_export_response(
+                lambda tmp_dir: _write_dataset_tabular_export(result, tmp_dir, fmt, options),
+                fmt,
+                "text/csv",
+            )
+        return _sync_export_response(
+            lambda tmp_dir: _write_raster(result, tmp_dir, fmt),
+            fmt,
+        )
 
     # Try vector
     try:
@@ -420,7 +452,18 @@ def execute_synchronous(
         import pandas as pd
 
         if isinstance(result, gpd.GeoDataFrame):
-            if fmt in _TABULAR_EXPORT_FORMATS:
+            if fmt == "CHAPCSV":
+                return _sync_export_response(
+                    lambda tmp_dir: _write_tabular_export(
+                        result.drop(columns="geometry", errors="ignore"),
+                        tmp_dir,
+                        fmt,
+                        options,
+                    ),
+                    fmt,
+                    "text/csv",
+                )
+            if fmt == "DHIS2JSON":
                 frame = pd.DataFrame(result.drop(columns="geometry", errors="ignore"))
                 return _json_tabular_payload_response(frame, options)
             if fmt == "GEOJSON":
