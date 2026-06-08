@@ -87,7 +87,6 @@ class ArtifactPublication(BaseModel):
     status: PublicationStatus = PublicationStatus.UNPUBLISHED
     collection_id: str | None = None
     published_at: datetime | None = None
-    pygeoapi_path: str | None = None
 
 
 class ArtifactRecord(BaseModel):
@@ -121,7 +120,7 @@ class CreateIngestionRequest(BaseModel):
     )
     publish: bool = Field(
         default=True,
-        description="Whether to publish the resulting dataset through pygeoapi.",
+        description="Whether to publish the resulting dataset.",
     )
 
 

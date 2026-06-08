@@ -1,6 +1,6 @@
 # Open Climate Service Managed Data Guide
 
-This guide describes the current native FastAPI surface for Open Climate Service and how it relates to the standards-facing `pygeoapi` publication layer.
+This guide describes the current native FastAPI surface for Open Climate Service and how datasets are published as STAC collections.
 
 The current public story is:
 
@@ -10,7 +10,6 @@ The current public story is:
 - discover published GeoZarr datasets with `/stac/catalog.json`
 - access raw Zarr data with `/zarr/{dataset_id}` (vanilla zarr clients, web maps)
 - access the native Icechunk store with `/icechunk/{dataset_id}` (Icechunk SDK)
-- access standards-facing publication with `/ogcapi/...`
 
 Internal artifacts still exist as a storage and provenance model, but they are not part of the public API contract.
 
@@ -36,9 +35,6 @@ Operational note:
 - `GET /icechunk/{dataset_id}/{path}`
 - `GET /sync/{dataset_id}/plan`
 - `POST /sync/{dataset_id}`
-- `GET /ogcapi/collections`
-- `GET /ogcapi/collections/{dataset_id}`
-- `GET /ogcapi/collections/{dataset_id}/coverage`
 
 ## 1. Discover the configured extent
 
@@ -150,11 +146,6 @@ Example response:
         "href": "/stac/collections/chirps3_precipitation_daily",
         "rel": "stac",
         "title": "STAC collection"
-      },
-      {
-        "href": "/ogcapi/collections/chirps3_precipitation_daily",
-        "rel": "ogc-collection",
-        "title": "OGC collection"
       }
     ],
     "publication": {
@@ -172,7 +163,7 @@ What this means:
 - `/ingestions` is an operational/admin surface, not the main managed-data catalog
 - `dataset` is a public managed dataset summary, not an internal artifact record
 - `extent` is realized data coverage, not just the configured bbox
-- `links` point to the native dataset metadata, native Zarr access, STAC collection metadata, and standards-facing OGC collection
+- `links` point to the native dataset metadata, native Zarr access, and STAC collection metadata
 
 ## 3. List ingestion runs
 
@@ -262,11 +253,6 @@ Example response:
           "href": "/zarr/chirps3_precipitation_daily",
           "rel": "zarr",
           "title": "Zarr store"
-        },
-        {
-          "href": "/ogcapi/collections/chirps3_precipitation_daily",
-          "rel": "ogc-collection",
-          "title": "OGC collection"
         }
       ],
       "publication": {
@@ -345,9 +331,9 @@ Both endpoints are advertised as `assets` in the STAC collection:
 }
 ```
 
-## 10. Access published STAC and OGC collections
+## 10. Access published STAC collections
 
-Published Zarr-backed datasets are exposed through `/stac` for discovery and `/ogcapi` for OGC collection and coverage access.
+Published Zarr-backed datasets are exposed through `/stac` for discovery.
 
 STAC examples:
 
@@ -356,20 +342,11 @@ curl -s "http://127.0.0.1:8000/stac/catalog.json" | jq
 curl -s "http://127.0.0.1:8000/stac/collections/chirps3_precipitation_daily" | jq
 ```
 
-Examples:
-
-```bash
-curl -s "http://127.0.0.1:8000/ogcapi/collections?f=json" | jq
-curl -s "http://127.0.0.1:8000/ogcapi/collections/chirps3_precipitation_daily?f=json" | jq
-curl -s "http://127.0.0.1:8000/ogcapi/collections/chirps3_precipitation_daily/coverage?f=json" | jq
-```
-
 What this means:
 
 - `/stac` is the public STAC discovery surface for published Zarr-backed datasets
-- `/ogcapi` is the public OGC collection and coverage surface
 - native FastAPI no longer exposes `/collections`
-- dataset responses can include both `/stac/collections/{dataset_id}` and `/ogcapi/collections/{dataset_id}`
+- dataset responses include `/stac/collections/{dataset_id}`
 
 ## 11. `/sync`
 
@@ -453,8 +430,6 @@ Expected:
 curl -s "http://127.0.0.1:8000/datasets/chirps3_precipitation_daily" | jq
 curl -s "http://127.0.0.1:8000/stac/collections/chirps3_precipitation_daily" | jq
 curl -s "http://127.0.0.1:8000/zarr/chirps3_precipitation_daily" | jq
-curl -s "http://127.0.0.1:8000/ogcapi/collections/chirps3_precipitation_daily?f=json" | jq
-curl -s "http://127.0.0.1:8000/ogcapi/collections/chirps3_precipitation_daily/coverage?f=json" | jq
 ```
 
 ### 4. Dry-run a CHIRPS3 append sync
@@ -625,6 +600,5 @@ The public contract is now:
 - discover managed datasets with `/datasets`
 - discover published Zarr-backed datasets with `/stac/catalog.json`
 - access raw native data with `/zarr/{dataset_id}`
-- access standards-facing publication with `/ogcapi`
 
 Artifacts remain internal because Open Climate Service still needs storage and provenance records behind ingestion and publication, but those internals are no longer exposed as first-class public resources.

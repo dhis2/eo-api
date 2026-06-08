@@ -15,7 +15,6 @@ from open_climate_service.ingestions import routes as ingestion_routes
 from open_climate_service.jobs.service import get_job_service
 from open_climate_service.openeo import routes as openeo_routes
 from open_climate_service.openeo.jobs import get_openeo_job_service
-from open_climate_service.pygeoapi_app import mount_pygeoapi
 from open_climate_service.stac import routes as stac_routes
 from open_climate_service.system import routes as system_routes
 
@@ -148,8 +147,6 @@ def create_app() -> FastAPI:
     _app.include_router(ingestion_routes.icechunk_router, prefix="/icechunk", tags=["Icechunk"])
     _app.include_router(ingestion_routes.sync_router, prefix="/sync", tags=["Sync"])
     _app.include_router(openeo_routes.processes_router, prefix="/processes", tags=["openEO"])
-
-    mount_pygeoapi(_app)
 
     return _app
 

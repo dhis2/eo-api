@@ -57,7 +57,6 @@ def _artifact(
         publication=ArtifactPublication(
             status=PublicationStatus.PUBLISHED,
             collection_id=managed_dataset_id,
-            pygeoapi_path=f"/ogcapi/collections/{managed_dataset_id}",
         ),
     )
 
@@ -141,9 +140,8 @@ def test_dataset_links_omit_stac_for_unpublished_or_netcdf() -> None:
     assert all(link.rel != "stac" for link in netcdf_links)
 
 
-def test_dataset_links_include_zarr_and_stac_for_icechunk_without_pygeoapi() -> None:
+def test_dataset_links_include_zarr_and_stac_for_icechunk() -> None:
     artifact = _artifact(artifact_id="a3")
-    artifact.publication.pygeoapi_path = None
 
     links = services._dataset_links("chirps3_precipitation_daily", artifact)
 

@@ -232,6 +232,5 @@ def info() -> AppInfo:
     return AppInfo(
         app_version=_pkg_version("open-climate-service"),
         python_version=sys.version,
-        pygeoapi_version=_pkg_version("pygeoapi"),
         uvicorn_version=_pkg_version("uvicorn"),
     )

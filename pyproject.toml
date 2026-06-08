@@ -47,7 +47,6 @@ dependencies = [
     "starlette>=0.27.0",
     "uvicorn>=0.41.0",
     "python-dotenv>=1.0.1",
-    "pygeoapi>=0.22.0",
     "pystac>=1.10,<2",
     "geojson-pydantic>=2.1.0",
     "httpx>=0.28.1",
@@ -117,7 +116,7 @@ module = "tests.*"
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-module = ["pygeoapi.*", "rasterio.*", "pygeofilter.*", "requests.*", "geopandas.*", "earthkit.*", "metpy.*", "matplotlib.*", "yaml", "xproj", "topozarr.*", "geozarr_toolkit", "xstac", "openeo_pg_parser_networkx", "openeo_pg_parser_networkx.*", "openeo_processes_dask_slim", "openeo_processes_dask_slim.*", "dask_geopandas", "dask_geopandas.*", "xclim", "xclim.*"]
+module = ["rasterio.*", "pygeofilter.*", "requests.*", "geopandas.*", "earthkit.*", "metpy.*", "matplotlib.*", "yaml", "xproj", "topozarr.*", "geozarr_toolkit", "xstac", "openeo_pg_parser_networkx", "openeo_pg_parser_networkx.*", "openeo_processes_dask_slim", "openeo_processes_dask_slim.*", "dask_geopandas", "dask_geopandas.*", "xclim", "xclim.*"]
 ignore_missing_imports = true
 
 [tool.pyright]

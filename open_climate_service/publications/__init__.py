@@ -1,1 +1,1 @@
-"""pygeoapi publication helpers."""
+"""Artifact publication helpers."""

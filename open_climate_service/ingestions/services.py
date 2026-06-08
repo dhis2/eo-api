@@ -496,7 +496,7 @@ def register_artifact_record(record: ArtifactRecord, *, publish: bool) -> Artifa
 
 
 def publish_artifact_record(artifact_id: str) -> ArtifactRecord:
-    """Publish an artifact via pygeoapi and persist publication metadata."""
+    """Publish an artifact and persist publication metadata."""
     published = publish_artifact(get_artifact_or_404(artifact_id))
 
     def mutate(records: list[ArtifactRecord]) -> ArtifactRecord:
@@ -1149,10 +1149,6 @@ def _dataset_links(dataset_id: str, latest: ArtifactRecord) -> list[DatasetAcces
     if latest.format == ArtifactFormat.NETCDF:
         links.append(
             DatasetAccessLink(href=f"/datasets/{dataset_id}/download", rel="download", title="Download NetCDF")
-        )
-    if latest.publication.pygeoapi_path is not None:
-        links.append(
-            DatasetAccessLink(href=latest.publication.pygeoapi_path, rel="ogc-collection", title="OGC collection")
         )
     return links
 
