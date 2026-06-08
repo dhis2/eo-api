@@ -21,12 +21,11 @@ open_climate_service/
   data_accessor/    # open zarr / netcdf for read (accessor.py)
   data_registry/    # dataset template YAML loading
   ingestions/       # artifact lifecycle: create, list, sync, publish
-  publications/     # pygeoapi config generation
+  publications/     # STAC publication metadata
   extents/          # spatial extent config
   shared/           # dhis2 adapter, time utils
   main.py           # FastAPI app, CORS middleware, route registration
 data/datasets/      # dataset template YAMLs (chirps3.yaml, worldpop.yaml, …)
-config/pygeoapi/    # pygeoapi base config
 tests/
 docs/
 ```
@@ -34,13 +33,13 @@ docs/
 ## Development
 
 ```bash
-make run      # start uvicorn with --reload (also generates pygeoapi OpenAPI spec)
+make run      # start uvicorn with --reload
 make lint     # ruff check + ruff format + mypy + pyright
 make test     # pytest
 make start    # docker compose up --build
 ```
 
-The `.env` file is required for `make run` and `make openapi`. Copy `.env.example` if it exists.
+The `.env` file is required for `make run`. Copy `.env.example` if it exists.
 
 ## Dataset templates
 
@@ -55,12 +54,6 @@ ingestion:
 `build_dataset_zarr` in `data_manager/downloader.py` builds a multiscale Zarr pyramid when the spatial dimensions exceed 2048×2048 pixels; otherwise it writes a flat chunked zarr with chunk sizes derived from the dataset's temporal resolution.
 
 The ingestion interface is being redesigned as a plugin protocol (see GitHub issue #64) — the `ingestion.function` convention will be replaced by a three-method async plugin (`probe`, `periods`, `fetch_period`).
-
-## pygeoapi
-
-pygeoapi is mounted at `/ogcapi` as a sub-application. Its config is generated dynamically from published artifacts by `publications/services.py` and written to `data/pygeoapi/pygeoapi-config.yml`.
-
-The config is regenerated on each `publish_artifact` call and also at startup via `ensure_pygeoapi_base_config()`.
 
 ## Active design work
 

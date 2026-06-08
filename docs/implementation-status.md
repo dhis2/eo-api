@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This note captures the current implementation state of the branch after the API consolidation around ingestions, datasets, extents, raw Zarr access, STAC discovery, and pygeoapi publication.
+This note captures the current implementation state of the branch after the API consolidation around ingestions, datasets, extents, raw Zarr access, and STAC discovery and publication.
 
 It is intended to answer:
 
@@ -18,7 +18,7 @@ The main branch now centers on one narrow vertical slice:
 1. define dataset templates in the Open Climate Service registry
 2. define configured extents for the Open Climate Service instance
 3. ingest data into a managed dataset for one dataset template plus one extent
-4. publish that managed dataset through `pygeoapi` under `/ogcapi`
+4. publish that managed dataset as a STAC collection under `/stac`
 5. expose native metadata under `/datasets`, STAC discovery under `/stac`, and raw Zarr access under `/zarr`
 6. sync existing managed datasets forward through `/sync`
 
@@ -30,7 +30,6 @@ The public surface is intentionally small:
 - `/stac/...`
 - `/zarr/{dataset_id}`
 - `/sync/{dataset_id}`
-- `/ogcapi/...`
 
 ## Main Code References
 
@@ -49,7 +48,7 @@ The public surface is intentionally small:
 - [open_climate_service/extents/services.py](../open_climate_service/extents/services.py)
   - extent registry backed by CLIMATE_SERVICE_CONFIG
 - [open_climate_service/publications/services.py](../open_climate_service/publications/services.py)
-  - pygeoapi publication and stable managed dataset id logic
+  - artifact publication and stable managed dataset id logic
 - `extent:` block in `climate-service.yaml` (CLIMATE_SERVICE_CONFIG)
   - configured spatial extent for this Open Climate Service instance
 
@@ -157,15 +156,14 @@ Current STAC details:
 - spatial `step` values are rounded for readability while preserving axis direction
 - an opt-in live interoperability smoke test exists at `tests/integration/test_stac_interop.py`
 
-### 7. pygeoapi remains the OGC query and coverage surface
+### 7. STAC is the publication surface
 
-Published datasets are exposed through:
+Published datasets are exposed as STAC collections:
 
-- `/ogcapi/collections`
-- `/ogcapi/collections/{dataset_id}`
-- `/ogcapi/collections/{dataset_id}/coverage`
+- `/stac/catalog.json`
+- `/stac/collections/{dataset_id}`
 
-From the native FastAPI side, dataset responses include publication state and links to the OGC collection, but the collection resource itself is only public under `/ogcapi`.
+Dataset responses on the native FastAPI side include publication state and a link to the STAC collection. (The previous OGC API surface has been removed.)
 
 ### 8. Internal artifacts still exist as a storage/provenance model
 
@@ -215,23 +213,20 @@ Implemented sync behavior:
 6. Open Climate Service prefers Zarr materialization and falls back to NetCDF when needed
 7. Open Climate Service computes realized coverage metadata
 8. Open Climate Service stores an internal artifact record
-9. if `publish=true`, Open Climate Service publishes the dataset through pygeoapi
+9. if `publish=true`, Open Climate Service publishes the dataset as a STAC collection
 10. the route returns the public managed dataset view
 
 ### Dataset publication
 
 1. publication derives a stable managed dataset id
-2. pygeoapi resources are regenerated from published internal artifacts
-3. STAC collection documents are derived dynamically from the same published artifact state
-4. the mounted pygeoapi sub-application is refreshed in process
-5. the dataset becomes available immediately under `/stac/collections/{dataset_id}` and `/ogcapi/collections/{dataset_id}`
+2. STAC collection documents are derived dynamically from the published artifact state
+3. the dataset becomes available immediately under `/stac/collections/{dataset_id}`
 
 ### Raw data access
 
 1. `/datasets/{dataset_id}` exposes native metadata and version summary
 2. `/stac/collections/{dataset_id}` exposes standards-friendly discovery metadata for direct Zarr-opening clients
 3. `/zarr/{dataset_id}` exposes the raw Zarr store layout when the latest version is Zarr-backed
-4. `/ogcapi/collections/{dataset_id}/coverage` exposes standards-facing coverage access
 
 ### Sync
 
@@ -263,9 +258,6 @@ Implemented sync behavior:
 - `GET /stac`
 - `GET /stac/catalog.json`
 - `GET /stac/collections/{dataset_id}`
-- `GET /ogcapi/collections`
-- `GET /ogcapi/collections/{dataset_id}`
-- `GET /ogcapi/collections/{dataset_id}/coverage`
 
 ## What Is Still Deferred
 
@@ -286,6 +278,5 @@ The branch now presents a much cleaner product story:
 4. discover published Zarr-backed datasets under `/stac/catalog.json`
 5. access raw Zarr under `/zarr/{dataset_id}`
 6. sync managed datasets through `/sync/{dataset_id}`
-7. use `/ogcapi` for standards-facing query and coverage access
 
 Internal artifacts still exist, but only as a storage and provenance model.
