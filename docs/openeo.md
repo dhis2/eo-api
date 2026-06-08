@@ -314,8 +314,8 @@ openEO is an additional access layer on top of the existing dataset store — th
 
 ## Examples
 
-- [`examples/openeo_process_graph.py`](../examples/openeo_process_graph.py) — full end-to-end walkthrough using the openEO Python client
-- [`examples/zonal_statistics.py`](../examples/zonal_statistics.py) — district-level statistics with DHIS2 organisation unit IDs via `aggregate_spatial` and `rename_labels`
+- [`examples/openeo_process_graph.py`](https://github.com/dhis2/open-climate-service/blob/main/examples/openeo_process_graph.py) — full end-to-end walkthrough using the openEO Python client
+- [`examples/zonal_statistics.py`](https://github.com/dhis2/open-climate-service/blob/main/examples/zonal_statistics.py) — district-level statistics with DHIS2 organisation unit IDs via `aggregate_spatial` and `rename_labels`
 
 ---
 

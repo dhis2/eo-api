@@ -103,4 +103,4 @@ transforms:
   - myplugin.transforms.my_transform
 ```
 
-For built-in and custom transform examples, see [Extensibility — Transform functions](extensibility.md#transform-functions).
+Transforms are declared in a dataset template — see [Adding custom datasets](adding_custom_datasets.md) for the full template reference.

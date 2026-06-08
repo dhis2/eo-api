@@ -33,21 +33,21 @@ The public surface is intentionally small:
 
 ## Main Code References
 
-- [open_climate_service/main.py](../open_climate_service/main.py)
+- [open_climate_service/main.py](https://github.com/dhis2/open-climate-service/blob/main/open_climate_service/main.py)
   - app assembly and router mounting
-- [open_climate_service/ingestions/routes.py](../open_climate_service/ingestions/routes.py)
+- [open_climate_service/ingestions/routes.py](https://github.com/dhis2/open-climate-service/blob/main/open_climate_service/ingestions/routes.py)
   - ingestion, dataset, zarr, and sync routes
-- [open_climate_service/ingestions/services.py](../open_climate_service/ingestions/services.py)
+- [open_climate_service/ingestions/services.py](https://github.com/dhis2/open-climate-service/blob/main/open_climate_service/ingestions/services.py)
   - internal artifact persistence, dataset grouping, sync service wiring, Zarr browsing
-- [open_climate_service/ingestions/sync_engine.py](../open_climate_service/ingestions/sync_engine.py)
+- [open_climate_service/ingestions/sync_engine.py](https://github.com/dhis2/open-climate-service/blob/main/open_climate_service/ingestions/sync_engine.py)
   - sync planning and execution engine
-- [open_climate_service/ingestions/schemas.py](../open_climate_service/ingestions/schemas.py)
+- [open_climate_service/ingestions/schemas.py](https://github.com/dhis2/open-climate-service/blob/main/open_climate_service/ingestions/schemas.py)
   - public ingestion, dataset, and sync contracts
-- [open_climate_service/extents/routes.py](../open_climate_service/extents/routes.py)
+- [open_climate_service/extents/routes.py](https://github.com/dhis2/open-climate-service/blob/main/open_climate_service/extents/routes.py)
   - extent discovery endpoint
-- [open_climate_service/extents/services.py](../open_climate_service/extents/services.py)
+- [open_climate_service/extents/services.py](https://github.com/dhis2/open-climate-service/blob/main/open_climate_service/extents/services.py)
   - extent registry backed by CLIMATE_SERVICE_CONFIG
-- [open_climate_service/publications/services.py](../open_climate_service/publications/services.py)
+- [open_climate_service/publications/services.py](https://github.com/dhis2/open-climate-service/blob/main/open_climate_service/publications/services.py)
   - artifact publication and stable managed dataset id logic
 - `extent:` block in `climate-service.yaml` (CLIMATE_SERVICE_CONFIG)
   - configured spatial extent for this Open Climate Service instance

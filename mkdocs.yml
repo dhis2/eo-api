@@ -1,6 +1,6 @@
 site_name: Open Climate Service
 site_description: Climate data tailored for your country, ready for climate-smart decisions
-site_url: https://dhis2.github.io/climate-service/
+site_url: https://dhis2.github.io/open-climate-service/
 repo_url: https://github.com/dhis2/open-climate-service
 repo_name: dhis2/open-climate-service
 docs_dir: docs
@@ -70,7 +70,6 @@ nav:
       - Zarr and GeoZarr: zarr_and_geozarr.md
       - Project overview: project_description.md
       - Implementation status: implementation-status.md
-      - OGC API: ogcapi.md
   - Guides:
       - Accessing data: user_guide.md
       - openEO: openeo.md
@@ -81,6 +80,8 @@ nav:
       - Workflows: workflows.md
       - Instance guide: instance_guide.md
       - Adding custom datasets: adding_custom_datasets.md
+      - Transforms: transforms.md
       - Extensibility: extensibility.md
       - API reference: managed_data_api_guide.md
   - Roadmap: roadmap.md
+  - Team: team.md

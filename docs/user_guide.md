@@ -125,7 +125,7 @@ print(spatial_mean.to_dataframe())
 
 ## What's next
 
-- **Process data** — run temporal aggregations, spatial filters, and custom calculations via openEO process graphs. See [openeo.md](openeo.md) and [`examples/openeo_process_graph.py`](../examples/openeo_process_graph.py).
+- **Process data** — run temporal aggregations, spatial filters, and custom calculations via openEO process graphs. See [openeo.md](openeo.md) and [`examples/openeo_process_graph.py`](https://github.com/dhis2/open-climate-service/blob/main/examples/openeo_process_graph.py).
 - **Built-in datasets** — coverage, units, and sync behaviour of each source. See [built_in_datasets.md](built_in_datasets.md).
-- **Discovery scripts** — [`examples/stac_discover_and_open.py`](../examples/stac_discover_and_open.py) and [`examples/zarr_direct_access.py`](../examples/zarr_direct_access.py).
+- **Discovery scripts** — [`examples/stac_discover_and_open.py`](https://github.com/dhis2/open-climate-service/blob/main/examples/stac_discover_and_open.py) and [`examples/zarr_direct_access.py`](https://github.com/dhis2/open-climate-service/blob/main/examples/zarr_direct_access.py).
 - **Admin API** — ingestion, sync, and publication reference. See [managed_data_api_guide.md](managed_data_api_guide.md).

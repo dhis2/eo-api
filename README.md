@@ -1,8 +1,8 @@
 # Open Climate Service
 
-Climate and Earth Observation data is distributed across dozens of providers — each with different APIs, data formats, and access mechanisms. The Open Climate Service unifies this fragmented landscape behind a single, consistent interface.
+Open Climate Service is an open-source platform that aims to turn fragmented climate and earth observation data — scattered across dozens of providers, formats, and APIs — into decision-ready data for climate-smart action.
 
-Each instance is configured for a specific country or region, and all data extraction, processing, and storage is scoped to that spatial extent. It abstracts data access across heterogeneous sources (CHIRPS, ERA5, WorldPop, and others), stores outputs as GeoZarr, and exposes them through standards-based endpoints.
+Each instance is configured for a specific country or region: it scopes all data extraction, processing, and storage to that spatial extent, draws from heterogeneous sources (CHIRPS, ERA5, WorldPop, and others), stores outputs as GeoZarr, and exposes them through open standards.
 
 The platform is designed to operate independently of DHIS2 and can be deployed on local, cloud-hosted, or sovereign country infrastructure. See [docs/setup_guide.md](docs/setup_guide.md) for a step-by-step setup walkthrough, [docs/user_guide.md](docs/user_guide.md) for data access examples, [docs/managed_data_api_guide.md](docs/managed_data_api_guide.md) for the full API reference, and [docs/roadmap.md](docs/roadmap.md) for the planned development steps.
 

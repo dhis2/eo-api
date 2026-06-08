@@ -91,7 +91,7 @@ Core parts of the Open Climate Service must function without a connected DHIS2 i
 
 Internally, the Open Climate Service distinguishes between dataset templates and published datasets:
 
-- **Dataset templates** — YAML definitions describing a dataset type (source, variable, period type, processing steps). These are internal and align closely with the OGC API Collections specification. They act as blueprints for ingestion.
+- **Dataset templates** — YAML definitions describing a dataset type (source, variable, period type, processing steps). These are internal and act as blueprints for ingestion.
 - **Published datasets** — actualised, ingested datasets for a specific extent and time range, exposed under `/datasets` and `/stac`. These are what end users and client applications discover and consume.
 
 This mirrors the approach used in the CHAP Modelling Platform, where generic model template YAMLs are distinguished from specific initialised instances.
@@ -116,14 +116,14 @@ This mirrors the approach used in the CHAP Modelling Platform, where generic mod
 ### 6.3 Visualisation
 
 - Support on-the-fly map tile rendering with custom styling.
-- Support image tile generation using TiTiler (following the OGC API — Tiles specification as closely as possible).
+- Support image tile generation using TiTiler.
 - Support direct browser rendering of Zarr data via zarr-layer (MapLibre custom layer) with GPU reprojection from EPSG:4326 to Spherical Mercator and client-side dynamic colour classification.
 - Support point queries (single location time series) for preview before import.
 
 ### 6.4 Aggregation
 
 - Aggregate raster data to org unit polygons (or any GeoJSON feature collection).
-- Support async execution for long-running aggregation jobs (OGC API Processes pattern).
+- Support async execution for long-running aggregation jobs (openEO batch jobs).
 - Support demographic disaggregation for WorldPop data (age/sex bands as additional Zarr dimensions).
 
 ### 6.5 Integration
@@ -221,7 +221,7 @@ Long-running jobs (ingestion, sync, aggregation) are executed asynchronously. Th
 | rechunker                     | Reshapes existing Zarr stores to a new chunk layout without full rewrite. Used for per-dataset chunk shape tuning.                                                                       |
 | cf-xarray                     | CF convention handling — maps standard dimension names and attributes across source datasets.                                                                                            |
 | numba                         | JIT compilation for custom processing functions (e.g. consecutive rainy days, heat index) applied pixel-wise over large arrays.                                                          |
-| TiTiler                       | On-the-fly raster tile server. Serves map tiles with dynamic styling, following OGC API - Tiles specification.                                                                           |
+| TiTiler                       | On-the-fly raster tile server. Serves map tiles with dynamic styling.                                                                                                                    |
 | fsspec                        | Unified filesystem abstraction for storage backends (local, S3-compatible, Azure Blob, GCS, Ceph/RGW). Backend is environment-variable configuration only.                               |
 | zarr-layer (MapLibre)         | TypeScript library for rendering Zarr directly as a native MapLibre Custom Layer in the browser. GPU reprojection from EPSG:4326 to Spherical Mercator; uses multiscale levels per zoom. |
 | Docker                        | Containerised deployment. Supports local, cloud-hosted, and country sovereign deployments.                                                                                               |
@@ -233,17 +233,15 @@ Long-running jobs (ingestion, sync, aggregation) are executed asynchronously. Th
 
 ## 9. Standards compliance
 
-The Open Climate Service is designed to be standards-compliant and interoperable. Key standards:
+The Open Climate Service favours open, widely-supported standards over bespoke interfaces:
 
-- **OGC API — Coverages**: raw grid access and subsetting.
-- **OGC API — EDR** (Environmental Data Retrieval): point and area time series queries.
-- **OGC API — Processes**: async zonal aggregation execution.
-- **OGC API — Tiles and Maps**: raster tile serving with dynamic styling.
-- **OGC API — Collections**: unified dataset discovery.
-- **GeoZarr specification**: geospatial metadata conventions for Zarr stores.
+- **GeoZarr specification**: geospatial metadata conventions for cloud-native, chunked, multiscale Zarr stores.
 - **STAC** (SpatioTemporal Asset Catalog): dataset discovery and asset linking.
+- **openEO**: a standard HTTP API and process-graph model for querying and processing datasets (see [openEO](openeo.md)).
 - **CF Conventions**: coordinate metadata for Xarray/Zarr datasets.
-- **FAIR principles**: datasets are Findable (STAC + `/datasets`), Accessible (open HTTP range requests), Interoperable (OGC APIs + standard formats), and Reusable (documented metadata and provenance).
+- **FAIR principles**: datasets are Findable (STAC + `/datasets`), Accessible (open HTTP range requests), Interoperable (standard formats and APIs), and Reusable (documented metadata and provenance).
+
+> An earlier design targeted OGC API profiles (Coverages, EDR, Processes, Tiles and Maps, Collections). These were dropped in favour of the lighter-weight combination above — STAC for discovery, Zarr over HTTP for access, and openEO for processing.
 
 ---
 
