@@ -23,7 +23,7 @@ from open_climate_service.openeo.execution import (
 )
 from open_climate_service.openeo.jobs import (
     OpenEOJobService,
-    _build_dhis2_dvs_payload,
+    _build_dhis2_json_payload,
     _derive_coverage,
     _derive_variable,
     _infer_period_type,
@@ -208,7 +208,7 @@ def test_persist_result_geodataframe_writes_geojson(job_service: OpenEOJobServic
     assert output_path.endswith(".geojson")
 
 
-def test_persist_result_dataset_writes_dhis2_dvs_json(job_service: OpenEOJobService) -> None:
+def test_persist_result_dataset_writes_dhis2_json(job_service: OpenEOJobService) -> None:
     ds = xr.Dataset(
         {
             "precip": xr.DataArray(
@@ -226,7 +226,7 @@ def test_persist_result_dataset_writes_dhis2_dvs_json(job_service: OpenEOJobServ
         "job-dhis2",
         SaveResultEnvelope(
             ds,
-            "DHIS2DVSJSON",
+            "DHIS2JSON",
             {
                 "data_element_id": "DE_123",
                 "org_unit_field": "geometry",
@@ -548,7 +548,7 @@ def test_result_route_reprojects_geojson_payload_to_wgs84(client: TestClient, mo
     assert coords[1] == pytest.approx(1.0, rel=0, abs=1e-6)
 
 
-def test_result_route_returns_dhis2_dvs_json_payload(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_result_route_returns_dhis2_json_payload(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     ds = xr.Dataset(
         {
             "precip": xr.DataArray(
@@ -566,7 +566,7 @@ def test_result_route_returns_dhis2_dvs_json_payload(client: TestClient, monkeyp
         del args, kwargs
         return SaveResultEnvelope(
             ds,
-            "DHIS2DVSJSON",
+            "DHIS2JSON",
             {
                 "data_element_id": "DE_123",
                 "org_unit_field": "geometry",
@@ -632,7 +632,7 @@ def test_result_route_returns_400_for_missing_dhis2_option(client: TestClient, m
         del args, kwargs
         return SaveResultEnvelope(
             ds,
-            "DHIS2DVSJSON",
+            "DHIS2JSON",
             {
                 "org_unit_field": "geometry",
                 "period_type": "monthly",
@@ -653,8 +653,8 @@ def test_result_route_returns_400_for_missing_dhis2_option(client: TestClient, m
     assert "Missing required export option 'data_element_id'" in response.json()["detail"]
 
 
-def test_dhis2_dvs_payload_omits_nulls_and_formats_values() -> None:
-    payload = _build_dhis2_dvs_payload(
+def test_dhis2_json_payload_omits_nulls_and_formats_values() -> None:
+    payload = _build_dhis2_json_payload(
         [
             {"t": "2024-01-01", "geometry": "OU_1", "precip": 1e-05},
             {"t": "2024-01-02", "geometry": "OU_2", "precip": None},
@@ -678,17 +678,17 @@ def test_dhis2_dvs_payload_omits_nulls_and_formats_values() -> None:
     }
 
 
-def test_dhis2_dvs_payload_requires_org_unit_field() -> None:
+def test_dhis2_json_payload_requires_org_unit_field() -> None:
     with pytest.raises(ValueError, match="Missing required export option 'org_unit_field'"):
-        _build_dhis2_dvs_payload(
+        _build_dhis2_json_payload(
             [{"t": "2024-01-01", "precip": 1.5}],
             {"data_element_id": "DE_123", "period_type": "daily"},
         )
 
 
-def test_dhis2_dvs_payload_requires_period_field_column() -> None:
+def test_dhis2_json_payload_requires_period_field_column() -> None:
     with pytest.raises(ValueError, match="Missing period field 't' in aggregated result"):
-        _build_dhis2_dvs_payload(
+        _build_dhis2_json_payload(
             [{"geometry": "OU_1", "precip": 1.5}],
             {
                 "data_element_id": "DE_123",
@@ -698,9 +698,9 @@ def test_dhis2_dvs_payload_requires_period_field_column() -> None:
         )
 
 
-def test_dhis2_dvs_payload_rejects_multiple_value_columns() -> None:
+def test_dhis2_json_payload_rejects_multiple_value_columns() -> None:
     with pytest.raises(ValueError, match="requires exactly one value column"):
-        _build_dhis2_dvs_payload(
+        _build_dhis2_json_payload(
             [{"t": "2024-01-01", "geometry": "OU_1", "precip": 1.5, "temp": 22.0}],
             {
                 "data_element_id": "DE_123",

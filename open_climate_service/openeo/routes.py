@@ -118,8 +118,8 @@ def file_formats() -> dict[str, Any]:
             "parameters": {},
             "links": [{"rel": "about", "href": "https://geoparquet.org"}],
         },
-        "DHIS2DVSJSON": {
-            "title": "DHIS2 data value set JSON",
+        "DHIS2JSON": {
+            "title": "DHIS2 JSON",
             "description": (
                 "DHIS2 import-ready JSON dataValues envelope for aggregated org-unit results. "
                 "Requires save_result options such as data_element_id, org_unit_field, and period_type."
@@ -300,10 +300,10 @@ _RESULT_MEDIA_TYPES: dict[str, str] = {
 
 
 def _json_tabular_payload_response(frame: Any, options: dict[str, Any]) -> JSONResponse:
-    from open_climate_service.openeo.jobs import _build_dhis2_dvs_payload
+    from open_climate_service.openeo.jobs import _build_dhis2_json_payload
 
     try:
-        payload = _build_dhis2_dvs_payload(frame, options)
+        payload = _build_dhis2_json_payload(frame, options)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse(payload)

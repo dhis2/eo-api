@@ -819,7 +819,7 @@ _VECTOR_FORMATS: dict[str, tuple[str, str]] = {
 }
 
 _TABULAR_EXPORT_FORMATS: dict[str, tuple[str, str]] = {
-    "DHIS2DVSJSON": (".json", "application/json"),
+    "DHIS2JSON": (".json", "application/json"),
 }
 
 
@@ -921,20 +921,20 @@ def _write_dataset_tabular_export(ds: Any, results_dir: Any, fmt: str, options: 
 
 
 def _write_tabular_export(df: Any, results_dir: Any, fmt: str, options: dict[str, Any]) -> str | None:
-    if fmt == "DHIS2DVSJSON":
-        return _write_dhis2_dvs_json(df, results_dir, options)
+    if fmt == "DHIS2JSON":
+        return _write_dhis2_json(df, results_dir, options)
     known = ", ".join(sorted(_TABULAR_EXPORT_FORMATS))
     raise ValueError(f"Unsupported tabular export format '{fmt}'. Known formats: {known}")
 
 
-def _write_dhis2_dvs_json(df: Any, results_dir: Any, options: dict[str, Any]) -> str:
-    payload = _build_dhis2_dvs_payload(df, options)
+def _write_dhis2_json(df: Any, results_dir: Any, options: dict[str, Any]) -> str:
+    payload = _build_dhis2_json_payload(df, options)
     path = str(results_dir / "result.json")
     Path(path).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     return path
 
 
-def _build_dhis2_dvs_payload(df: Any, options: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+def _build_dhis2_json_payload(df: Any, options: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
     import pandas as pd
 
     data_element_id = _required_str_option(options, "data_element_id")
@@ -1006,7 +1006,7 @@ def _select_dhis2_value_field(frame: Any, org_unit_field: str, period_field: str
     candidates = [str(c) for c in frame.columns if c not in excluded and not str(c).startswith("level_")]
     if len(candidates) != 1:
         raise ValueError(
-            "DHIS2DVSJSON export requires exactly one value column after excluding "
+            "DHIS2JSON export requires exactly one value column after excluding "
             f"'{org_unit_field}' and '{period_field}', found {candidates}"
         )
     return candidates[0]
