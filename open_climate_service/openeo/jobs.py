@@ -5,9 +5,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
+from decimal import Decimal
+from numbers import Real
 from pathlib import Path
 from typing import Any, TypeVar
 from uuid import uuid4
@@ -434,6 +437,8 @@ class OpenEOJobService:
                 # managed dataset via a marker that _result_assets expands into
                 # /datasets, /zarr (and /stac when published) result links.
                 return f"managed://{options['dataset_id']}"
+            if fmt in _TABULAR_EXPORT_FORMATS:
+                return _write_dataset_tabular_export(result, results_dir, fmt, options)
             return _write_raster(result, results_dir, fmt)
 
         # Tabular: resolve dask_geopandas → GeoDataFrame
@@ -449,6 +454,8 @@ class OpenEOJobService:
             import geopandas as gpd
 
             if isinstance(result, gpd.GeoDataFrame):
+                if fmt in _TABULAR_EXPORT_FORMATS:
+                    return _write_tabular_export(result, results_dir, fmt, options)
                 return _write_vector(result, results_dir, fmt)
         except ImportError:
             pass
@@ -771,6 +778,7 @@ def _result_assets(record: OpenEOJobRecord) -> dict[str, Any]:
         ".tif": ("image/tiff; subtype=geotiff", "GeoTIFF result"),
         ".png": ("image/png", "PNG result"),
         ".csv": ("text/csv", "CSV result"),
+        ".json": ("application/json", "JSON result"),
         ".parquet": ("application/vnd.apache.parquet", "GeoParquet result"),
     }
     for ext, (mime, title) in ext_map.items():
@@ -808,6 +816,10 @@ _VECTOR_FORMATS: dict[str, tuple[str, str]] = {
     "GEOJSON": (".geojson", "application/geo+json"),
     "CSV": (".csv", "text/csv"),
     "PARQUET": (".parquet", "application/vnd.apache.parquet"),
+}
+
+_TABULAR_EXPORT_FORMATS: dict[str, tuple[str, str]] = {
+    "DHIS2JSON": (".json", "application/json"),
 }
 
 
@@ -894,6 +906,223 @@ def _write_vector(gdf: Any, results_dir: Any, fmt: str) -> str | None:
     path = str(results_dir / "result.geojson")
     gdf.to_file(path, driver="GeoJSON")
     return path
+
+
+def _write_dataset_tabular_export(ds: Any, results_dir: Any, fmt: str, options: dict[str, Any]) -> str | None:
+    import pandas as pd
+
+    if hasattr(ds, "to_dataframe"):
+        df = ds.to_dataframe().reset_index()
+    elif isinstance(ds, pd.DataFrame):
+        df = ds
+    else:
+        raise TypeError(f"Unsupported data type for tabular export: {type(ds).__name__}")
+    return _write_tabular_export(df, results_dir, fmt, options)
+
+
+def _write_tabular_export(df: Any, results_dir: Any, fmt: str, options: dict[str, Any]) -> str | None:
+    if fmt == "DHIS2JSON":
+        return _write_dhis2_json(df, results_dir, options)
+    known = ", ".join(sorted(_TABULAR_EXPORT_FORMATS))
+    raise ValueError(f"Unsupported tabular export format '{fmt}'. Known formats: {known}")
+
+
+def _write_dhis2_json(df: Any, results_dir: Any, options: dict[str, Any]) -> str:
+    payload = _build_dhis2_json_payload(df, options)
+    path = str(results_dir / "result.json")
+    Path(path).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _build_dhis2_json_payload(df: Any, options: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+    import pandas as pd
+
+    data_element_id = _required_str_option(options, "data_element_id")
+    org_unit_field = _required_str_option(options, "org_unit_field")
+    period_field = _optional_str_option(options, "period_field") or "t"
+    period_type = _optional_str_option(options, "period_type")
+    category_option_combo = _optional_str_option(options, "category_option_combo")
+
+    frame = pd.DataFrame(df).copy()
+    if org_unit_field not in frame.columns:
+        raise ValueError(f"Missing org unit field '{org_unit_field}' in aggregated result")
+    if period_field not in frame.columns:
+        raise ValueError(f"Missing period field '{period_field}' in aggregated result")
+
+    value_field = _select_dhis2_value_field(frame, org_unit_field, period_field)
+
+    data_values: list[dict[str, str]] = []
+    for record in frame.to_dict(orient="records"):
+        value = record.get(value_field)
+        if _is_nullish(value):
+            continue
+
+        org_unit = record.get(org_unit_field)
+        if _is_nullish(org_unit):
+            raise ValueError(f"Null org unit value in field '{org_unit_field}'")
+
+        period_value = record.get(period_field)
+        if _is_nullish(period_value):
+            raise ValueError(f"Null period value in field '{period_field}'")
+
+        item = {
+            "dataElement": data_element_id,
+            "orgUnit": str(org_unit),
+            "period": _to_dhis2_period_string(period_value, period_type),
+            "value": _to_dhis2_value_string(value),
+        }
+        if category_option_combo is not None:
+            item["categoryOptionCombo"] = category_option_combo
+        data_values.append(item)
+
+    return {"dataValues": data_values}
+
+
+def _required_str_option(options: dict[str, Any], key: str) -> str:
+    value = _optional_str_option(options, key)
+    if value is None:
+        raise ValueError(f"Missing required export option '{key}'")
+    return value
+
+
+def _optional_str_option(options: dict[str, Any], key: str) -> str | None:
+    raw = options.get(key)
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    return value or None
+
+
+def _select_dhis2_value_field(frame: Any, org_unit_field: str, period_field: str) -> str:
+    excluded = {
+        org_unit_field,
+        period_field,
+        "geometry",
+        "spatial_ref",
+        "index",
+        "band",
+        "bands",
+    }
+    candidates = [str(c) for c in frame.columns if c not in excluded and not str(c).startswith("level_")]
+    if len(candidates) != 1:
+        raise ValueError(
+            "DHIS2JSON export requires exactly one value column after excluding "
+            f"'{org_unit_field}' and '{period_field}', found {candidates}"
+        )
+    return candidates[0]
+
+
+def _is_nullish(value: Any) -> bool:
+    import numpy as np
+    import pandas as pd
+
+    result = pd.isna(value)
+    if isinstance(result, (bool, np.bool_)):
+        return bool(result)
+    if isinstance(result, np.ndarray):
+        return bool(result.all())
+    if hasattr(result, "all"):
+        reduced = result.all()
+        if isinstance(reduced, (bool, np.bool_)):
+            return bool(reduced)
+    if value is None:
+        return value is None
+    raise TypeError(f"Unsupported null-check value type '{type(value).__name__}'")
+
+
+def _normalise_period_type(period_type: str | None) -> str | None:
+    if period_type is None:
+        return None
+    value = period_type.strip().lower()
+    aliases = {
+        "day": "daily",
+        "daily": "daily",
+        "week": "weekly",
+        "weekly": "weekly",
+        "month": "monthly",
+        "monthly": "monthly",
+        "quarter": "quarterly",
+        "quarterly": "quarterly",
+        "year": "yearly",
+        "yearly": "yearly",
+    }
+    kind = aliases.get(value)
+    if kind is None:
+        raise ValueError(f"Unsupported period_type '{period_type}'")
+    return kind
+
+
+def _direct_dhis2_period_string(value: str) -> str | None:
+    patterns = (
+        r"^\d{8}$",
+        r"^\d{6}$",
+        r"^\d{4}$",
+        r"^\d{4}W\d{2}$",
+        r"^\d{4}Q[1-4]$",
+    )
+    if any(re.fullmatch(pattern, value) for pattern in patterns):
+        return value
+    return None
+
+
+def _to_dhis2_period_string(value: Any, period_type: str | None = None) -> str:
+    import pandas as pd
+
+    if _is_nullish(value):
+        raise ValueError("Cannot serialize null period value")
+
+    kind = _normalise_period_type(period_type)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Cannot serialize blank period value")
+        direct = _direct_dhis2_period_string(stripped)
+        if direct is not None:
+            return direct
+        if kind is None:
+            raise ValueError(
+                "Ambiguous period value; provide save_result option 'period_type' "
+                "for date-like values that are not already in DHIS2 format"
+            )
+        timestamp = pd.Timestamp(stripped)
+        return _format_dhis2_timestamp(timestamp, kind)
+
+    if kind is None:
+        raise ValueError("Missing required export option 'period_type' for non-string period values")
+
+    timestamp = pd.Timestamp(value)
+    return _format_dhis2_timestamp(timestamp, kind)
+
+
+def _format_dhis2_timestamp(timestamp: Any, period_type: str) -> str:
+    if period_type == "daily":
+        return str(timestamp.strftime("%Y%m%d"))
+    if period_type == "weekly":
+        iso = timestamp.isocalendar()
+        return f"{iso.year}W{iso.week:02d}"
+    if period_type == "monthly":
+        return str(timestamp.strftime("%Y%m"))
+    if period_type == "quarterly":
+        return f"{timestamp.year}Q{timestamp.quarter}"
+    if period_type == "yearly":
+        return str(timestamp.strftime("%Y"))
+    raise ValueError(f"Unsupported period_type '{period_type}'")
+
+
+def _to_dhis2_value_string(value: Any) -> str:
+    import numpy as np
+
+    if _is_nullish(value):
+        raise ValueError("Cannot serialize null value")
+    if isinstance(value, (bool, np.bool_)):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, Decimal):
+        return format(value.normalize(), "f").rstrip("0").rstrip(".") or "0"
+    if isinstance(value, Real):
+        return format(Decimal(str(value)).normalize(), "f").rstrip("0").rstrip(".") or "0"
+    return str(value)
 
 
 def _write_png(ds: Any, results_dir: Any) -> str | None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -22,11 +23,14 @@ from open_climate_service.openeo.execution import (
 )
 from open_climate_service.openeo.jobs import (
     OpenEOJobService,
+    _build_dhis2_json_payload,
     _derive_coverage,
     _derive_variable,
     _infer_period_type,
     _recover_temporal_from_attrs,
     _result_assets,
+    _to_dhis2_period_string,
+    _to_dhis2_value_string,
 )
 from open_climate_service.openeo.schemas import OpenEOJobCreate, OpenEOJobRecord, OpenEOJobStatus
 from open_climate_service.shared.time import utc_now
@@ -204,6 +208,45 @@ def test_persist_result_geodataframe_writes_geojson(job_service: OpenEOJobServic
     assert output_path.endswith(".geojson")
 
 
+def test_persist_result_dataset_writes_dhis2_json(job_service: OpenEOJobService) -> None:
+    ds = xr.Dataset(
+        {
+            "precip": xr.DataArray(
+                np.array([[1.5, np.nan], [2.75, 3.0]], dtype=np.float32),
+                dims=["t", "geometry"],
+                coords={
+                    "t": np.array(["2024-01-01", "2024-02-01"], dtype="datetime64[ns]"),
+                    "geometry": ["OU_1", "OU_2"],
+                },
+            )
+        }
+    )
+
+    output_path = job_service._persist_result(
+        "job-dhis2",
+        SaveResultEnvelope(
+            ds,
+            "DHIS2JSON",
+            {
+                "data_element_id": "DE_123",
+                "org_unit_field": "geometry",
+                "period_type": "monthly",
+            },
+        ),
+    )
+
+    assert output_path is not None
+    assert output_path.endswith("result.json")
+    payload = json.loads(Path(output_path).read_text())
+    assert payload == {
+        "dataValues": [
+            {"dataElement": "DE_123", "orgUnit": "OU_1", "period": "202401", "value": "1.5"},
+            {"dataElement": "DE_123", "orgUnit": "OU_1", "period": "202402", "value": "2.75"},
+            {"dataElement": "DE_123", "orgUnit": "OU_2", "period": "202402", "value": "3"},
+        ]
+    }
+
+
 def test_openeo_job_service_create_execute_and_get_results(
     job_service: OpenEOJobService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -257,6 +300,12 @@ def test_result_assets_geojson() -> None:
     assert assets["result"]["href"].endswith("result.geojson")
 
 
+def test_result_assets_json() -> None:
+    assets = _result_assets(_record("/some/path/result.json"))
+    assert assets["result"]["type"] == "application/json"
+    assert assets["result"]["href"].endswith("result.json")
+
+
 def test_result_assets_none_output_returns_empty() -> None:
     assert _result_assets(_record(None)) == {}
 
@@ -294,6 +343,21 @@ def test_download_result_file_serves_geojson_with_geojson_media_type(
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/geo+json")
+
+
+def test_download_result_file_serves_json_with_json_media_type(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("open_climate_service.openeo.jobs._JOBS_DIR", tmp_path)
+    results_dir = tmp_path / "job-1" / "results"
+    results_dir.mkdir(parents=True)
+    json_path = results_dir / "result.json"
+    json_path.write_text('{"dataValues":[]}')
+
+    response = client.get("/jobs/job-1/results/result.json")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
 
 
 def test_create_job_uses_explicit_title_when_provided(client: TestClient) -> None:
@@ -482,6 +546,203 @@ def test_result_route_reprojects_geojson_payload_to_wgs84(client: TestClient, mo
     coords = payload["features"][0]["geometry"]["coordinates"]
     assert coords[0] == pytest.approx(1.0, rel=0, abs=1e-6)
     assert coords[1] == pytest.approx(1.0, rel=0, abs=1e-6)
+
+
+def test_result_route_returns_dhis2_json_payload(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset(
+        {
+            "precip": xr.DataArray(
+                np.array([[1.5, np.nan], [2.75, 3.0]], dtype=np.float32),
+                dims=["t", "geometry"],
+                coords={
+                    "t": np.array(["2024-01-01", "2024-02-01"], dtype="datetime64[ns]"),
+                    "geometry": ["OU_1", "OU_2"],
+                },
+            )
+        }
+    )
+
+    def return_dhis2_result(*args: object, **kwargs: object) -> SaveResultEnvelope:
+        del args, kwargs
+        return SaveResultEnvelope(
+            ds,
+            "DHIS2JSON",
+            {
+                "data_element_id": "DE_123",
+                "org_unit_field": "geometry",
+                "period_type": "monthly",
+                "category_option_combo": "COC_456",
+            },
+        )
+
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        return_dhis2_result,
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {
+        "dataValues": [
+            {
+                "dataElement": "DE_123",
+                "orgUnit": "OU_1",
+                "period": "202401",
+                "value": "1.5",
+                "categoryOptionCombo": "COC_456",
+            },
+            {
+                "dataElement": "DE_123",
+                "orgUnit": "OU_1",
+                "period": "202402",
+                "value": "2.75",
+                "categoryOptionCombo": "COC_456",
+            },
+            {
+                "dataElement": "DE_123",
+                "orgUnit": "OU_2",
+                "period": "202402",
+                "value": "3",
+                "categoryOptionCombo": "COC_456",
+            },
+        ]
+    }
+
+
+def test_result_route_returns_400_for_missing_dhis2_option(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset(
+        {
+            "precip": xr.DataArray(
+                np.array([[1.5]], dtype=np.float32),
+                dims=["t", "geometry"],
+                coords={
+                    "t": np.array(["2024-01-01"], dtype="datetime64[ns]"),
+                    "geometry": ["OU_1"],
+                },
+            )
+        }
+    )
+
+    def return_invalid_result(*args: object, **kwargs: object) -> SaveResultEnvelope:
+        del args, kwargs
+        return SaveResultEnvelope(
+            ds,
+            "DHIS2JSON",
+            {
+                "org_unit_field": "geometry",
+                "period_type": "monthly",
+            },
+        )
+
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        return_invalid_result,
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 400
+    assert "Missing required export option 'data_element_id'" in response.json()["detail"]
+
+
+def test_dhis2_json_payload_omits_nulls_and_formats_values() -> None:
+    payload = _build_dhis2_json_payload(
+        [
+            {"t": "2024-01-01", "geometry": "OU_1", "precip": 1e-05},
+            {"t": "2024-01-02", "geometry": "OU_2", "precip": None},
+        ],
+        {
+            "data_element_id": "DE_123",
+            "org_unit_field": "geometry",
+            "period_type": "daily",
+        },
+    )
+
+    assert payload == {
+        "dataValues": [
+            {
+                "dataElement": "DE_123",
+                "orgUnit": "OU_1",
+                "period": "20240101",
+                "value": "0.00001",
+            }
+        ]
+    }
+
+
+def test_dhis2_json_payload_requires_org_unit_field() -> None:
+    with pytest.raises(ValueError, match="Missing required export option 'org_unit_field'"):
+        _build_dhis2_json_payload(
+            [{"t": "2024-01-01", "precip": 1.5}],
+            {"data_element_id": "DE_123", "period_type": "daily"},
+        )
+
+
+def test_dhis2_json_payload_requires_period_field_column() -> None:
+    with pytest.raises(ValueError, match="Missing period field 't' in aggregated result"):
+        _build_dhis2_json_payload(
+            [{"geometry": "OU_1", "precip": 1.5}],
+            {
+                "data_element_id": "DE_123",
+                "org_unit_field": "geometry",
+                "period_type": "daily",
+            },
+        )
+
+
+def test_dhis2_json_payload_rejects_multiple_value_columns() -> None:
+    with pytest.raises(ValueError, match="requires exactly one value column"):
+        _build_dhis2_json_payload(
+            [{"t": "2024-01-01", "geometry": "OU_1", "precip": 1.5, "temp": 22.0}],
+            {
+                "data_element_id": "DE_123",
+                "org_unit_field": "geometry",
+                "period_type": "daily",
+            },
+        )
+
+
+def test_dhis2_period_string_supports_weekly_and_quarterly() -> None:
+    assert _to_dhis2_period_string("2024-02-01", "monthly") == "202402"
+    assert _to_dhis2_period_string("2024-02-01", "weekly").startswith("2024W")
+    assert _to_dhis2_period_string("2024-05-01", "quarterly") == "2024Q2"
+
+
+def test_dhis2_period_string_accepts_existing_dhis2_strings_with_period_type() -> None:
+    assert _to_dhis2_period_string("2024Q2", "quarterly") == "2024Q2"
+    assert _to_dhis2_period_string("2024W05", "weekly") == "2024W05"
+
+
+def test_dhis2_period_string_rejects_ambiguous_string_without_period_type() -> None:
+    with pytest.raises(ValueError, match="Ambiguous period value"):
+        _to_dhis2_period_string("2024-02-01")
+
+
+def test_dhis2_period_string_rejects_unsupported_period_type() -> None:
+    with pytest.raises(ValueError, match="Unsupported period_type 'decadal'"):
+        _to_dhis2_period_string("2024-02-01", "decadal")
+
+
+def test_dhis2_value_string_avoids_scientific_notation() -> None:
+    assert _to_dhis2_value_string(1e-05) == "0.00001"
+
+
+def test_dhis2_value_string_formats_numpy_scalars() -> None:
+    assert _to_dhis2_value_string(np.float32(1e-05)) == "0.00001"
+    assert _to_dhis2_value_string(np.int64(42)) == "42"
+
+
+def test_dhis2_value_string_formats_boolean_scalars() -> None:
+    assert _to_dhis2_value_string(True) == "true"
+    assert _to_dhis2_value_string(np.bool_(False)) == "false"
 
 
 # ---------------------------------------------------------------------------
