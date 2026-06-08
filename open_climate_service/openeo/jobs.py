@@ -430,7 +430,10 @@ class OpenEOJobService:
             # Zarr format with dataset_id → write directly to managed Icechunk/Zarr store
             if fmt == "ZARR" and options.get("dataset_id"):
                 _write_managed_zarr(result, options)
-                return None
+                # Managed datasets are not served as job-local files; advertise the
+                # managed dataset via a marker that _result_assets expands into
+                # /datasets, /zarr (and /stac when published) result links.
+                return f"managed://{options['dataset_id']}"
             return _write_raster(result, results_dir, fmt)
 
         # Tabular: resolve dask_geopandas → GeoDataFrame
@@ -712,6 +715,37 @@ def _result_assets(record: OpenEOJobRecord) -> dict[str, Any]:
     output_path = usage.get("output_path")
     if not output_path or not isinstance(output_path, str):
         return {}
+    if output_path.startswith("managed://"):
+        dataset_id = output_path[len("managed://") :]
+        assets: dict[str, Any] = {
+            "dataset": {
+                "href": f"/datasets/{dataset_id}",
+                "type": "application/json",
+                "title": "Managed dataset",
+                "roles": ["metadata"],
+            },
+            "zarr": {
+                "href": f"/zarr/{dataset_id}",
+                "type": "application/vnd.zarr; version=3",
+                "title": "Zarr store",
+                "roles": ["data"],
+                "xarray:open_kwargs": {"consolidated": True},
+            },
+        }
+        # Advertise the STAC collection only when the dataset is actually published.
+        try:
+            from open_climate_service.ingestions import services as _ingestion_services
+
+            if dataset_id in _ingestion_services.latest_published_zarr_artifacts_by_dataset():
+                assets["stac"] = {
+                    "href": f"/stac/collections/{dataset_id}",
+                    "type": "application/json",
+                    "title": "STAC collection",
+                    "roles": ["metadata"],
+                }
+        except Exception:
+            logger.debug("Could not resolve STAC publication for managed dataset '%s'", dataset_id, exc_info=True)
+        return assets
     if output_path.endswith(".zarr"):
         return {
             "result": {

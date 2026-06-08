@@ -261,6 +261,26 @@ def test_result_assets_none_output_returns_empty() -> None:
     assert _result_assets(_record(None)) == {}
 
 
+def test_result_assets_managed_dataset_exposes_links(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Unpublished: dataset + zarr links, no STAC.
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.services.latest_published_zarr_artifacts_by_dataset",
+        lambda: {},
+    )
+    assets = _result_assets(_record("managed://my_aggregate"))
+    assert assets["dataset"]["href"] == "/datasets/my_aggregate"
+    assert assets["zarr"]["href"] == "/zarr/my_aggregate"
+    assert "stac" not in assets
+
+    # Published: STAC collection link is added.
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.services.latest_published_zarr_artifacts_by_dataset",
+        lambda: {"my_aggregate": object()},
+    )
+    published = _result_assets(_record("managed://my_aggregate"))
+    assert published["stac"]["href"] == "/stac/collections/my_aggregate"
+
+
 def test_download_result_file_serves_geojson_with_geojson_media_type(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -499,7 +519,7 @@ def test_persist_result_writes_icechunk_when_dataset_id_in_options(
 
     result = job_service._persist_result("job-managed", envelope)
 
-    assert result is None
+    assert result == "managed://my_aggregate"
     assert (tmp_path / "my_aggregate.icechunk").exists()
     assert len(registered) == 1
     record, publish_flag = registered[0]
