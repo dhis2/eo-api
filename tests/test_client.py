@@ -8,7 +8,6 @@ import pytest
 import xarray as xr
 
 from open_climate_service.client import (
-    Client,
     ClimateService,
     _id_from_href,
     list_datasets,
@@ -173,18 +172,6 @@ def _make_service(base_url: str = "http://localhost") -> tuple[ClimateService, M
     mock_http = MagicMock()
     service._http = mock_http
     return service, mock_http
-
-
-def test_client_is_backwards_compatible_alias() -> None:
-    assert Client is ClimateService
-
-
-def test_catalog_is_alias_of_datasets() -> None:
-    assert ClimateService.catalog is ClimateService.datasets
-
-
-def test_open_is_alias_of_open_dataset() -> None:
-    assert ClimateService.open is ClimateService.open_dataset
 
 
 def test_datasets_uses_persistent_http_session() -> None:

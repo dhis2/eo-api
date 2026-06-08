@@ -210,14 +210,6 @@ class ClimateService:
             return Path(path)
         return response.content
 
-    # Backwards-compatible method aliases (pre-rename names).
-    catalog = datasets
-    open = open_dataset
-
-
-# Backwards-compatible class alias for the pre-rename name.
-Client = ClimateService
-
 
 def list_datasets(base_url: str | None = None) -> list[dict]:
     """Return all published datasets from the STAC catalog (one-shot, no persistent connection).

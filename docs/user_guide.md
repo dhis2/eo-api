@@ -74,9 +74,6 @@ data_value_set = service.execute(
 )
 ```
 
-> The `ClimateService` class was previously named `Client`; the old name remains as an
-> alias, as do `catalog()`/`open()` for `datasets()`/`open_dataset()`.
-
 ## Opening a dataset with xarray
 
 `open_dataset` reads the Zarr asset advertised in the dataset's STAC collection and returns a lazy `xarray.Dataset` (requires the `xarray` extra):
