@@ -19,6 +19,8 @@ from open_climate_service.openeo.execution import (
     SaveResultEnvelope,
     _augment_with_workflows,
     _bbox_to_dict,
+    _ensure_crs,
+    _load_collection_impl,
     _RegistryOverlay,
     _temporal_to_list,
     run_process_graph,
@@ -122,6 +124,61 @@ def test_registry_overlay_tuple_key_uses_name() -> None:
     base: dict[Any, Any] = {}
     overlay = _RegistryOverlay(base, {"bar": proc})
     assert overlay[("predefined", "bar")] is proc
+
+
+# ---------------------------------------------------------------------------
+# _ensure_crs / load_collection CRS tagging (regression for #243)
+# ---------------------------------------------------------------------------
+
+
+def _streaming_style_cube() -> xr.Dataset:
+    """A cube as written by the streaming engine: x/y coords, CRS only in GeoZarr attrs."""
+    ds = xr.Dataset(
+        {"pop": (("t", "y", "x"), np.arange(20, dtype="float32").reshape(1, 4, 5))},
+        coords={
+            "t": np.array(["2021-01-01"], dtype="datetime64[ns]"),
+            "y": np.linspace(10, 7, 4),
+            "x": np.linspace(-13, -10, 5),
+        },
+    )
+    ds.attrs["proj:code"] = "EPSG:4326"  # GeoZarr root attr only — no spatial_ref coord
+    return ds
+
+
+def test_ensure_crs_tags_untagged_streaming_cube() -> None:
+    ds = _streaming_style_cube()
+    import rioxarray  # noqa: F401  # activate .rio  # pyright: ignore[reportUnusedImport]
+
+    assert ds.rio.crs is None  # odc.geo would see a non-georegistered array
+
+    tagged = _ensure_crs(ds)
+
+    assert "spatial_ref" in tagged.coords
+    assert tagged.rio.crs is not None
+    assert tagged.rio.crs.to_epsg() == 4326
+
+
+def test_ensure_crs_is_idempotent_and_preserves_existing_crs() -> None:
+    import rioxarray  # noqa: F401  # pyright: ignore[reportUnusedImport]
+
+    ds = _streaming_style_cube().rio.write_crs("EPSG:32633")  # downloader-path style
+    # proj:code says 4326, but an already-written CRS must win (no override).
+    result = _ensure_crs(ds)
+    assert result.rio.crs.to_epsg() == 32633
+
+
+def test_load_collection_returns_georegistered_cube(monkeypatch: pytest.MonkeyPatch) -> None:
+    import rioxarray  # noqa: F401  # pyright: ignore[reportUnusedImport]
+
+    monkeypatch.setattr("open_climate_service.openeo.execution._get_published_artifact", lambda _id: object())
+    monkeypatch.setattr("open_climate_service.openeo.execution._open_artifact", lambda _a: _streaming_style_cube())
+
+    cube = _load_collection_impl("pop_collection")
+
+    # The returned DataArray must carry a CRS so odc-based processes
+    # (resample_cube_spatial) can georegister it.
+    assert cube.rio.crs is not None
+    assert cube.rio.crs.to_epsg() == 4326
 
 
 # ---------------------------------------------------------------------------
