@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -783,6 +784,7 @@ def _result_assets(record: OpenEOJobRecord) -> dict[str, Any]:
         ".tif": ("image/tiff; subtype=geotiff", "GeoTIFF result"),
         ".png": ("image/png", "PNG result"),
         ".csv": ("text/csv", "CSV result"),
+        ".json": ("application/json", "JSON result"),
         ".parquet": ("application/vnd.apache.parquet", "GeoParquet result"),
     }
     for ext, (mime, title) in ext_map.items():
@@ -824,6 +826,7 @@ _VECTOR_FORMATS: dict[str, tuple[str, str]] = {
 
 _TABULAR_EXPORT_FORMATS: dict[str, tuple[str, str]] = {
     "CHAPCSV": (".csv", "text/csv"),
+    "DHIS2JSON": (".json", "application/json"),
 }
 
 
@@ -921,7 +924,6 @@ def _write_dataset_tabular_export(ds: Any, results_dir: Any, fmt: str, options: 
         inferred = _infer_period_type(ds, period_field)
         if inferred in {"daily", "weekly", "monthly", "quarterly", "yearly"}:
             inferred_options["period_type"] = inferred
-
     if hasattr(ds, "to_dataframe"):
         df = ds.to_dataframe().reset_index()
     elif isinstance(ds, pd.DataFrame):
@@ -934,6 +936,8 @@ def _write_dataset_tabular_export(ds: Any, results_dir: Any, fmt: str, options: 
 def _write_tabular_export(df: Any, results_dir: Any, fmt: str, options: dict[str, Any]) -> str | None:
     if fmt == "CHAPCSV":
         return _write_chap_csv(df, results_dir, options)
+    if fmt == "DHIS2JSON":
+        return _write_dhis2_json(df, results_dir, options)
     known = ", ".join(sorted(_TABULAR_EXPORT_FORMATS))
     raise ValueError(f"Unsupported tabular export format '{fmt}'. Known formats: {known}")
 
@@ -996,12 +1000,89 @@ def _select_chap_value_fields(frame: Any, location_field: str, period_field: str
     return candidates
 
 
+def _write_dhis2_json(df: Any, results_dir: Any, options: dict[str, Any]) -> str:
+    payload = _build_dhis2_json_payload(df, options)
+    path = str(results_dir / "result.json")
+    Path(path).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _build_dhis2_json_payload(df: Any, options: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+    import pandas as pd
+
+    data_element_id = _required_str_option(options, "data_element_id")
+    org_unit_field = _required_str_option(options, "org_unit_field")
+    period_field = _optional_str_option(options, "period_field") or "t"
+    period_type = _optional_str_option(options, "period_type")
+    category_option_combo = _optional_str_option(options, "category_option_combo")
+
+    frame = pd.DataFrame(df).copy()
+    if org_unit_field not in frame.columns:
+        raise ValueError(f"Missing org unit field '{org_unit_field}' in aggregated result")
+    if period_field not in frame.columns:
+        raise ValueError(f"Missing period field '{period_field}' in aggregated result")
+
+    value_field = _select_dhis2_value_field(frame, org_unit_field, period_field)
+
+    data_values: list[dict[str, str]] = []
+    for record in frame.to_dict(orient="records"):
+        value = record.get(value_field)
+        if _is_nullish(value):
+            continue
+
+        org_unit = record.get(org_unit_field)
+        if _is_nullish(org_unit):
+            raise ValueError(f"Null org unit value in field '{org_unit_field}'")
+
+        period_value = record.get(period_field)
+        if _is_nullish(period_value):
+            raise ValueError(f"Null period value in field '{period_field}'")
+
+        item = {
+            "dataElement": data_element_id,
+            "orgUnit": str(org_unit),
+            "period": _to_dhis2_period_string(period_value, period_type),
+            "value": _to_dhis2_value_string(value),
+        }
+        if category_option_combo is not None:
+            item["categoryOptionCombo"] = category_option_combo
+        data_values.append(item)
+
+    return {"dataValues": data_values}
+
+
+def _required_str_option(options: dict[str, Any], key: str) -> str:
+    value = _optional_str_option(options, key)
+    if value is None:
+        raise ValueError(f"Missing required export option '{key}'")
+    return value
+
+
 def _optional_str_option(options: dict[str, Any], key: str) -> str | None:
     raw = options.get(key)
     if raw is None:
         return None
     value = str(raw).strip()
     return value or None
+
+
+def _select_dhis2_value_field(frame: Any, org_unit_field: str, period_field: str) -> str:
+    excluded = {
+        org_unit_field,
+        period_field,
+        "geometry",
+        "spatial_ref",
+        "index",
+        "band",
+        "bands",
+    }
+    candidates = [str(c) for c in frame.columns if c not in excluded and not str(c).startswith("level_")]
+    if len(candidates) != 1:
+        raise ValueError(
+            "DHIS2JSON export requires exactly one value column after excluding "
+            f"'{org_unit_field}' and '{period_field}', found {candidates}"
+        )
+    return candidates[0]
 
 
 def _is_nullish(value: Any) -> bool:
@@ -1022,9 +1103,112 @@ def _is_nullish(value: Any) -> bool:
     return bool(result)
 
 
+def _normalise_period_type(period_type: str | None) -> str | None:
+    if period_type is None:
+        return None
+    value = period_type.strip().lower()
+    aliases = {
+        "day": "daily",
+        "daily": "daily",
+        "week": "weekly",
+        "weekly": "weekly",
+        "month": "monthly",
+        "monthly": "monthly",
+        "quarter": "quarterly",
+        "quarterly": "quarterly",
+        "year": "yearly",
+        "yearly": "yearly",
+    }
+    kind = aliases.get(value)
+    if kind is None:
+        raise ValueError(f"Unsupported period_type '{period_type}'")
+    return kind
+
+
+def _direct_dhis2_period_string(value: str) -> str | None:
+    patterns = (
+        re.compile(r"^\d{8}$"),
+        re.compile(r"^\d{6}$"),
+        re.compile(r"^\d{4}$"),
+        re.compile(r"^\d{4}W\d{2}$"),
+        re.compile(r"^\d{4}Q[1-4]$"),
+    )
+    if any(pattern.fullmatch(value) for pattern in patterns):
+        return value
+    return None
+
+
+def _to_dhis2_period_string(value: Any, period_type: str | None = None) -> str:
+    import pandas as pd
+
+    if _is_nullish(value):
+        raise ValueError("Cannot serialize null period value")
+
+    kind = _normalise_period_type(period_type)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("Cannot serialize blank period value")
+        direct = _direct_dhis2_period_string(stripped)
+        if direct is not None:
+            if kind is None:
+                return direct
+            pattern_map = {
+                "daily": re.compile(r"^\d{8}$"),
+                "weekly": re.compile(r"^\d{4}W\d{2}$"),
+                "monthly": re.compile(r"^\d{6}$"),
+                "quarterly": re.compile(r"^\d{4}Q[1-4]$"),
+                "yearly": re.compile(r"^\d{4}$"),
+            }
+            if pattern_map[kind].fullmatch(stripped):
+                return direct
+            for known_type, pattern in pattern_map.items():
+                if known_type != kind and pattern.fullmatch(stripped):
+                    raise ValueError(f"Period value appears to be {known_type}, but period_type={kind}")
+        if kind is None:
+            raise ValueError(
+                "Ambiguous period value; provide save_result option 'period_type' "
+                "for date-like values that are not already in DHIS2 format"
+            )
+        try:
+            timestamp = pd.Timestamp(stripped)
+        except Exception as exc:
+            raise ValueError(f"Could not parse period value {stripped!r} for period_type={kind}") from exc
+        return _format_dhis2_timestamp(timestamp, kind)
+
+    if kind is None:
+        raise ValueError(
+            "Ambiguous period value; provide save_result option 'period_type' "
+            "for date-like values that are not already in DHIS2 format"
+        )
+
+    try:
+        timestamp = pd.Timestamp(value)
+    except Exception as exc:
+        raise ValueError(f"Could not parse period value {value!r} for period_type={kind}") from exc
+    return _format_dhis2_timestamp(timestamp, kind)
+
+
+def _format_dhis2_timestamp(timestamp: Any, period_type: str) -> str:
+    if period_type == "daily":
+        return str(timestamp.strftime("%Y%m%d"))
+    if period_type == "weekly":
+        iso = timestamp.isocalendar()
+        return f"{iso.year}W{iso.week:02d}"
+    if period_type == "monthly":
+        return str(timestamp.strftime("%Y%m"))
+    if period_type == "quarterly":
+        return f"{timestamp.year}Q{timestamp.quarter}"
+    if period_type == "yearly":
+        return str(timestamp.strftime("%Y"))
+    raise ValueError(f"Unsupported period_type '{period_type}'")
+
+
 def _to_dhis2_value_string(value: Any) -> str:
     import numpy as np
 
+    if _is_nullish(value):
+        raise ValueError("Cannot serialize null value")
     if isinstance(value, (bool, np.bool_)):
         return "true" if bool(value) else "false"
     if isinstance(value, (int, np.integer)) and not isinstance(value, bool):
@@ -1041,59 +1225,6 @@ def _to_dhis2_value_string(value: Any) -> str:
             normalized = normalized.rstrip("0").rstrip(".")
         return normalized or "0"
     return str(value)
-
-
-def _to_dhis2_period_string(value: Any, period_type: str | None = None) -> str:
-    import re
-
-    import pandas as pd
-
-    raw = str(value).strip()
-    if not raw:
-        raise ValueError("Empty period value is not allowed")
-
-    patterns = {
-        "daily": re.compile(r"^\d{8}$"),
-        "weekly": re.compile(r"^\d{4}W\d{2}$"),
-        "monthly": re.compile(r"^\d{6}$"),
-        "quarterly": re.compile(r"^\d{4}Q[1-4]$"),
-        "yearly": re.compile(r"^\d{4}$"),
-    }
-    if period_type is not None:
-        period_type = period_type.strip().lower()
-        if period_type not in patterns:
-            raise ValueError(f"Unsupported period_type '{period_type}'")
-        if patterns[period_type].match(raw):
-            return raw
-        for known_type, pattern in patterns.items():
-            if known_type != period_type and pattern.match(raw):
-                raise ValueError(f"Period value appears to be {known_type}, but period_type={period_type}")
-    else:
-        for pattern in patterns.values():
-            if pattern.match(raw):
-                return raw
-
-    if period_type is None:
-        raise ValueError(
-            "Ambiguous period value; provide period_type explicitly when the input is not already in DHIS2 format"
-        )
-
-    try:
-        ts = pd.Timestamp(value)
-    except Exception as exc:
-        raise ValueError(f"Could not parse period value {raw!r} for period_type={period_type}") from exc
-    if period_type == "daily":
-        return ts.strftime("%Y%m%d")
-    if period_type == "weekly":
-        iso = ts.isocalendar()
-        return f"{int(iso.year):04d}W{int(iso.week):02d}"
-    if period_type == "monthly":
-        return ts.strftime("%Y%m")
-    if period_type == "quarterly":
-        return f"{ts.year:04d}Q{((ts.month - 1) // 3) + 1}"
-    if period_type == "yearly":
-        return ts.strftime("%Y")
-    raise ValueError(f"Unsupported period_type '{period_type}'")
 
 
 def _write_png(ds: Any, results_dir: Any) -> str | None:

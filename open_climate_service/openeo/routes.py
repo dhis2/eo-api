@@ -131,6 +131,22 @@ def file_formats() -> dict[str, Any]:
             },
             "links": [],
         },
+        "DHIS2JSON": {
+            "title": "DHIS2 JSON",
+            "description": (
+                "DHIS2 import-ready JSON dataValues envelope for aggregated org-unit results. "
+                "Requires save_result options such as data_element_id, org_unit_field, and period_type."
+            ),
+            "gis_data_types": ["table", "vector"],
+            "parameters": {
+                "data_element_id": {"type": "string"},
+                "org_unit_field": {"type": "string"},
+                "period_field": {"type": "string", "default": "t"},
+                "period_type": {"type": "string"},
+                "category_option_combo": {"type": "string"},
+            },
+            "links": [],
+        },
     }
     return {
         "input": {},
@@ -290,9 +306,20 @@ _RESULT_MEDIA_TYPES: dict[str, str] = {
     ".tif": "image/tiff; subtype=geotiff",
     ".png": "image/png",
     ".csv": "text/csv",
+    ".json": "application/json",
     ".geojson": "application/geo+json",
     ".parquet": "application/vnd.apache.parquet",
 }
+
+
+def _json_tabular_payload_response(frame: Any, options: dict[str, Any]) -> JSONResponse:
+    from open_climate_service.openeo.jobs import _build_dhis2_json_payload
+
+    try:
+        payload = _build_dhis2_json_payload(frame, options)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(payload)
 
 
 @jobs_router.get("/{job_id}/results/{filename}")
@@ -390,6 +417,8 @@ def execute_synchronous(
         result = result.to_dataset(name=result.name or "result")
 
     if isinstance(result, xr.Dataset):
+        if fmt == "DHIS2JSON":
+            return _json_tabular_payload_response(result.to_dataframe().reset_index(), options)
         if fmt == "ZARR":
             raise HTTPException(
                 status_code=400,
@@ -420,6 +449,7 @@ def execute_synchronous(
 
     try:
         import geopandas as gpd
+        import pandas as pd
 
         if isinstance(result, gpd.GeoDataFrame):
             if fmt == "CHAPCSV":
@@ -433,6 +463,9 @@ def execute_synchronous(
                     fmt,
                     "text/csv",
                 )
+            if fmt == "DHIS2JSON":
+                frame = pd.DataFrame(result.drop(columns="geometry", errors="ignore"))
+                return _json_tabular_payload_response(frame, options)
             if fmt == "GEOJSON":
                 if result.crs is not None and result.crs.to_epsg() != 4326:
                     result = result.to_crs("EPSG:4326")
