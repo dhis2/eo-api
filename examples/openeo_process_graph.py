@@ -2,15 +2,13 @@
 
 Replicates the canonical openEO docs example
 (https://open-eo.github.io/openeo-python-client/) against a local Open Climate Service
-instance: connect → load_collection → apply rescale → max_time → execute.
+instance: connect → load_collection → apply rescale → max_time → batch job → results.
 
 Requires:
   pip install openeo
   A running Open Climate Service with at least one published dataset.
 Adjust BASE_URL if the API is not on the default local address.
 """
-
-import json
 
 import openeo
 
@@ -52,9 +50,16 @@ def main() -> None:
 
     print(f"\nProcess graph nodes: {list(cube_max.flat_graph().keys())}")
 
-    # Execute synchronously — mirrors: cube.download("ndvi-max.tiff")
-    result = conn.execute(cube_max)
-    print(f"\nResult:\n{json.dumps(result, indent=2)}")
+    # Submit as a batch job and list result assets — mirrors the production pattern: create → start → wait → get_results
+    job = cube_max.create_job(title="max-time-demo", format="GTiff")
+    print(f"\nSubmitted batch job: {job.job_id}")
+    job.start_and_wait()
+
+    results = job.get_results()
+    assets = results.get_assets()
+    print(f"Result assets ({len(assets)}):")
+    for asset in assets:
+        print(f"  {asset.name}: {asset.href}")
 
 
 if __name__ == "__main__":

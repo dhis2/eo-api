@@ -510,7 +510,7 @@
             selector,
             ...(zarrVersion !== null && { zarrVersion }),
             ...(fillValue !== null && { fillValue }),
-            ...(!isWgs84 && { crs: nativeCrs }),
+            crs: nativeCrs,
             ...(proj4String !== null && { proj4: proj4String }),
           });
           map.addLayer(activeLayer);

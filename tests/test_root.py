@@ -74,11 +74,11 @@ def test_health_returns_healthy_status(client: TestClient) -> None:
 def test_zarr_route_echoes_origin_for_browser_access(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ingestion_services,
-        "get_dataset_zarr_store_info_or_404",
-        lambda _: {"kind": "ZarrListing", "dataset_id": "dataset-1", "path": ".", "entries": []},
+        "get_dataset_zarr_store_file_or_404",
+        lambda _id, _path, range_header=None: {"zarr_format": 3, "node_type": "group", "attributes": {}},
     )
 
-    response = client.get("/zarr/dataset-1", headers={"Origin": "https://inspect.geozarr.org"})
+    response = client.get("/zarr/dataset-1/zarr.json", headers={"Origin": "https://inspect.geozarr.org"})
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "https://inspect.geozarr.org"
@@ -87,11 +87,11 @@ def test_zarr_route_echoes_origin_for_browser_access(client: TestClient, monkeyp
 def test_zarr_route_does_not_allow_unconfigured_origin(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ingestion_services,
-        "get_dataset_zarr_store_info_or_404",
-        lambda _: {"kind": "ZarrListing", "dataset_id": "dataset-1", "path": ".", "entries": []},
+        "get_dataset_zarr_store_file_or_404",
+        lambda _id, _path, range_header=None: {"zarr_format": 3, "node_type": "group", "attributes": {}},
     )
 
-    response = client.get("/zarr/dataset-1", headers={"Origin": "https://example.org"})
+    response = client.get("/zarr/dataset-1/zarr.json", headers={"Origin": "https://example.org"})
 
     assert response.status_code == 200
     assert "access-control-allow-private-network" not in response.headers
@@ -100,12 +100,12 @@ def test_zarr_route_does_not_allow_unconfigured_origin(client: TestClient, monke
 def test_zarr_route_allows_private_network_preflight(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ingestion_services,
-        "get_dataset_zarr_store_info_or_404",
-        lambda _: {"kind": "ZarrListing", "dataset_id": "dataset-1", "path": ".", "entries": []},
+        "get_dataset_zarr_store_file_or_404",
+        lambda _id, _path, range_header=None: {"zarr_format": 3, "node_type": "group", "attributes": {}},
     )
 
     response = client.options(
-        "/zarr/dataset-1",
+        "/zarr/dataset-1/zarr.json",
         headers={
             "Origin": "https://inspect.geozarr.org",
             "Access-Control-Request-Method": "GET",
@@ -121,12 +121,12 @@ def test_zarr_route_allows_private_network_preflight(client: TestClient, monkeyp
 def test_zarr_route_preserves_existing_vary_values(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ingestion_services,
-        "get_dataset_zarr_store_info_or_404",
-        lambda _: {"kind": "ZarrListing", "dataset_id": "dataset-1", "path": ".", "entries": []},
+        "get_dataset_zarr_store_file_or_404",
+        lambda _id, _path, range_header=None: {"zarr_format": 3, "node_type": "group", "attributes": {}},
     )
 
     response = client.options(
-        "/zarr/dataset-1",
+        "/zarr/dataset-1/zarr.json",
         headers={
             "Origin": "https://inspect.geozarr.org",
             "Access-Control-Request-Method": "GET",

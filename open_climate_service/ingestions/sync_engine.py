@@ -406,18 +406,24 @@ def _default_target_end(*, period_type: str) -> str:
     raise ValueError(f"Unsupported period_type '{period_type}' for sync")
 
 
+def _icechunk_path_for(artifact: ArtifactRecord) -> str | None:
+    """Return the Icechunk store path for a plugin-backed artifact."""
+    if artifact.format != ArtifactFormat.ICECHUNK:
+        return None
+    return artifact.path or (artifact.asset_paths[0] if artifact.asset_paths else None)
+
+
 def _supports_append(source_dataset: dict[str, Any], latest_artifact: ArtifactRecord) -> bool:
     """Return whether this template opts into store-based append sync execution."""
     if source_dataset.get("sync", {}).get("execution") != SyncAction.APPEND.value:
         return False
-    if latest_artifact.format != ArtifactFormat.ICECHUNK:
-        logger.info(
-            "Sync append execution for dataset '%s' requires an existing Icechunk artifact; "
-            "falling back to rematerialize",
-            source_dataset.get("id", "<unknown>"),
-        )
-        return False
-    return True
+    if latest_artifact.format == ArtifactFormat.ICECHUNK:
+        return True
+    logger.info(
+        "Sync append execution for dataset '%s' requires an existing Icechunk artifact; falling back to rematerialize",
+        source_dataset.get("id", "<unknown>"),
+    )
+    return False
 
 
 def _is_plugin_backed(source_dataset: dict[str, Any]) -> bool:
@@ -482,11 +488,9 @@ def _sync_current_end(*, source_dataset: dict[str, Any], latest_artifact: Artifa
     datasets, but keeps planning aligned with execution on the committed store
     state rather than a cached metadata snapshot.
     """
-    if not _is_plugin_backed(source_dataset) or latest_artifact.format != ArtifactFormat.ICECHUNK:
+    if not _is_plugin_backed(source_dataset):
         return latest_artifact.coverage.temporal.end
-    raw_artifact_path = latest_artifact.path or (
-        latest_artifact.asset_paths[0] if latest_artifact.asset_paths else None
-    )
+    raw_artifact_path = _icechunk_path_for(latest_artifact)
     if raw_artifact_path is None:
         return latest_artifact.coverage.temporal.end
     local_artifact_path, path_reason = _resolve_local_artifact_path(raw_artifact_path)

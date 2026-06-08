@@ -430,6 +430,13 @@ class OpenEOJobService:
             result = result.to_dataset(name=result.name or "result")
 
         if isinstance(result, xr.Dataset):
+            # Zarr format with dataset_id → write directly to managed Icechunk/Zarr store
+            if fmt == "ZARR" and options.get("dataset_id"):
+                _write_managed_zarr(result, options)
+                # Managed datasets are not served as job-local files; advertise the
+                # managed dataset via a marker that _result_assets expands into
+                # /datasets, /zarr (and /stac when published) result links.
+                return f"managed://{options['dataset_id']}"
             if fmt in _TABULAR_EXPORT_FORMATS:
                 return _write_dataset_tabular_export(result, results_dir, fmt, options)
             return _write_raster(result, results_dir, fmt)
@@ -460,11 +467,292 @@ class OpenEOJobService:
         )
 
 
+def _strip_non_serializable_attrs(ds: Any) -> Any:
+    """Return a copy of ds with any non-JSON-serializable attrs removed.
+
+    openeo-processes-dask injects numpy scalars and datetime64 values into
+    variable attrs (e.g. reduced_dimensions_min_values) after reduce_dimension.
+    Zarr requires all attrs to be JSON-serializable; strip the offenders so the
+    write succeeds while keeping the data and coordinates intact.
+    """
+    import json
+
+    def _safe(attrs: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for k, v in attrs.items():
+            try:
+                json.dumps(v)
+                out[k] = v
+            except (TypeError, ValueError):
+                pass
+        return out
+
+    ds = ds.copy()
+    ds.attrs = _safe(ds.attrs)
+    for name in list(ds.data_vars) + list(ds.coords):
+        if ds[name].attrs:
+            ds[name].attrs = _safe(ds[name].attrs)
+    return ds
+
+
+def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
+    """Write a computed xr.Dataset to the managed Icechunk/Zarr store and register it."""
+    import uuid
+    from datetime import UTC, datetime
+
+    import xarray as xr
+
+    from open_climate_service.data_manager.services import downloader
+    from open_climate_service.data_manager.services.utils import get_time_dim, get_x_y_dims
+    from open_climate_service.ingestions import services as ingestion_services
+    from open_climate_service.ingestions.schemas import (
+        ArtifactFormat,
+        ArtifactPublication,
+        ArtifactRecord,
+        ArtifactRequestScope,
+    )
+
+    dataset_id = options["dataset_id"]
+    if not isinstance(dataset_id, str) or not dataset_id:
+        raise ValueError(f"'dataset_id' option must be a non-empty string, got {type(dataset_id).__name__}")
+    if Path(dataset_id).name != dataset_id:
+        raise ValueError(
+            f"Invalid dataset_id '{dataset_id}': must be a plain name with no path separators or traversal segments"
+        )
+
+    from open_climate_service.data_registry.services import datasets as _reg
+
+    template = _reg.get_dataset(dataset_id)
+    if template is None:
+        raise ValueError(
+            f"No dataset template found for '{dataset_id}'. "
+            "Register the dataset template before writing managed artifacts."
+        )
+
+    # Prefer an explicit option, then the registered template's display name, and
+    # only fall back to the raw id so published collections read as e.g.
+    # "Mosquito hotspots (Rwanda 2018 Q1)" rather than "mosquito_hotspots".
+    dataset_name: str = options.get("dataset_name") or template.get("name") or dataset_id
+
+    if not isinstance(ds, xr.Dataset):
+        raise TypeError(f"Managed Zarr write requires an xr.Dataset, got {type(ds).__name__}")
+
+    # Rename the variable in the store to match the user-specified variable name,
+    # so the on-disk name matches what is advertised in the STAC collection.
+    if options.get("variable") and len(ds.data_vars) == 1:
+        current_name = next(iter(ds.data_vars))
+        desired_name = str(options["variable"])
+        if current_name != desired_name:
+            ds = ds.rename({current_name: desired_name})
+
+    try:
+        x_dim, y_dim = get_x_y_dims(ds)
+    except ValueError as exc:
+        raise ValueError(f"Cannot write managed dataset '{dataset_id}': {exc}") from exc
+
+    try:
+        t_dim: str | None = get_time_dim(ds)
+    except ValueError:
+        t_dim = None
+
+    coverage = _derive_coverage(ds, x_dim, y_dim, t_dim)
+    variable = _derive_variable(ds, options)
+    period_type: str | None = options.get("period_type") or (
+        _infer_period_type(ds, t_dim) if t_dim is not None else None
+    )
+
+    from open_climate_service import config as api_config
+
+    crs: str = ds.attrs.get("proj:code") or api_config.get_crs()
+    store_path = downloader.DOWNLOAD_DIR / f"{dataset_id}.icechunk"
+    store_path.parent.mkdir(parents=True, exist_ok=True)
+
+    downloader.write_to_icechunk_store(
+        _strip_non_serializable_attrs(ds),
+        store_path,
+        x_dim,
+        y_dim,
+        t_dim,
+        crs=crs,
+        commit_message=f"Published from openEO job: {dataset_id}",
+    )
+
+    record = ArtifactRecord(
+        artifact_id=str(uuid.uuid4()),
+        dataset_id=dataset_id,
+        dataset_name=dataset_name,
+        variable=variable,
+        period_type=period_type,
+        format=ArtifactFormat.ICECHUNK,
+        path=str(store_path),
+        asset_paths=[str(store_path)],
+        variables=[str(v) for v in ds.data_vars],
+        request_scope=ArtifactRequestScope(
+            start=coverage.temporal.start,
+            end=coverage.temporal.end,
+        ),
+        coverage=coverage,
+        created_at=datetime.now(UTC),
+        publication=ArtifactPublication(),
+    )
+    _publish_raw = options.get("publish", True)
+    if not isinstance(_publish_raw, bool):
+        raise ValueError(f"'publish' option must be a boolean, got {type(_publish_raw).__name__!r}: {_publish_raw!r}")
+    ingestion_services.register_artifact_record(record, publish=_publish_raw)
+
+
+def _recover_temporal_from_attrs(ds: Any) -> tuple[str, str]:
+    """Extract temporal extent from reduce_dimension min/max attrs.
+
+    openeo-processes-dask stores the reduced dimension's value range in
+    ``reduced_dimensions_min_values`` / ``reduced_dimensions_max_values`` on each
+    variable's attrs after ``reduce_dimension``.  Fall back to ("", "") when not found.
+    """
+    import numpy as np
+
+    _TIME_NAMES = ("t", "time", "valid_time")
+    sources: list[dict[str, Any]] = [ds.attrs]
+    for name in list(ds.data_vars) + list(ds.coords):
+        attrs = getattr(ds[name], "attrs", {})
+        if attrs:
+            sources.append(attrs)
+    for attrs in sources:
+        min_vals = attrs.get("reduced_dimensions_min_values", {})
+        max_vals = attrs.get("reduced_dimensions_max_values", {})
+        if not isinstance(min_vals, dict) or not isinstance(max_vals, dict):
+            continue
+        for tname in _TIME_NAMES:
+            if tname in min_vals and tname in max_vals:
+                try:
+                    t_start = str(np.datetime_as_string(np.datetime64(min_vals[tname]), unit="D"))
+                    t_end = str(np.datetime_as_string(np.datetime64(max_vals[tname]), unit="D"))
+                    return t_start, t_end
+                except Exception:
+                    pass
+    return "", ""
+
+
+def _derive_coverage(ds: Any, x_dim: str, y_dim: str, t_dim: str | None) -> Any:
+    """Derive ArtifactCoverage from an xr.Dataset's coordinates."""
+    import numpy as np
+    import pyproj
+
+    from open_climate_service.ingestions.schemas import (
+        ArtifactCoverage,
+        CoverageSpatial,
+        CoverageTemporal,
+    )
+
+    xmin = float(ds[x_dim].min())
+    xmax = float(ds[x_dim].max())
+    ymin = float(ds[y_dim].min())
+    ymax = float(ds[y_dim].max())
+    spatial = CoverageSpatial(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)
+
+    native_crs: str = ds.attrs.get("proj:code", "EPSG:4326")
+    spatial_wgs84: Any = None
+    if native_crs not in ("EPSG:4326", "CRS84", "OGC:CRS84"):
+        try:
+            transformer = pyproj.Transformer.from_crs(native_crs, "EPSG:4326", always_xy=True)
+            # transform_bounds is more accurate than transforming individual corners —
+            # it densifies the edges, which matters for non-rectilinear projections.
+            wx_min, wy_min, wx_max, wy_max = transformer.transform_bounds(xmin, ymin, xmax, ymax)
+            spatial_wgs84 = CoverageSpatial(xmin=wx_min, ymin=wy_min, xmax=wx_max, ymax=wy_max)
+        except Exception:
+            pass
+
+    if t_dim is not None and t_dim in ds.coords and ds.sizes.get(t_dim, 0) > 0:
+        # min/max rather than first/last so coverage is correct for a non-monotonic time axis.
+        t_values = ds[t_dim].values
+        t_start = str(np.datetime_as_string(t_values.min(), unit="D"))
+        t_end = str(np.datetime_as_string(t_values.max(), unit="D"))
+    else:
+        # Dataset has no time dimension (e.g. after reduce_dimension); recover the
+        # original temporal range from attrs that openeo-processes-dask attaches.
+        t_start, t_end = _recover_temporal_from_attrs(ds)
+
+    return ArtifactCoverage(
+        spatial=spatial,
+        spatial_wgs84=spatial_wgs84,
+        temporal=CoverageTemporal(start=t_start, end=t_end),
+    )
+
+
+def _infer_period_type(ds: Any, t_dim: str) -> str | None:
+    """Infer period type from the median time step of a dataset."""
+    import numpy as np
+
+    if t_dim not in ds.coords or ds.sizes.get(t_dim, 0) < 2:
+        return None
+
+    # Sort first: streaming/append can leave a non-monotonic time axis, and an
+    # unsorted np.diff yields negative/irregular steps that skew the median.
+    t_values = np.sort(ds[t_dim].values)
+    deltas = np.diff(t_values).astype("timedelta64[s]").astype(float)
+    median_seconds = float(np.median(deltas))
+
+    if median_seconds <= 3600:
+        return "hourly"
+    if median_seconds <= 86400:
+        return "daily"
+    if median_seconds <= 8 * 86400:
+        return "weekly"
+    if median_seconds <= 32 * 86400:
+        return "monthly"
+    return "yearly"
+
+
+def _derive_variable(ds: Any, options: dict[str, Any]) -> str:
+    """Return the primary variable name from options or the sole data variable."""
+    if options.get("variable"):
+        name = str(options["variable"])
+        if name not in ds.data_vars:
+            raise ValueError(
+                f"Variable {name!r} specified in options not found in dataset; available: {list(ds.data_vars)!r}"
+            )
+        return name
+    vars_list = list(ds.data_vars)
+    if len(vars_list) == 1:
+        return str(vars_list[0])
+    raise ValueError(f"Dataset has multiple variables {vars_list!r}; specify 'variable' in save_result options")
+
+
 def _result_assets(record: OpenEOJobRecord) -> dict[str, Any]:
     usage = record.usage or {}
     output_path = usage.get("output_path")
     if not output_path or not isinstance(output_path, str):
         return {}
+    if output_path.startswith("managed://"):
+        dataset_id = output_path[len("managed://") :]
+        assets: dict[str, Any] = {
+            "dataset": {
+                "href": f"/datasets/{dataset_id}",
+                "type": "application/json",
+                "title": "Managed dataset",
+                "roles": ["metadata"],
+            },
+            "zarr": {
+                "href": f"/zarr/{dataset_id}",
+                "type": "application/vnd.zarr; version=3",
+                "title": "Zarr store",
+                "roles": ["data"],
+                "xarray:open_kwargs": {"consolidated": True},
+            },
+        }
+        # Advertise the STAC collection only when the dataset is actually published.
+        try:
+            from open_climate_service.ingestions import services as _ingestion_services
+
+            if dataset_id in _ingestion_services.latest_published_zarr_artifacts_by_dataset():
+                assets["stac"] = {
+                    "href": f"/stac/collections/{dataset_id}",
+                    "type": "application/json",
+                    "title": "STAC collection",
+                    "roles": ["metadata"],
+                }
+        except Exception:
+            logger.debug("Could not resolve STAC publication for managed dataset '%s'", dataset_id, exc_info=True)
+        return assets
     if output_path.endswith(".zarr"):
         return {
             "result": {

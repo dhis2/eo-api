@@ -5,7 +5,7 @@ using rename_labels to attach DHIS2 org unit IDs so they survive into the output
 
 Requires:
   pip install openeo requests
-  A running Open Climate Service with chirps3_precipitation_daily ingested.
+  A running Open Climate Service with era5land_precipitation_daily ingested.
   examples/data/sle-districts.geojson (included in this repo)
 
 Adjust BASE_URL if the API is not on the default local address.
@@ -25,17 +25,28 @@ BASE_URL = "http://127.0.0.1:8000"
 DISTRICTS_FILE = Path(__file__).parent / "data" / "sle-districts.geojson"
 
 
+COLLECTION_ID = "era5land_precipitation_daily"
+
+
 def main() -> None:
     """Run load → monthly sum → zonal mean per district → CSV."""
     geojson = json.loads(DISTRICTS_FILE.read_text())
     features = geojson["features"]
 
-    # Extract DHIS2 org unit IDs and names for display
-    district_ids = [f["properties"]["id"] for f in features]
+    # Map org unit UID → display name. aggregate_spatial labels the geometry
+    # dimension with each feature's GeoJSON `id` (the DHIS2 org unit UID), so the
+    # CSV geometry column carries the UIDs directly.
     id_to_name = {f["properties"]["id"]: f["properties"]["name"] for f in features}
 
+    # Discover available temporal extent from the STAC collection
+    coll = requests.get(f"{BASE_URL}/stac/collections/{COLLECTION_ID}", timeout=30)
+    coll.raise_for_status()
+    coll = coll.json()
+    interval = coll["extent"]["temporal"]["interval"][0]
+    temporal_extent = [interval[0][:10], interval[1][:10]]
+
     print(f"Districts  : {len(features)}")
-    print("Period     : 2026-01 – 2026-03")
+    print(f"Period     : {temporal_extent[0]} – {temporal_extent[1]}")
     print()
 
     process_graph = {
@@ -43,8 +54,8 @@ def main() -> None:
         "load": {
             "process_id": "load_collection",
             "arguments": {
-                "id": "chirps3_precipitation_daily",
-                "temporal_extent": ["2026-01-01", "2026-03-31"],
+                "id": COLLECTION_ID,
+                "temporal_extent": temporal_extent,
             },
         },
         # 2. Sum daily values into monthly totals
@@ -81,21 +92,12 @@ def main() -> None:
                 },
             },
         },
-        # 4. Replace Shapely geometry objects with DHIS2 org unit IDs so they
-        #    appear as the geometry label in the output — without this step the
-        #    geometry dimension uses raw geometry objects that are lost in CSV/JSON.
-        "label": {
-            "process_id": "rename_labels",
-            "arguments": {
-                "data": {"from_node": "zones"},
-                "dimension": "geometry",
-                "target": district_ids,
-            },
-        },
-        # 5. Save as CSV (geometry column now contains org unit IDs)
+        # 4. Save as CSV. aggregate_spatial already labels the geometry dimension
+        #    with each feature's GeoJSON `id` (the DHIS2 org unit UID), so the
+        #    geometry column carries the org unit IDs directly — no rename needed.
         "save": {
             "process_id": "save_result",
-            "arguments": {"data": {"from_node": "label"}, "format": "CSV"},
+            "arguments": {"data": {"from_node": "zones"}, "format": "CSV"},
             "result": True,
         },
     }
@@ -108,11 +110,14 @@ def main() -> None:
     )
     resp.raise_for_status()
 
-    # Parse CSV — rows are (t, geometry=org_unit_id, precip)
+    # Parse CSV — rows are (geometry=org_unit_id, t, tp)
     rows = list(csv.DictReader(io.StringIO(resp.text)))
+    # Find the precipitation variable column (first non-index column)
+    index_cols = {"geometry", "t"}
+    precip_col = next((c for c in (rows[0] if rows else {}) if c not in index_cols), "tp")
     by_id: dict[str, dict[str, str]] = defaultdict(dict)
     for row in rows:
-        by_id[row["geometry"]][row["t"][:7]] = f"{float(row['precip']):.1f}"
+        by_id[row["geometry"]][row["t"][:7]] = f"{float(row[precip_col]):.1f}"
 
     months = sorted({row["t"][:7] for row in rows})
 
