@@ -19,9 +19,7 @@ University of Oslo, together with HISP groups and country teams across Africa an
 Open Climate Service is developed in close collaboration with HISP groups and country
 teams across Africa and Asia — the people who understand local data landscapes,
 institutional constraints, and what it takes to run a sustainable climate service in
-practice. Contributing groups include HISP Centre (University of Oslo), HISP Ethiopia,
-HISP Uganda, HISP Tanzania, HISP UNIMA (Malawi), HISP Sri Lanka, HISP Rwanda,
-HISP West and Central Africa, Saudigitus, and the Planetary Health Research Centre (PHRC).
+practice.
 
 ## Get involved
 

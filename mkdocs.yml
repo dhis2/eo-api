@@ -80,7 +80,6 @@ nav:
       - Workflows: workflows.md
       - Instance guide: instance_guide.md
       - Adding custom datasets: adding_custom_datasets.md
-      - Transforms: transforms.md
       - Extensibility: extensibility.md
       - API reference: managed_data_api_guide.md
   - Roadmap: roadmap.md
