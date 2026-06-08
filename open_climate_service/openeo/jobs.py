@@ -621,7 +621,14 @@ def _write_vector(gdf: Any, results_dir: Any, fmt: str) -> str | None:
 
 
 def _write_dataset_tabular_export(ds: Any, results_dir: Any, fmt: str, options: dict[str, Any]) -> str | None:
-    df = ds.to_dataframe().reset_index()
+    import pandas as pd
+
+    if hasattr(ds, "to_dataframe"):
+        df = ds.to_dataframe().reset_index()
+    elif isinstance(ds, pd.DataFrame):
+        df = ds
+    else:
+        raise TypeError(f"Unsupported data type for tabular export: {type(ds).__name__}")
     return _write_tabular_export(df, results_dir, fmt, options)
 
 

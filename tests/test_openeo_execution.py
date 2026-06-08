@@ -686,6 +686,7 @@ def test_dhis2_dvs_payload_rejects_multiple_value_columns() -> None:
 
 
 def test_dhis2_period_string_supports_weekly_and_quarterly() -> None:
+    assert _to_dhis2_period_string("2024-02-01", "monthly") == "202402"
     assert _to_dhis2_period_string("2024-02-01", "weekly").startswith("2024W")
     assert _to_dhis2_period_string("2024-05-01", "quarterly") == "2024Q2"
 
