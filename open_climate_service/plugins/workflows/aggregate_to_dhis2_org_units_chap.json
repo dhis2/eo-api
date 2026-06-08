@@ -1,7 +1,7 @@
 {
-  "id": "aggregate_to_org_units_chap",
-  "summary": "Aggregate a GeoZarr dataset to org units and export CHAP CSV",
-  "description": "Org-unit aggregation workflow that exports CHAP-ready wide CSV. Loads a published GeoZarr dataset over a time range, computes the spatial mean of its variable(s) within each GeoJSON feature (e.g. a DHIS2 organisation unit), and writes one row per location-period with columns `time_period`, `location`, and one column per variable.\n\nEach feature's GeoJSON `id` becomes the `location`, each time step becomes `time_period` (formatted according to `period_type`). Aggregation is at the dataset's native temporal resolution, so set `period_type` to match it (e.g. `month` for a monthly dataset). This is the same pipeline as `aggregate_to_org_units` but emits CHAP CSV instead of DHIS2 JSON.\n\nUsage — call this process as the result of a process graph:\n\n{\n  \"agg\": {\n    \"process_id\": \"aggregate_to_org_units_chap\",\n    \"arguments\": {\n      \"dataset_id\": \"era5land_precipitation_monthly\",\n      \"temporal_extent\": [\"2025-01-01\", \"2025-12-31\"],\n      \"geometries\": { \"type\": \"FeatureCollection\", \"features\": [ ... ] },\n      \"period_type\": \"month\"\n    },\n    \"result\": true\n  }\n}",
+  "id": "aggregate_to_dhis2_org_units_chap",
+  "summary": "Aggregate a GeoZarr dataset to DHIS2 org units and export CHAP CSV",
+  "description": "Org-unit aggregation workflow that exports CHAP-ready wide CSV. Loads a published GeoZarr dataset over a time range, spatially aggregates its variable(s) within each GeoJSON feature (e.g. a DHIS2 organisation unit) using the chosen method, and writes one row per location-period with columns `time_period`, `location`, and one column per variable.\n\nEach feature's GeoJSON `id` becomes the `location`, each time step becomes `time_period` (formatted according to `period_type`). Aggregation is at the dataset's native temporal resolution, so set `period_type` to match it (e.g. `month` for a monthly dataset). This is the same pipeline as `aggregate_to_dhis2_org_units` but emits CHAP CSV instead of DHIS2 JSON.\n\nUsage — call this process as the result of a process graph:\n\n{\n  \"agg\": {\n    \"process_id\": \"aggregate_to_dhis2_org_units_chap\",\n    \"arguments\": {\n      \"dataset_id\": \"era5land_precipitation_monthly\",\n      \"temporal_extent\": [\"2025-01-01\", \"2025-12-31\"],\n      \"geometries\": { \"type\": \"FeatureCollection\", \"features\": [ ... ] },\n      \"method\": \"mean\",\n      \"period_type\": \"month\"\n    },\n    \"result\": true\n  }\n}",
   "parameters": [
     {
       "name": "dataset_id",
@@ -17,6 +17,12 @@
       "name": "geometries",
       "description": "GeoJSON FeatureCollection of organisation units. Each feature's `id` becomes the CSV `location`.",
       "schema": { "type": "object", "subtype": "geojson" }
+    },
+    {
+      "name": "method",
+      "description": "Spatial aggregation method applied to the pixels within each org unit: mean (default), min, max, or sum.",
+      "schema": { "type": "string" },
+      "default": "mean"
     },
     {
       "name": "period_type",
@@ -40,8 +46,8 @@
         "geometries": { "from_parameter": "geometries" },
         "reducer": {
           "process_graph": {
-            "mean": {
-              "process_id": "mean",
+            "reduce": {
+              "process_id": { "from_parameter": "method" },
               "arguments": { "data": { "from_parameter": "data" } },
               "result": true
             }
