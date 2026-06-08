@@ -14,6 +14,7 @@ from typing import Any
 import xarray as xr
 from fastapi import HTTPException, Request
 
+from open_climate_service import config as api_config
 from open_climate_service.data_accessor.services.accessor import open_icechunk_dataset, open_zarr_dataset
 from open_climate_service.data_manager.services.utils import get_time_dim
 from open_climate_service.ingestions import services as ingestion_services
@@ -267,7 +268,7 @@ def _load_collection_impl(
 ) -> xr.DataArray:
     """Load a published dataset as an openEO data cube (xr.DataArray)."""
     artifact = _get_published_artifact(id)
-    ds = _open_artifact(artifact)
+    ds = _ensure_crs(_open_artifact(artifact))
 
     bbox = _bbox_to_dict(spatial_extent)
     t_extent = _temporal_to_list(temporal_extent)
@@ -356,6 +357,34 @@ def _open_artifact(artifact: Any) -> xr.Dataset:
     if artifact.format == ArtifactFormat.ICECHUNK:
         return open_icechunk_dataset(path)
     return open_zarr_dataset(path)
+
+
+def _ensure_crs(ds: xr.Dataset) -> xr.Dataset:
+    """Ensure the cube carries a CF ``spatial_ref`` coordinate that odc.geo can read.
+
+    Streaming-ingested IceChunk stores record their CRS only as GeoZarr root-group
+    attributes (``proj:code``), which odc.geo does not interpret. odc-based processes
+    such as ``resample_cube_spatial`` then fail with "Can not reproject non-georegistered
+    array". Writing the CRS here as a proper CF grid_mapping makes every collection
+    consistently georegistered regardless of storage format. Stores written by the
+    downloader/pyramid path already carry ``spatial_ref``; ``write_crs`` is a no-op for
+    them, so this is safe and idempotent.
+
+    The CRS is taken from the store's declared ``proj:code`` when present, falling back
+    to the instance CRS. Tagging failures are logged and the dataset returned untouched
+    rather than failing the load.
+    """
+    import rioxarray  # noqa: F401  # pyright: ignore[reportUnusedImport]  # activates .rio accessor
+
+    try:
+        if ds.rio.crs is not None:
+            return ds
+        crs = ds.attrs.get("proj:code") or ds.attrs.get("proj:epsg") or api_config.get_crs()
+        tagged: xr.Dataset = ds.rio.write_crs(crs)
+        return tagged
+    except Exception:  # pragma: no cover - defensive; resampling will surface a clearer error
+        logger.warning("Could not attach CRS to collection; leaving untagged", exc_info=True)
+        return ds
 
 
 def _artifact_store_path(artifact: Any) -> str:
