@@ -16,6 +16,8 @@ pip install open-climate-service[xarray]    # + open published datasets as xarra
 pip install open-climate-service[server]    # full server stack — run your own instance
 ```
 
+> **Running a server?** The recommended ways to run an instance are **uv** or **Docker** — see [Run a server](#run-a-server) and the [setup guide](https://dhis2.github.io/open-climate-service/setup_guide/). The `[server]` extra installs with `pip` on Linux x86-64; on macOS or ARM, use uv or Docker. The client and `[xarray]` extras work on any platform.
+
 ## Quick start (client)
 
 ```python
