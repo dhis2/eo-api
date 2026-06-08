@@ -6,15 +6,15 @@ Adjust BASE_URL if the API is not running on the default local address.
 
 import json
 
-from open_climate_service.client import Client
+from open_climate_service import ClimateService
 
 BASE_URL = "http://127.0.0.1:8000"
 
 
 def main() -> None:
     """Discover and open the first published dataset."""
-    api = Client(BASE_URL)
-    datasets = api.catalog()
+    service = ClimateService(BASE_URL)
+    datasets = service.datasets()
 
     if not datasets:
         print("No published datasets found. Run an ingestion first.")
@@ -25,7 +25,7 @@ def main() -> None:
     first = datasets[0]
     print(f"\nOpening: {first['title']}")
 
-    ds = api.open(first["id"])
+    ds = service.open_dataset(first["id"])
     print(ds)
 
     print(f"\nTime range: {ds['t'].values[0]}  →  {ds['t'].values[-1]}")
