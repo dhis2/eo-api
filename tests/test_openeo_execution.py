@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+from io import StringIO
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -22,11 +24,14 @@ from open_climate_service.openeo.execution import (
 )
 from open_climate_service.openeo.jobs import (
     OpenEOJobService,
+    _build_chap_csv_frame,
     _derive_coverage,
     _derive_variable,
     _infer_period_type,
     _recover_temporal_from_attrs,
     _result_assets,
+    _to_dhis2_period_string,
+    _write_dataset_tabular_export,
 )
 from open_climate_service.openeo.schemas import OpenEOJobCreate, OpenEOJobRecord, OpenEOJobStatus
 from open_climate_service.shared.time import utc_now
@@ -204,6 +209,41 @@ def test_persist_result_geodataframe_writes_geojson(job_service: OpenEOJobServic
     assert output_path.endswith(".geojson")
 
 
+def test_persist_result_dataset_writes_chap_csv(job_service: OpenEOJobService) -> None:
+    ds = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.array([[28.4, 24.1], [29.0, 25.5]], dtype=np.float32),
+                dims=["t", "geometry"],
+                coords={
+                    "t": np.array(["2024-01-01", "2024-02-01"], dtype="datetime64[ns]"),
+                    "geometry": ["OU_1", "OU_2"],
+                },
+            ),
+            "precipitation": xr.DataArray(
+                np.array([[12.1, 8.3], [np.nan, 9.4]], dtype=np.float32),
+                dims=["t", "geometry"],
+                coords={
+                    "t": np.array(["2024-01-01", "2024-02-01"], dtype="datetime64[ns]"),
+                    "geometry": ["OU_1", "OU_2"],
+                },
+            ),
+        }
+    )
+
+    output_path = job_service._persist_result("job-chap", SaveResultEnvelope(ds, "CHAPCSV"))
+
+    assert output_path is not None
+    assert output_path.endswith("result.csv")
+    rows = list(csv.DictReader(StringIO(Path(output_path).read_text())))
+    assert rows == [
+        {"time_period": "202401", "location": "OU_1", "temperature": "28.4", "precipitation": "12.1"},
+        {"time_period": "202401", "location": "OU_2", "temperature": "24.1", "precipitation": "8.3"},
+        {"time_period": "202402", "location": "OU_1", "temperature": "29", "precipitation": ""},
+        {"time_period": "202402", "location": "OU_2", "temperature": "25.5", "precipitation": "9.4"},
+    ]
+
+
 def test_openeo_job_service_create_execute_and_get_results(
     job_service: OpenEOJobService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -255,6 +295,12 @@ def test_result_assets_geojson() -> None:
     assets = _result_assets(_record("/some/path/result.geojson"))
     assert assets["result"]["type"] == "application/geo+json"
     assert assets["result"]["href"].endswith("result.geojson")
+
+
+def test_result_assets_csv() -> None:
+    assets = _result_assets(_record("/some/path/result.csv"))
+    assert assets["result"]["type"] == "text/csv"
+    assert assets["result"]["href"].endswith("result.csv")
 
 
 def test_result_assets_none_output_returns_empty() -> None:
@@ -484,6 +530,118 @@ def test_result_route_reprojects_geojson_payload_to_wgs84(client: TestClient, mo
     assert coords[1] == pytest.approx(1.0, rel=0, abs=1e-6)
 
 
+def test_result_route_returns_chap_csv_payload(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    ds = xr.Dataset(
+        {
+            "temperature": xr.DataArray(
+                np.array([[28.4, 24.1]], dtype=np.float32),
+                dims=["t", "geometry"],
+                coords={
+                    "t": np.array(["2024-01-01"], dtype="datetime64[ns]"),
+                    "geometry": ["OU_1", "OU_2"],
+                },
+            ),
+            "precipitation": xr.DataArray(
+                np.array([[12.1, 8.3]], dtype=np.float32),
+                dims=["t", "geometry"],
+                coords={
+                    "t": np.array(["2024-01-01"], dtype="datetime64[ns]"),
+                    "geometry": ["OU_1", "OU_2"],
+                },
+            ),
+        }
+    )
+
+    def return_chap_result(*args: object, **kwargs: object) -> SaveResultEnvelope:
+        del args, kwargs
+        return SaveResultEnvelope(ds, "CHAPCSV", {"period_type": "monthly"})
+
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        return_chap_result,
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    rows = list(csv.DictReader(StringIO(response.text)))
+    assert rows == [
+        {"time_period": "202401", "location": "OU_1", "temperature": "28.4", "precipitation": "12.1"},
+        {"time_period": "202401", "location": "OU_2", "temperature": "24.1", "precipitation": "8.3"},
+    ]
+
+
+def test_build_chap_csv_frame_requires_location_field() -> None:
+    with pytest.raises(ValueError, match="Missing location field 'geometry' in aggregated result"):
+        _build_chap_csv_frame(
+            [{"t": "2024-01-01", "temperature": 1.5}],
+            {"period_type": "daily"},
+        )
+
+
+def test_build_chap_csv_frame_requires_period_field() -> None:
+    with pytest.raises(ValueError, match="Missing period field 't' in aggregated result"):
+        _build_chap_csv_frame(
+            [{"geometry": "OU_1", "temperature": 1.5}],
+            {"period_type": "daily"},
+        )
+
+
+def test_build_chap_csv_frame_includes_row_context_for_null_location() -> None:
+    with pytest.raises(ValueError, match=r"Null location value in field 'geometry' at row 0"):
+        _build_chap_csv_frame(
+            [{"t": "2024-01-01", "geometry": None, "temperature": 1.5}],
+            {"period_type": "daily"},
+        )
+
+
+def test_build_chap_csv_frame_requires_at_least_one_value_column() -> None:
+    with pytest.raises(ValueError, match="requires at least one value column"):
+        _build_chap_csv_frame(
+            [{"t": "2024-01-01", "geometry": "OU_1"}],
+            {"period_type": "daily"},
+        )
+
+
+def test_dhis2_period_string_accepts_existing_monthly_string() -> None:
+    assert _to_dhis2_period_string("202401") == "202401"
+
+
+def test_build_chap_csv_frame_rejects_ambiguous_period_without_period_type() -> None:
+    with pytest.raises(ValueError, match="Ambiguous period value"):
+        _build_chap_csv_frame(
+            [{"t": "2024-01-01", "geometry": "OU_1", "temperature": 1.5}],
+            {},
+        )
+
+
+def test_dhis2_period_string_rejects_mismatched_existing_period_type() -> None:
+    with pytest.raises(ValueError, match="appears to be monthly, but period_type=daily"):
+        _to_dhis2_period_string("202401", "daily")
+
+
+def test_dhis2_period_string_wraps_parse_failure_with_context() -> None:
+    with pytest.raises(ValueError, match=r"Could not parse period value 'not-a-date' for period_type=daily"):
+        _to_dhis2_period_string("not-a-date", "daily")
+
+
+def test_write_dataset_tabular_export_does_not_infer_unsupported_hourly_period_type(tmp_path: Path) -> None:
+    ds = xr.Dataset(
+        {"temperature": (("t", "geometry"), np.array([[1.0], [2.0]], dtype=np.float32))},
+        coords={
+            "t": np.array(["2024-01-01T00:00:00", "2024-01-01T01:00:00"], dtype="datetime64[ns]"),
+            "geometry": ["OU_1"],
+        },
+    )
+
+    with pytest.raises(ValueError, match="Ambiguous period value"):
+        _write_dataset_tabular_export(ds, tmp_path, "CHAPCSV", {})
+
+
 # ---------------------------------------------------------------------------
 # _write_managed_zarr — managed Icechunk / pyramid store via save_result
 # ---------------------------------------------------------------------------
@@ -687,6 +845,7 @@ def test_derive_variable_raises_for_multiple_vars_without_option() -> None:
         (1, "daily"),
         (7, "weekly"),
         (30, "monthly"),
+        (90, "quarterly"),
         (365, "yearly"),
     ],
 )

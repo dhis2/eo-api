@@ -8,6 +8,7 @@ import os
 import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, TypeVar
 from uuid import uuid4
@@ -434,6 +435,8 @@ class OpenEOJobService:
                 # managed dataset via a marker that _result_assets expands into
                 # /datasets, /zarr (and /stac when published) result links.
                 return f"managed://{options['dataset_id']}"
+            if fmt in _TABULAR_EXPORT_FORMATS:
+                return _write_dataset_tabular_export(result, results_dir, fmt, options)
             return _write_raster(result, results_dir, fmt)
 
         # Tabular: resolve dask_geopandas → GeoDataFrame
@@ -449,6 +452,13 @@ class OpenEOJobService:
             import geopandas as gpd
 
             if isinstance(result, gpd.GeoDataFrame):
+                if fmt in _TABULAR_EXPORT_FORMATS:
+                    return _write_tabular_export(
+                        result.drop(columns="geometry", errors="ignore"),
+                        results_dir,
+                        fmt,
+                        options,
+                    )
                 return _write_vector(result, results_dir, fmt)
         except ImportError:
             pass
@@ -692,6 +702,8 @@ def _infer_period_type(ds: Any, t_dim: str) -> str | None:
         return "weekly"
     if median_seconds <= 32 * 86400:
         return "monthly"
+    if median_seconds <= 100 * 86400:
+        return "quarterly"
     return "yearly"
 
 
@@ -810,6 +822,10 @@ _VECTOR_FORMATS: dict[str, tuple[str, str]] = {
     "PARQUET": (".parquet", "application/vnd.apache.parquet"),
 }
 
+_TABULAR_EXPORT_FORMATS: dict[str, tuple[str, str]] = {
+    "CHAPCSV": (".csv", "text/csv"),
+}
+
 
 def _write_raster(ds: Any, results_dir: Any, fmt: str) -> str | None:
     """Write an xr.Dataset to disk in the requested format. Returns the output path."""
@@ -894,6 +910,190 @@ def _write_vector(gdf: Any, results_dir: Any, fmt: str) -> str | None:
     path = str(results_dir / "result.geojson")
     gdf.to_file(path, driver="GeoJSON")
     return path
+
+
+def _write_dataset_tabular_export(ds: Any, results_dir: Any, fmt: str, options: dict[str, Any]) -> str | None:
+    import pandas as pd
+
+    inferred_options = dict(options)
+    period_field = _optional_str_option(inferred_options, "period_field") or "t"
+    if "period_type" not in inferred_options and period_field in getattr(ds, "coords", {}):
+        inferred = _infer_period_type(ds, period_field)
+        if inferred in {"daily", "weekly", "monthly", "quarterly", "yearly"}:
+            inferred_options["period_type"] = inferred
+
+    if hasattr(ds, "to_dataframe"):
+        df = ds.to_dataframe().reset_index()
+    elif isinstance(ds, pd.DataFrame):
+        df = ds
+    else:
+        raise TypeError(f"Unsupported data type for tabular export: {type(ds).__name__}")
+    return _write_tabular_export(df, results_dir, fmt, inferred_options)
+
+
+def _write_tabular_export(df: Any, results_dir: Any, fmt: str, options: dict[str, Any]) -> str | None:
+    if fmt == "CHAPCSV":
+        return _write_chap_csv(df, results_dir, options)
+    known = ", ".join(sorted(_TABULAR_EXPORT_FORMATS))
+    raise ValueError(f"Unsupported tabular export format '{fmt}'. Known formats: {known}")
+
+
+def _write_chap_csv(df: Any, results_dir: Any, options: dict[str, Any]) -> str:
+    frame = _build_chap_csv_frame(df, options)
+    path = str(results_dir / "result.csv")
+    frame.to_csv(path, index=False)
+    return path
+
+
+def _build_chap_csv_frame(df: Any, options: dict[str, Any]) -> Any:
+    import pandas as pd
+
+    period_field = _optional_str_option(options, "period_field") or "t"
+    location_field = _optional_str_option(options, "location_field") or "geometry"
+    period_type = _optional_str_option(options, "period_type")
+
+    frame = pd.DataFrame(df).copy()
+    if location_field not in frame.columns:
+        raise ValueError(f"Missing location field '{location_field}' in aggregated result")
+    if period_field not in frame.columns:
+        raise ValueError(f"Missing period field '{period_field}' in aggregated result")
+
+    value_fields = _select_chap_value_fields(frame, location_field, period_field)
+    rows: list[dict[str, str]] = []
+    for row_index, record in enumerate(frame.to_dict(orient="records")):
+        period_value = record.get(period_field)
+        if _is_nullish(period_value):
+            raise ValueError(f"Null period value in field '{period_field}' at row {row_index}")
+        location = record.get(location_field)
+        if _is_nullish(location):
+            raise ValueError(f"Null location value in field '{location_field}' at row {row_index}")
+
+        row: dict[str, str] = {
+            "time_period": _to_dhis2_period_string(period_value, period_type),
+            "location": str(location),
+        }
+        for value_field in value_fields:
+            value = record.get(value_field)
+            row[value_field] = "" if _is_nullish(value) else _to_dhis2_value_string(value)
+        rows.append(row)
+
+    return pd.DataFrame(rows, columns=["time_period", "location", *value_fields])
+
+
+def _select_chap_value_fields(frame: Any, location_field: str, period_field: str) -> list[str]:
+    excluded = {
+        location_field,
+        period_field,
+        "geometry",
+        "spatial_ref",
+        "index",
+        "band",
+        "bands",
+    }
+    candidates = [str(c) for c in frame.columns if c not in excluded and not str(c).startswith("level_")]
+    if not candidates:
+        raise ValueError("CHAPCSV export requires at least one value column")
+    return candidates
+
+
+def _optional_str_option(options: dict[str, Any], key: str) -> str | None:
+    raw = options.get(key)
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    return value or None
+
+
+def _is_nullish(value: Any) -> bool:
+    import numpy as np
+    import pandas as pd
+
+    result = pd.isna(value)
+    if isinstance(result, (bool, np.bool_)):
+        return bool(result)
+    if isinstance(result, np.ndarray):
+        if result.ndim == 0:
+            return bool(result.item())
+        raise ValueError("Array-like values are not supported in tabular export cells")
+    if hasattr(result, "shape") and getattr(result, "shape", ()) not in [(), None]:
+        raise ValueError("Array-like values are not supported in tabular export cells")
+    if hasattr(result, "item"):
+        return bool(result.item())
+    return bool(result)
+
+
+def _to_dhis2_value_string(value: Any) -> str:
+    import numpy as np
+
+    if isinstance(value, (bool, np.bool_)):
+        return "true" if bool(value) else "false"
+    if isinstance(value, (int, np.integer)) and not isinstance(value, bool):
+        return str(int(value))
+    if isinstance(value, (float, np.floating)):
+        as_float = float(value)
+        as_float32 = float(np.float32(as_float))
+        if as_float == as_float32:
+            return np.format_float_positional(np.float32(as_float), trim="-")
+        return np.format_float_positional(as_float, trim="-")
+    if isinstance(value, Decimal):
+        normalized = format(value, "f")
+        if "." in normalized:
+            normalized = normalized.rstrip("0").rstrip(".")
+        return normalized or "0"
+    return str(value)
+
+
+def _to_dhis2_period_string(value: Any, period_type: str | None = None) -> str:
+    import re
+
+    import pandas as pd
+
+    raw = str(value).strip()
+    if not raw:
+        raise ValueError("Empty period value is not allowed")
+
+    patterns = {
+        "daily": re.compile(r"^\d{8}$"),
+        "weekly": re.compile(r"^\d{4}W\d{2}$"),
+        "monthly": re.compile(r"^\d{6}$"),
+        "quarterly": re.compile(r"^\d{4}Q[1-4]$"),
+        "yearly": re.compile(r"^\d{4}$"),
+    }
+    if period_type is not None:
+        period_type = period_type.strip().lower()
+        if period_type not in patterns:
+            raise ValueError(f"Unsupported period_type '{period_type}'")
+        if patterns[period_type].match(raw):
+            return raw
+        for known_type, pattern in patterns.items():
+            if known_type != period_type and pattern.match(raw):
+                raise ValueError(f"Period value appears to be {known_type}, but period_type={period_type}")
+    else:
+        for pattern in patterns.values():
+            if pattern.match(raw):
+                return raw
+
+    if period_type is None:
+        raise ValueError(
+            "Ambiguous period value; provide period_type explicitly when the input is not already in DHIS2 format"
+        )
+
+    try:
+        ts = pd.Timestamp(value)
+    except Exception as exc:
+        raise ValueError(f"Could not parse period value {raw!r} for period_type={period_type}") from exc
+    if period_type == "daily":
+        return ts.strftime("%Y%m%d")
+    if period_type == "weekly":
+        iso = ts.isocalendar()
+        return f"{int(iso.year):04d}W{int(iso.week):02d}"
+    if period_type == "monthly":
+        return ts.strftime("%Y%m")
+    if period_type == "quarterly":
+        return f"{ts.year:04d}Q{((ts.month - 1) // 3) + 1}"
+    if period_type == "yearly":
+        return ts.strftime("%Y")
+    raise ValueError(f"Unsupported period_type '{period_type}'")
 
 
 def _write_png(ds: Any, results_dir: Any) -> str | None:
