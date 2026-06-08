@@ -22,7 +22,7 @@ The platform is being developed in close collaboration with HISP groups in the c
 
 The Open Climate Service is a no-code data integration platform that enables earth observation (EO) and climate data from multiple upstream sources to be downloaded, processed, harmonised, and loaded into DHIS2 and the CHAP Modelling Platform.
 
-The platform is built as a Python-based REST API (FastAPI) and exposes both native endpoints and OGC API-compliant endpoints (via pygeoapi). Data is stored in cloud-native GeoZarr format and can be consumed by the DHIS2 Climate App, the DHIS2 Maps App, DHIS2 Climate Tools, the CHAP Modelling Platform, and third-party tools such as QGIS.
+The platform is built as a Python-based REST API (FastAPI) and exposes native REST endpoints together with a STAC catalogue for discovery. Data is stored in cloud-native GeoZarr format and can be consumed by the DHIS2 Climate App, the DHIS2 Maps App, DHIS2 Climate Tools, the CHAP Modelling Platform, and third-party tools such as QGIS.
 
 The Open Climate Service is envisioned as the shared data infrastructure layer for the DHIS2 climate and health ecosystem — a single, well-defined source of spatiotemporal raster data that any DHIS2 application or external tool can build on.
 
@@ -92,7 +92,7 @@ Core parts of the Open Climate Service must function without a connected DHIS2 i
 Internally, the Open Climate Service distinguishes between dataset templates and published datasets:
 
 - **Dataset templates** — YAML definitions describing a dataset type (source, variable, period type, processing steps). These are internal and align closely with the OGC API Collections specification. They act as blueprints for ingestion.
-- **Published datasets** — actualised, ingested datasets for a specific extent and time range, exposed under `/datasets` and `/ogcapi/collections`. These are what end users and client applications discover and consume.
+- **Published datasets** — actualised, ingested datasets for a specific extent and time range, exposed under `/datasets` and `/stac`. These are what end users and client applications discover and consume.
 
 This mirrors the approach used in the CHAP Modelling Platform, where generic model template YAMLs are distinguished from specific initialised instances.
 
@@ -111,7 +111,6 @@ This mirrors the approach used in the CHAP Modelling Platform, where generic mod
 
 - Store all datasets as GeoZarr — cloud-native, chunked, multiscale, EPSG:4326.
 - Expose datasets via a `/zarr/{dataset_id}` endpoint using HTTP range requests, enabling chunk-level access by any compatible client.
-- Expose datasets through OGC API-compliant endpoints (Coverages, EDR, Processes, Tiles, Collections) via pygeoapi under `/ogcapi`.
 - Expose dataset discovery metadata via a `/datasets` endpoint and a STAC catalogue.
 
 ### 6.3 Visualisation
@@ -174,7 +173,6 @@ The API is built on FastAPI and exposes the following endpoint groups:
 | `/sync`              | Check for more recent data from the upstream source and append new time steps to the existing Zarr store. Validates temporal continuity before writing.                                         |
 | `/datasets`          | List and describe available published datasets — metadata, period type, extent, last updated, and access links.                                                                                 |
 | `/zarr/{dataset_id}` | Serve the GeoZarr store by returning a directory listing at the dataset path and file responses for Zarr contents beneath it.                                                                   |
-| `/ogcapi/...`        | OGC API-compliant endpoints served by pygeoapi: Coverages, EDR, Processes, Collections.                                                                                                         |
 
 ### 8.2 Storage layer
 
@@ -223,7 +221,6 @@ Long-running jobs (ingestion, sync, aggregation) are executed asynchronously. Th
 | rechunker                     | Reshapes existing Zarr stores to a new chunk layout without full rewrite. Used for per-dataset chunk shape tuning.                                                                       |
 | cf-xarray                     | CF convention handling — maps standard dimension names and attributes across source datasets.                                                                                            |
 | numba                         | JIT compilation for custom processing functions (e.g. consecutive rainy days, heat index) applied pixel-wise over large arrays.                                                          |
-| pygeoapi                      | OGC API standards exposure (Coverages, EDR, Processes, Tiles, Collections). Mounted under `/ogcapi`.                                                                                     |
 | TiTiler                       | On-the-fly raster tile server. Serves map tiles with dynamic styling, following OGC API - Tiles specification.                                                                           |
 | fsspec                        | Unified filesystem abstraction for storage backends (local, S3-compatible, Azure Blob, GCS, Ceph/RGW). Backend is environment-variable configuration only.                               |
 | zarr-layer (MapLibre)         | TypeScript library for rendering Zarr directly as a native MapLibre Custom Layer in the browser. GPU reprojection from EPSG:4326 to Spherical Mercator; uses multiscale levels per zoom. |
@@ -272,4 +269,3 @@ The storage backend is configured entirely via environment variables — no code
 | dhis2eo                 | https://github.com/dhis2/dhis2eo             |
 | dhis2-python-client     | https://github.com/dhis2/dhis2-python-client |
 | GeoZarr roadmap         | https://geozarr.org/roadmap.html             |
-| pygeoapi                | https://pygeoapi.io/                         |

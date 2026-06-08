@@ -94,7 +94,7 @@ Current EO data workflows are fragmented across tools and scripts, making them h
 
 ## 8) Proposed Technical Direction
 - API framework: FastAPI
-- Process API: pygeoapi (OGC API - Processes)
+- Process API: native openEO `/processes` and `/jobs` (OGC API - Processes-aligned)
 - Raster/tile API: TiTiler (`/cog/*`, `/stac/*`)
 - DHIS2 API integration library: `dhis2-python-client` (https://github.com/dhis2/dhis2-python-client)
 - EO/climate processing library: `dhis2eo` (https://github.com/dhis2/dhis2eo)

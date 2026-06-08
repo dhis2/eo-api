@@ -57,7 +57,6 @@ Common Makefile targets:
 | `make lint`    | Check linting, formatting, and types             |
 | `make fix`     | Autofix ruff lint and format issues              |
 | `make test`    | Run the test suite with pytest                   |
-| `make openapi` | Regenerate the pygeoapi OpenAPI spec             |
 | `make start`   | Build and start the Docker stack                 |
 | `make restart` | Tear down, rebuild, and restart the Docker stack |
 
@@ -74,7 +73,6 @@ Once running, the API is available at:
 | `http://localhost:8000/datasets`          | Managed dataset catalogue                  |
 | `http://localhost:8000/stac/catalog.json` | STAC catalog for published GeoZarr data    |
 | `http://localhost:8000/zarr/{dataset_id}` | GeoZarr store for a managed dataset        |
-| `http://localhost:8000/ogcapi`            | OGC API root                               |
 
 ## STAC
 
@@ -104,22 +102,4 @@ else:
         consolidated=asset["xarray:open_kwargs"]["consolidated"],
     )
     print(ds)
-```
-
-## pygeoapi
-
-The OGC API is served by pygeoapi, mounted at `/ogcapi`. Its configuration is generated dynamically from published artifacts and written to the resolved runtime data directory (for Docker: `/app/data/pygeoapi/pygeoapi-config.yml`).
-
-The base configuration is bundled with the package at `open_climate_service/data/pygeoapi/base.yml` and does not need to be copied or managed separately.
-
-To validate the configuration manually:
-
-```
-PYTHONPATH="$(pwd)/src" uv run pygeoapi config validate -c data/pygeoapi/pygeoapi-config.yml
-```
-
-Regenerate after changes to publication logic:
-
-```
-make openapi
 ```

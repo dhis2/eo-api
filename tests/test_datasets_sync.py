@@ -54,7 +54,6 @@ def _artifact(
         publication=ArtifactPublication(
             status=PublicationStatus.PUBLISHED,
             collection_id=managed_dataset_id,
-            pygeoapi_path=f"/ogcapi/collections/{managed_dataset_id}",
         ),
     )
 
