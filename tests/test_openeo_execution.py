@@ -843,6 +843,14 @@ def test_build_chap_csv_frame_requires_location_field() -> None:
         )
 
 
+def test_build_chap_csv_frame_missing_default_geometry_field_guides_geodataframe_inputs() -> None:
+    with pytest.raises(ValueError, match="set save_result option 'location_field' explicitly"):
+        _build_chap_csv_frame(
+            [{"t": "2024-01-01", "temperature": 1.5}],
+            {"period_type": "daily"},
+        )
+
+
 def test_build_chap_csv_frame_requires_period_field() -> None:
     with pytest.raises(ValueError, match="Missing period field 't' in aggregated result"):
         _build_chap_csv_frame(
@@ -1139,6 +1147,12 @@ def test_infer_period_type(timedelta_days: int, expected: str) -> None:
 
 def test_infer_period_type_returns_none_for_single_timestep() -> None:
     ds = xr.Dataset({"v": ("t", [1.0])}, coords={"t": np.array(["2025-01-01"], dtype="datetime64[D]")})
+    assert _infer_period_type(ds, "t") is None
+
+
+def test_infer_period_type_returns_none_for_bimonthly_spacing() -> None:
+    t = np.arange(3).astype("timedelta64[D]") * 60 + np.datetime64("2025-01-01", "D")
+    ds = xr.Dataset({"v": ("t", [1.0, 2.0, 3.0])}, coords={"t": t})
     assert _infer_period_type(ds, "t") is None
 
 

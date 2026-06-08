@@ -703,9 +703,11 @@ def _infer_period_type(ds: Any, t_dim: str) -> str | None:
         return "weekly"
     if median_seconds <= 32 * 86400:
         return "monthly"
-    if median_seconds <= 100 * 86400:
+    if 80 * 86400 <= median_seconds <= 100 * 86400:
         return "quarterly"
-    return "yearly"
+    if 330 * 86400 <= median_seconds <= 370 * 86400:
+        return "yearly"
+    return None
 
 
 def _derive_variable(ds: Any, options: dict[str, Any]) -> str:
@@ -959,6 +961,11 @@ def _build_chap_csv_frame(df: Any, options: dict[str, Any]) -> Any:
 
     frame = pd.DataFrame(df).copy()
     if location_field not in frame.columns:
+        if location_field == "geometry":
+            raise ValueError(
+                "Missing location field 'geometry' in aggregated result; "
+                "for GeoDataFrame inputs set save_result option 'location_field' explicitly"
+            )
         raise ValueError(f"Missing location field '{location_field}' in aggregated result")
     if period_field not in frame.columns:
         raise ValueError(f"Missing period field '{period_field}' in aggregated result")
