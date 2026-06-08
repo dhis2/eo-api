@@ -920,7 +920,8 @@ def _write_dataset_tabular_export(ds: Any, results_dir: Any, fmt: str, options: 
 
     inferred_options = dict(options)
     period_field = _optional_str_option(inferred_options, "period_field") or "t"
-    if "period_type" not in inferred_options and period_field in getattr(ds, "coords", {}):
+    period_type = _optional_str_option(inferred_options, "period_type")
+    if period_type is None and period_field in getattr(ds, "coords", {}):
         inferred = _infer_period_type(ds, period_field)
         if inferred in {"daily", "weekly", "monthly", "quarterly", "yearly"}:
             inferred_options["period_type"] = inferred

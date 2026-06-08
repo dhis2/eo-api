@@ -123,7 +123,7 @@ def file_formats() -> dict[str, Any]:
             "description": (
                 "Wide-format CSV for CHAP imports with one row per location-period and one column per variable."
             ),
-            "gis_data_types": ["table", "vector"],
+            "gis_data_types": ["table"],
             "parameters": {
                 "period_field": {"type": "string", "default": "t"},
                 "location_field": {"type": "string", "default": "geometry"},

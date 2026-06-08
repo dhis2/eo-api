@@ -902,6 +902,28 @@ def test_write_dataset_tabular_export_does_not_infer_unsupported_hourly_period_t
         _write_dataset_tabular_export(ds, tmp_path, "CHAPCSV", {})
 
 
+@pytest.mark.parametrize("period_type", [None, ""])
+def test_write_dataset_tabular_export_treats_blank_period_type_as_missing(
+    tmp_path: Path, period_type: str | None
+) -> None:
+    ds = xr.Dataset(
+        {"temperature": (("t", "geometry"), np.array([[1.0], [2.0]], dtype=np.float32))},
+        coords={
+            "t": np.array(["2024-01-01", "2024-02-01"], dtype="datetime64[ns]"),
+            "geometry": ["OU_1"],
+        },
+    )
+
+    output_path = _write_dataset_tabular_export(ds, tmp_path, "CHAPCSV", {"period_type": period_type})
+
+    assert output_path is not None
+    rows = list(csv.DictReader(StringIO(Path(output_path).read_text())))
+    assert rows == [
+        {"time_period": "202401", "location": "OU_1", "temperature": "1"},
+        {"time_period": "202402", "location": "OU_1", "temperature": "2"},
+    ]
+
+
 # ---------------------------------------------------------------------------
 # _write_managed_zarr — managed Icechunk / pyramid store via save_result
 # ---------------------------------------------------------------------------
