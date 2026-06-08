@@ -226,17 +226,18 @@ _PYRAMID_TARGET_TILE_SIZE = 512
 _ROOT_TIME_COORD_MAX_CHUNK = 4096
 
 
-def _strip_sharding(encoding: dict[str, dict[str, object]]) -> dict[str, dict[str, object]]:
+def _strip_sharding(
+    encoding: dict[str, dict[str, dict[str, object]]],
+) -> dict[str, dict[str, dict[str, object]]]:
     """Remove the shards key from topozarr pyramid encoding, leaving only chunks.
 
     zarrita (used by @carbonplan/zarr-layer) cannot decode sharding_indexed codec
     without explicit registration, so we drop shards before writing the store.
     """
-    stripped: dict[str, dict[str, object]] = {}
+    stripped: dict[str, dict[str, dict[str, object]]] = {}
     for level_path, level_enc in encoding.items():
         stripped[level_path] = {
-            var: {k: v for k, v in var_enc.items() if k != "shards"}
-            for var, var_enc in level_enc.items()
+            var: {k: v for k, v in var_enc.items() if k != "shards"} for var, var_enc in level_enc.items()
         }
     return stripped
 
