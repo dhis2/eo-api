@@ -40,9 +40,9 @@ def _artifact(
         dataset_id=source_dataset_id,
         dataset_name="CHIRPS3 precipitation",
         variable="precip",
-        format=ArtifactFormat.ZARR,
-        path="/tmp/chirps3_precipitation_daily.zarr",
-        asset_paths=["/tmp/chirps3_precipitation_daily.zarr"],
+        format=ArtifactFormat.ICECHUNK,
+        path="/tmp/chirps3_precipitation_daily.icechunk",
+        asset_paths=["/tmp/chirps3_precipitation_daily.icechunk"],
         variables=["precip"],
         request_scope=ArtifactRequestScope(
             start="2026-01-01",
@@ -121,7 +121,7 @@ def test_list_datasets_groups_artifacts_by_managed_dataset_id(monkeypatch: pytes
     assert any(link.href == f"/stac/collections/{dataset.dataset_id}" for link in dataset.links)
 
 
-def test_dataset_links_include_stac_for_published_zarr() -> None:
+def test_dataset_links_include_stac_for_published_icechunk() -> None:
     links = services._dataset_links("chirps3_precipitation_daily", _artifact(artifact_id="a1"))
 
     assert any(link.rel == "stac" and link.href == "/stac/collections/chirps3_precipitation_daily" for link in links)
@@ -140,43 +140,14 @@ def test_dataset_links_omit_stac_for_unpublished_or_netcdf() -> None:
     assert all(link.rel != "stac" for link in netcdf_links)
 
 
-def test_dataset_links_omit_ogc_collection_link_for_icechunk_artifacts() -> None:
-    icechunk = _artifact(artifact_id="a3")
-    icechunk.format = ArtifactFormat.ICECHUNK
+def test_dataset_links_include_zarr_and_stac_for_icechunk() -> None:
+    artifact = _artifact(artifact_id="a3")
 
-    links = services._dataset_links("chirps3_precipitation_daily", icechunk)
+    links = services._dataset_links("chirps3_precipitation_daily", artifact)
 
     assert any(link.rel == "zarr" for link in links)
     assert any(link.rel == "stac" for link in links)
     assert all(link.rel != "ogc-collection" for link in links)
-
-
-def test_get_dataset_zarr_store_info_reads_icechunk_listing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    store_path = tmp_path / "chirps3.icechunk"
-    storage = icechunk.local_filesystem_storage(str(store_path))
-    repo = icechunk.Repository.create(storage)
-    session = repo.writable_session("main")
-    ds = xr.Dataset(
-        {"precip": (("t", "y", "x"), [[[1.0, 2.0], [3.0, 4.0]]])},
-        coords={"t": ["2026-01-01"], "x": [1.0, 2.0], "y": [3.0, 4.0]},
-        attrs={"proj:code": "EPSG:4326", "spatial:bbox": [1.0, 3.0, 2.0, 4.0]},
-    )
-    ds.to_zarr(session.store, mode="w", zarr_format=3)
-    session.commit("seed icechunk store")
-    ds.close()
-
-    artifact = _artifact(artifact_id="a4")
-    artifact.format = ArtifactFormat.ICECHUNK
-    artifact.path = str(store_path)
-    artifact.asset_paths = [str(store_path)]
-    monkeypatch.setattr(services, "get_latest_artifact_for_dataset_or_404", lambda _: artifact)
-
-    listing = services.get_dataset_zarr_store_info_or_404("chirps3_precipitation_daily")
-
-    assert listing["format"] == ArtifactFormat.ICECHUNK
-    assert listing["path"] == "."
-    names = {entry["name"] for entry in listing["entries"]}  # type: ignore[index]
-    assert {"zarr.json", "precip", "t", "x", "y"} <= names
 
 
 def test_get_dataset_zarr_store_file_reads_icechunk_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

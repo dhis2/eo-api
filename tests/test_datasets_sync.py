@@ -30,14 +30,14 @@ def _artifact(
     managed_dataset_id: str = "chirps3_precipitation_daily_sle",
     created_at: str = "2026-01-10T00:00:00+00:00",
     end: str = "2026-01-10",
-    path: str = "/tmp/chirps3_precipitation_daily.zarr",
+    path: str = "/tmp/chirps3_precipitation_daily.icechunk",
 ) -> ArtifactRecord:
     return ArtifactRecord(
         artifact_id=artifact_id,
         dataset_id=source_dataset_id,
         dataset_name="CHIRPS3 precipitation",
         variable="precip",
-        format=ArtifactFormat.ZARR,
+        format=ArtifactFormat.ICECHUNK,
         path=path,
         asset_paths=[path],
         variables=["precip"],
@@ -175,6 +175,7 @@ def test_sync_dataset_append_policy_falls_back_to_rematerialize_without_icechunk
         end="2024",
         path=str(zarr_path),
     )
+    latest.format = ArtifactFormat.ZARR  # legacy download-path artifact, not Icechunk
     monkeypatch.setattr(services, "get_latest_artifact_for_dataset_or_404", lambda _: latest)
     monkeypatch.setattr(
         services.registry_datasets,
@@ -1087,3 +1088,125 @@ def test_sync_dataset_forwards_country_code_from_extent(monkeypatch: pytest.Monk
     services.sync_dataset(dataset_id=dataset_id, end="2021", publish=True)
 
     assert captured["country_code"] == "SLE"
+
+
+# ---------------------------------------------------------------------------
+# Pyramid promotion tests
+# ---------------------------------------------------------------------------
+
+
+def test_maybe_build_pyramid_calls_write_to_icechunk_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import xarray as xr
+
+    from open_climate_service.data_manager.services import downloader
+    from open_climate_service.ingestions.services import _maybe_build_pyramid
+
+    icechunk_path = tmp_path / "dataset.icechunk"
+    icechunk_path.mkdir()
+
+    ds = xr.Dataset()
+    monkeypatch.setattr(
+        "open_climate_service.data_accessor.services.accessor.open_icechunk_dataset",
+        lambda _: ds,
+    )
+
+    written: list[tuple] = []
+
+    def fake_write(ds_arg: xr.Dataset, path: Path, *a: object, **kw: object) -> None:
+        written.append((ds_arg, path))
+
+    monkeypatch.setattr(downloader, "write_to_icechunk_store", fake_write)
+
+    _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "precip"})
+
+    assert len(written) == 1
+    assert written[0][1] == icechunk_path
+
+
+def test_maybe_build_pyramid_skips_rewrite_for_normalized_flat_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A temporal append to an already-normalized flat store needs no read-rewrite."""
+    import numpy as np
+    import xarray as xr
+
+    from open_climate_service.data_manager.services import downloader
+    from open_climate_service.ingestions.services import _maybe_build_pyramid
+
+    icechunk_path = tmp_path / "dataset.icechunk"
+    icechunk_path.mkdir()
+
+    # Small flat store that already carries the spatial_ref CRS coordinate, i.e.
+    # the output of a prior write_to_icechunk_store normalization.
+    ds = xr.Dataset(
+        {"precip": (("t", "y", "x"), np.ones((2, 4, 5), dtype="float32"))},
+        coords={
+            "t": np.array(["2026-01-01", "2026-01-02"], dtype="datetime64[D]"),
+            "y": [1.0, 2.0, 3.0, 4.0],
+            "x": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "spatial_ref": 0,
+        },
+    )
+    monkeypatch.setattr(
+        "open_climate_service.data_accessor.services.accessor.open_icechunk_dataset",
+        lambda _: ds,
+    )
+
+    written: list[tuple] = []
+    monkeypatch.setattr(downloader, "write_to_icechunk_store", lambda *a, **kw: written.append(a))
+
+    _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "precip"})
+
+    assert written == []  # already GeoZarr-normalized and flat → no rewrite
+
+
+def test_maybe_build_pyramid_falls_back_on_build_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import xarray as xr
+
+    from open_climate_service.data_manager.services import downloader
+    from open_climate_service.ingestions.services import _maybe_build_pyramid
+
+    icechunk_path = tmp_path / "dataset.icechunk"
+    icechunk_path.mkdir()
+
+    ds = xr.Dataset()
+    monkeypatch.setattr(
+        "open_climate_service.data_accessor.services.accessor.open_icechunk_dataset",
+        lambda _: ds,
+    )
+
+    def fake_write_fail(*_a: object, **_k: object) -> None:
+        raise RuntimeError("fail")
+
+    monkeypatch.setattr(downloader, "write_to_icechunk_store", fake_write_fail)
+
+    # Must not raise — errors are swallowed so the flat artifact is still registered.
+    _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "v"})
+
+
+def test_plan_sync_append_for_icechunk_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    icechunk_path = tmp_path / "dataset.icechunk"
+    icechunk_path.mkdir()
+
+    latest = _artifact(artifact_id="a1", managed_dataset_id="chirps3_precipitation_daily_sle", end="2026-01-15")
+    latest.format = ArtifactFormat.ICECHUNK
+    latest.path = str(icechunk_path)
+    latest.asset_paths = [str(icechunk_path)]
+
+    monkeypatch.setattr(sync_engine, "read_committed_period_ids", lambda *_a, **_k: {"2026-01-15"})
+
+    result = sync_engine.plan_sync(
+        source_dataset={
+            "id": "chirps3_precipitation_daily",
+            "period_type": "daily",
+            "sync": {"kind": "temporal", "execution": "append"},
+            "ingestion": {"plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin"},
+        },
+        latest_artifact=latest,
+        requested_end="2026-01-31",
+    )
+
+    assert result.action == SyncAction.APPEND

@@ -24,6 +24,67 @@ logger = logging.getLogger(__name__)
 _registry: Any = None  # lazy singleton
 
 
+@xr.register_dataset_accessor("openeo")
+class _DatasetOpenEOAccessor:  # pyright: ignore[reportUnusedClass]
+    """Mirrors the DataArray openeo accessor for xr.Dataset.
+
+    openeo-processes-dask-slim only registers the accessor for DataArray.
+    Several standard processes (e.g. rename_labels) call data.openeo.temporal_dims
+    on the result of aggregate_spatial which returns a Dataset, so we register a
+    minimal compatible accessor here.
+    """
+
+    def __init__(self, ds: xr.Dataset) -> None:
+        from openeo_processes_dask_slim.process_implementations.cubes._xr_interop import (
+            BANDS_GUESSES,
+            TEMPORAL_GUESSES,
+            X_GUESSES,
+            Y_GUESSES,
+        )
+
+        dim_names = [str(d) for d in ds.dims]
+        lower_dims = [d.casefold() for d in dim_names]
+        self._ds = ds
+        self._temporal = [dim_names[lower_dims.index(g)] for g in TEMPORAL_GUESSES if g in lower_dims]
+        self._spatial = [dim_names[lower_dims.index(g)] for g in X_GUESSES + Y_GUESSES if g in lower_dims]
+        self._bands = [dim_names[lower_dims.index(g)] for g in BANDS_GUESSES if g in lower_dims]
+        self._other = [d for d in dim_names if d not in self._temporal + self._spatial + self._bands]
+
+    @property
+    def temporal_dims(self) -> tuple[str, ...]:
+        return tuple(d for d in self._temporal if d in self._ds.dims)
+
+    @property
+    def spatial_dims(self) -> tuple[str, ...]:
+        return tuple(d for d in self._spatial if d in self._ds.dims)
+
+    @property
+    def band_dims(self) -> tuple[str, ...]:
+        return tuple(d for d in self._bands if d in self._ds.dims)
+
+    @property
+    def other_dims(self) -> tuple[str, ...]:
+        return tuple(d for d in self._other if d in self._ds.dims)
+
+
+def _make_sorted_atp(original_fn: Any) -> Any:
+    """Wrap aggregate_temporal_period to sort the time axis before resampling.
+
+    Streaming ingests can produce non-monotonic time coordinates when append
+    sessions overlap or are replayed out of order. xarray's resample() requires
+    a monotonic index, so we sort defensively before delegating.
+    """
+
+    def _sorted_atp(data: Any, reducer: Any, period: str, dimension: Any = None, **kwargs: Any) -> Any:
+        temporal_dims = data.openeo.temporal_dims
+        t_dim = dimension or (temporal_dims[0] if temporal_dims else None)
+        if t_dim is not None:
+            data = data.sortby(t_dim)
+        return original_fn(data=data, reducer=reducer, period=period, dimension=dimension, **kwargs)
+
+    return _sorted_atp
+
+
 def _build_process_registry() -> Any:
     """Build the base process registry (lazy-initialised singleton).
 
@@ -50,6 +111,10 @@ def _build_process_registry() -> Any:
     # Backend-specific processes override any stub from the standard library.
     registry["load_collection"] = Process(spec={}, implementation=_load_collection_impl)
     registry["save_result"] = Process(spec={}, implementation=_save_result_impl)
+    registry["aggregate_temporal_period"] = Process(
+        spec=getattr(specs_module, "aggregate_temporal_period", {}),
+        implementation=_make_sorted_atp(impls_module.aggregate_temporal_period),
+    )
 
     # @process-decorated plugin functions — override standard processes with same id.
     from open_climate_service.openeo.plugin_processes import load_plugin_processes, to_openeo_descriptor
@@ -233,15 +298,16 @@ def _load_collection_impl(
 
 
 class SaveResultEnvelope:
-    """Wraps the process graph result with the requested output format."""
+    """Wraps the process graph result with the requested output format and options."""
 
-    def __init__(self, data: Any, format: str) -> None:
+    def __init__(self, data: Any, format: str, options: dict[str, Any] | None = None) -> None:
         self.data = data
         self.format = format.upper()
+        self.options: dict[str, Any] = options or {}
 
 
 def _save_result_impl(data: Any, format: str = "Zarr", options: dict[str, Any] | None = None) -> Any:
-    return SaveResultEnvelope(data, format)
+    return SaveResultEnvelope(data, format, options)
 
 
 # ---------------------------------------------------------------------------

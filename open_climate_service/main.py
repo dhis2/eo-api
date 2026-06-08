@@ -144,6 +144,7 @@ def create_app() -> FastAPI:
     _app.include_router(ingestion_routes.datasets_router, prefix="/datasets", tags=["Datasets"])
     _app.include_router(ingestion_routes.ingestions_router, prefix="/ingestions", tags=["Ingestions"])
     _app.include_router(ingestion_routes.zarr_router, prefix="/zarr", tags=["Zarr"])
+    _app.include_router(ingestion_routes.icechunk_router, prefix="/icechunk", tags=["Icechunk"])
     _app.include_router(ingestion_routes.sync_router, prefix="/sync", tags=["Sync"])
     _app.include_router(openeo_routes.processes_router, prefix="/processes", tags=["openEO"])
 

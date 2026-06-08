@@ -121,6 +121,14 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
         "roles": template_asset.get("roles"),
         "xarray:open_kwargs": xarray_open_kwargs,
     }
+    if artifact.format == ArtifactFormat.ICECHUNK:
+        collection_payload["assets"]["icechunk"] = {
+            "href": _abs_url(request, f"/icechunk/{dataset_id}"),
+            "type": "application/octet-stream",
+            "title": "Icechunk store (native SDK access)",
+            "roles": ["data"],
+            "xarray:open_kwargs": {"zarr_format": 3, "consolidated": False},
+        }
     collection_payload["license"] = template.license
     _remove_helper_variables(collection_payload)
     _round_spatial_steps(collection_payload)
@@ -153,7 +161,12 @@ def _build_collection_template(
         extent=pystac.Extent(
             spatial=pystac.SpatialExtent([[spatial.xmin, spatial.ymin, spatial.xmax, spatial.ymax]]),
             temporal=pystac.TemporalExtent(
-                [[parse_period_string_to_datetime(temporal.start), parse_period_string_to_datetime(temporal.end)]]
+                [
+                    [
+                        parse_period_string_to_datetime(temporal.start) if temporal.start else None,
+                        parse_period_string_to_datetime(temporal.end) if temporal.end else None,
+                    ]
+                ]
             ),
         ),
         title=artifact.dataset_name,
@@ -180,7 +193,7 @@ def _build_collection_template(
         "zarr",
         pystac.Asset(
             href=zarr_href,
-            media_type="application/vnd+zarr",
+            media_type="application/vnd.zarr; version=3",
             title="Zarr store",
             roles=["data"],
         ),
@@ -215,21 +228,33 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
             time_dimension: str | None = get_time_dim(ds)
         except ValueError:
             time_dimension = None  # static dataset with no time dimension
-        result = xarray_to_stac(
-            ds,
-            template,
-            temporal_dimension=time_dimension,
-            x_dimension=x_dimension,
-            y_dimension=y_dimension,
-            reference_system=4326,
-            # Schema validation can trigger outbound fetches for STAC extension schemas.
-            validate=False,
-        )
+        if time_dimension is not None:
+            result = xarray_to_stac(
+                ds,
+                template,
+                temporal_dimension=time_dimension,
+                x_dimension=x_dimension,
+                y_dimension=y_dimension,
+                reference_system=4326,
+                # Schema validation can trigger outbound fetches for STAC extension schemas.
+                validate=False,
+            )
+        else:
+            # xarray_to_stac raises KeyError when temporal_dimension is None and the
+            # dataset has no CF time axis (e.g. after reduce_dimension removes it).
+            # Fall back to the template and build cube metadata manually so the
+            # map viewer can identify the correct variable and dimensions.
+            result = template
         # build_collection replaces links from the template after xstac runs, so
         # clear xstac/pystac-owned links before serialization to avoid root-link
         # resolution attempts during to_dict().
         result.clear_links()
         payload: dict[str, Any] = result.to_dict(include_self_link=False)
+        if time_dimension is None:
+            # xstac was skipped — inject minimal cube:dimensions and cube:variables
+            # so the map viewer can resolve the variable name and spatial axes.
+            payload.setdefault("cube:dimensions", _build_static_cube_dimensions(ds, x_dimension, y_dimension))
+            payload.setdefault("cube:variables", _build_cube_variables(ds))
         _cache_xstac_collection_payload(artifact.artifact_id, payload)
         return deepcopy(payload)
     except HTTPException:
@@ -305,19 +330,7 @@ def _public_zarr_asset_href(
     artifact: ArtifactRecord,
     source_dataset: dict[str, Any],
 ) -> str:
-    artifact_path = _artifact_store_path(artifact)
-    if artifact.format == ArtifactFormat.ICECHUNK:
-        return _abs_url(request, f"/zarr/{dataset_id}")
-    if _is_pyramid_zarr(artifact_path):
-        return _abs_url(request, f"/zarr/{dataset_id}/0")
     return _abs_url(request, f"/zarr/{dataset_id}")
-
-
-def _is_pyramid_zarr(artifact_path: str) -> bool:
-    """Return True if artifact_path is a multiscale pyramid zarr store."""
-    if "://" in artifact_path:
-        return False
-    return (Path(artifact_path) / "0").is_dir()
 
 
 def _abs_url(request: Request, path: str) -> str:
@@ -336,6 +349,44 @@ def _override_time_step(collection: dict[str, Any], step: str | None) -> None:
             value["step"] = step
             dimensions[key] = value
             return
+
+
+def _build_static_cube_dimensions(ds: xr.Dataset, x_dim: str, y_dim: str) -> dict[str, Any]:
+    """Build minimal cube:dimensions for a dataset with no time axis."""
+    crs = ds.attrs.get("proj:code", "EPSG:4326")
+    x_vals = ds[x_dim].values
+    y_vals = ds[y_dim].values
+    x_step = float(x_vals[1] - x_vals[0]) if len(x_vals) > 1 else None
+    y_step = float(y_vals[1] - y_vals[0]) if len(y_vals) > 1 else None
+    return {
+        x_dim: {
+            "type": "spatial",
+            "axis": "x",
+            "extent": [float(x_vals.min()), float(x_vals.max())],
+            **({"step": x_step} if x_step is not None else {}),
+            "reference_system": crs,
+        },
+        y_dim: {
+            "type": "spatial",
+            "axis": "y",
+            "extent": [float(y_vals.min()), float(y_vals.max())],
+            **({"step": y_step} if y_step is not None else {}),
+            "reference_system": crs,
+        },
+    }
+
+
+def _build_cube_variables(ds: xr.Dataset) -> dict[str, Any]:
+    """Build cube:variables from an xr.Dataset's data variables."""
+    result: dict[str, Any] = {}
+    for name in ds.data_vars:
+        var = ds[name]
+        result[str(name)] = {
+            "type": "data",
+            "dimensions": [str(d) for d in var.dims],
+            "unit": var.attrs.get("units"),
+        }
+    return result
 
 
 def _round_spatial_steps(collection: dict[str, Any]) -> None:
@@ -358,14 +409,13 @@ def _override_spatial_extent_from_artifact(collection: dict[str, Any], artifact:
 
 def _override_temporal_extent_from_artifact(collection: dict[str, Any], artifact: ArtifactRecord) -> None:
     temporal = artifact.coverage.temporal
-    start = parse_period_string_to_datetime(temporal.start).isoformat().replace("+00:00", "Z")
-    end = parse_period_string_to_datetime(temporal.end).isoformat().replace("+00:00", "Z")
-    collection["extent"]["temporal"]["interval"] = [
-        [
-            start,
-            end,
-        ]
-    ]
+
+    def _fmt(v: str) -> str | None:
+        return parse_period_string_to_datetime(v).isoformat().replace("+00:00", "Z") if v else None
+
+    start = _fmt(temporal.start)
+    end = _fmt(temporal.end)
+    collection["extent"]["temporal"]["interval"] = [[start, end]]
     dimensions = collection.setdefault("cube:dimensions", {})
     for key, value in dimensions.items():
         if isinstance(value, dict) and value.get("type") == "temporal":
@@ -442,7 +492,7 @@ def _zarr_asset_metadata(artifact: ArtifactRecord) -> dict[str, object]:
 
 def _zarr_open_kwargs(artifact: ArtifactRecord) -> dict[str, bool | None]:
     if artifact.format == ArtifactFormat.ICECHUNK:
-        return {"consolidated": None}
+        return {"consolidated": True}
     return {"consolidated": _zarr_consolidated_flag(_artifact_store_path(artifact))}
 
 

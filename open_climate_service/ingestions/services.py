@@ -16,7 +16,6 @@ from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import portalocker
-import pyproj
 from fastapi import HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.responses import Response
@@ -61,6 +60,20 @@ logger = logging.getLogger(__name__)
 _store_locks: dict[str, threading.Lock] = {}
 _store_locks_mutex = threading.Lock()
 
+# Consolidated zarr metadata cache: (store_path, snapshot_id) → metadata dict.
+# Building consolidated metadata requires reading every zarr.json from the store;
+# the result is stable for the lifetime of a snapshot, so we cache it keyed to
+# the Icechunk branch tip.  Capped at 512 entries; the oldest half is evicted when
+# the limit is hit (one entry per ingest per dataset, so 512 entries ≈ 85 ingests
+# across 6 datasets before any eviction occurs).
+_consolidated_metadata_cache: dict[str, dict[str, object]] = {}
+_MAX_CONSOLIDATED_CACHE_ENTRIES = 512
+
+# Icechunk artifact path cache: dataset_id → (records_mtime, artifact).
+# Avoids reading and deserializing the full artifact index on every chunk request
+# from the /icechunk/ endpoint.  Invalidated when records.json changes on disk.
+_icechunk_artifact_cache: dict[str, tuple[float, "ArtifactRecord"]] = {}
+
 
 def _acquire_store_lock(store_path: Path) -> threading.Lock:
     """Return the exclusive lock for store_path, creating it if needed."""
@@ -77,8 +90,22 @@ class _IcechunkReadableStore(Protocol):
     def get(self, key: str, prototype: Any) -> Awaitable[Any]: ...
 
 
+class _IcechunkSession:
+    """Thin holder for a readonly Icechunk session and its branch-tip snapshot id."""
+
+    __slots__ = ("store", "snapshot_id", "store_path")
+
+    def __init__(self, store: _IcechunkReadableStore, snapshot_id: str, store_path: str) -> None:
+        self.store = store
+        self.snapshot_id = snapshot_id
+        self.store_path = store_path
+
+    @property
+    def cache_key(self) -> str:
+        return f"{self.store_path}:{self.snapshot_id}"
+
+
 def _resolve_artifacts_dir() -> Path:
-    from open_climate_service import config as api_config
 
     data_dir = api_config.get_data_dir()
     if data_dir is not None:
@@ -118,7 +145,7 @@ def latest_published_zarr_artifacts_by_dataset() -> dict[str, ArtifactRecord]:
         latest = max(artifacts, key=lambda artifact: artifact.created_at)
         if latest.publication.status != PublicationStatus.PUBLISHED:
             continue
-        if latest.format not in {ArtifactFormat.ZARR, ArtifactFormat.ICECHUNK}:
+        if latest.format != ArtifactFormat.ICECHUNK:
             continue
         result[dataset_id] = latest
     return dict(sorted(result.items()))
@@ -355,6 +382,8 @@ def _create_streaming_artifact(
 
         request_scope = request_scope.model_copy(update={"end": coverage.temporal.end})
 
+        _maybe_build_pyramid(store_path, dataset)
+
         record = ArtifactRecord(
             artifact_id=str(uuid4()),
             dataset_id=str(dataset["id"]),
@@ -382,6 +411,53 @@ def _create_streaming_artifact(
         lock.release()
 
 
+def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
+    """Apply GeoZarr conventions and a multiscale pyramid to the committed Icechunk store.
+
+    Streaming ingest writes a flat store with root GeoZarr attrs but no
+    ``spatial_ref`` CRS coordinate or pyramid levels. This rewrites the store via
+    ``write_to_icechunk_store`` to add them, so every Icechunk store follows the
+    same GeoZarr layout regardless of size.
+
+    The rewrite must materialise the whole store in memory first, because
+    ``write_to_icechunk_store`` overwrites the very store it is reading from. That
+    is unavoidable on the initial ingest and whenever a pyramid must be rebuilt,
+    but a *temporal append* to an already-normalised flat store produces nothing
+    new: ``spatial_ref`` is a scalar that survives the append and streaming
+    refreshes the root attrs on every commit. We detect that case and skip the
+    read-rewrite, avoiding both the full in-memory load and the write
+    amplification of re-emitting the entire store on every sync.
+
+    Errors are logged and swallowed so that the plain flat artifact is still
+    registered.
+    """
+    from open_climate_service.data_accessor.services.accessor import open_icechunk_dataset
+
+    try:
+        ds = open_icechunk_dataset(store_path)
+    except Exception:
+        logger.warning("Could not open Icechunk store for GeoZarr write; skipping", exc_info=True)
+        return
+
+    try:
+        already_normalized = "spatial_ref" in ds.coords or "spatial_ref" in ds.variables
+        if already_normalized and "x" in ds.sizes and "y" in ds.sizes and not downloader.needs_pyramid(ds):
+            logger.info(
+                "Store '%s' is already GeoZarr-normalized and flat; skipping read-rewrite",
+                store_path.name,
+            )
+            return
+        downloader.write_to_icechunk_store(ds.load(), store_path, commit_message="Applied GeoZarr conventions")
+    except Exception:
+        logger.error(
+            "GeoZarr/pyramid write failed for '%s'; flat Icechunk artifact will be used as-is",
+            store_path.name,
+            exc_info=True,
+        )
+    finally:
+        ds.close()
+
+
 def _load_streaming_plugin(plugin_path: str, *, params: dict[str, object]) -> IngestionPlugin:
     """Load and instantiate one streaming plugin class from a dotted import path.
 
@@ -405,6 +481,20 @@ def _load_streaming_plugin(plugin_path: str, *, params: dict[str, object]) -> In
     return plugin
 
 
+def register_artifact_record(record: ArtifactRecord, *, publish: bool) -> ArtifactRecord:
+    """Store a pre-built artifact record and optionally publish it to STAC.
+
+    Uses overwrite semantics: re-publishing a managed dataset (e.g. re-running an
+    openEO ``save_result`` for the same ``dataset_id``) replaces the existing
+    record's metadata — name, coverage, paths — rather than silently keeping the
+    stale record, while preserving its artifact id and publication state.
+    """
+    stored = _upsert_artifact_record(record, publish=publish, overwrite=True)
+    if publish and stored.publication.status != PublicationStatus.PUBLISHED:
+        return publish_artifact_record(stored.artifact_id)
+    return stored
+
+
 def publish_artifact_record(artifact_id: str) -> ArtifactRecord:
     """Publish an artifact and persist publication metadata."""
     published = publish_artifact(get_artifact_or_404(artifact_id))
@@ -418,60 +508,6 @@ def publish_artifact_record(artifact_id: str) -> ArtifactRecord:
         raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found")
 
     return _mutate_records(mutate)
-
-
-def store_materialized_zarr_artifact(
-    *,
-    dataset: dict[str, object],
-    start: str,
-    end: str | None,
-    bbox: list[float] | None,
-    zarr_path: Path,
-    overwrite: bool,
-    publish: bool,
-) -> ArtifactRecord:
-    """Store metadata for a locally materialized Zarr artifact."""
-    period_type = str(dataset["period_type"])
-    normalized_start = _normalize_request_period(start, period_type=period_type, field_name="start")
-    normalized_end = _normalize_optional_request_period(end, period_type=period_type, field_name="end")
-    request_scope = ArtifactRequestScope(
-        start=normalized_start,
-        end=normalized_end,
-        bbox=(bbox[0], bbox[1], bbox[2], bbox[3]) if bbox is not None else None,
-    )
-    coverage_data = get_data_coverage_for_paths(dataset, zarr_path=str(zarr_path.resolve()))
-    if not coverage_data.get("has_data", True):
-        raise HTTPException(status_code=409, detail="Materialized artifact contains no data for the requested scope")
-    _spatial_wgs84_data = coverage_data["coverage"].get("spatial_wgs84")
-    coverage = ArtifactCoverage(
-        temporal=CoverageTemporal(**coverage_data["coverage"]["temporal"]),
-        spatial=CoverageSpatial(**coverage_data["coverage"]["spatial"]),
-        spatial_wgs84=CoverageSpatial(**_spatial_wgs84_data) if _spatial_wgs84_data else None,
-    )
-    request_scope = request_scope.model_copy(update={"end": coverage.temporal.end})
-
-    record = ArtifactRecord(
-        artifact_id=str(uuid4()),
-        dataset_id=str(dataset["id"]),
-        source_dataset_id=(
-            str(dataset.get("source_dataset_id")) if dataset.get("source_dataset_id") is not None else None
-        ),
-        dataset_name=str(dataset["name"]),
-        variable=str(dataset["variable"]),
-        period_type=str(dataset.get("period_type")) if dataset.get("period_type") is not None else None,
-        format=ArtifactFormat.ZARR,
-        path=str(zarr_path.resolve()),
-        asset_paths=[str(zarr_path.resolve())],
-        variables=[str(dataset["variable"])],
-        request_scope=request_scope,
-        coverage=coverage,
-        created_at=datetime.now(UTC),
-        publication=ArtifactPublication(),
-    )
-    stored_record = _upsert_artifact_record(record, publish=publish, overwrite=overwrite)
-    if publish and stored_record.publication.status != PublicationStatus.PUBLISHED:
-        return publish_artifact_record(stored_record.artifact_id)
-    return stored_record
 
 
 def sync_dataset(
@@ -532,115 +568,57 @@ def plan_sync_dataset(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-def get_dataset_zarr_store_info_or_404(dataset_id: str) -> dict[str, object]:
-    """Return a public Zarr store listing for a managed dataset."""
-    artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
-    if artifact.format == ArtifactFormat.ICECHUNK:
-        store = _open_icechunk_store_or_404(artifact)
-        entries = _icechunk_entries(dataset_id=dataset_id, store=store, prefix="")
-        store_attrs = _read_icechunk_attrs(store)
-        store_crs = store_attrs.get("proj:code") if store_attrs else None
-        crs = store_crs if isinstance(store_crs, str) and store_crs else api_config.get_crs()
-        return {
-            "kind": "ZarrListing",
-            "dataset_id": dataset_id,
-            "format": artifact.format,
-            "path": ".",
-            "crs": crs,
-            "proj4": _crs_to_proj4(crs),
-            "bounds": _read_zarr_bounds(store_attrs),
-            "entries": entries,
-        }
-
-    store_root = _get_zarr_root_or_409(artifact)
-
-    entries = _zarr_entries(dataset_id=dataset_id, store_root=store_root, directory=store_root)
-    store_attrs = _read_zarr_attrs(store_root)
-    store_crs = store_attrs.get("proj:code") if store_attrs else None
-    crs = store_crs if isinstance(store_crs, str) and store_crs else api_config.get_crs()
-    return {
-        "kind": "ZarrListing",
-        "dataset_id": dataset_id,
-        "format": artifact.format,
-        "path": ".",
-        "crs": crs,
-        "proj4": _crs_to_proj4(crs),
-        "bounds": _read_zarr_bounds(store_attrs),
-        "entries": entries,
-    }
-
-
-def _crs_to_proj4(crs: str) -> str | None:
-    """Convert an EPSG code or WKT string to a proj4 definition string, or None on failure."""
-    import warnings
-
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            return pyproj.CRS.from_user_input(crs).to_proj4()
-    except Exception:
-        return None
-
-
-def _read_zarr_attrs(store_root: Path) -> dict[str, object] | None:
-    """Read the root attributes from a Zarr store, normalising v2/v3 layout differences."""
-    for attrs_file in (store_root / "zarr.json", store_root / ".zattrs"):
-        if attrs_file.exists():
-            attrs: dict[str, object] = json.loads(attrs_file.read_text(encoding="utf-8"))
-            if attrs_file.name == "zarr.json":
-                attrs = attrs.get("attributes", attrs)  # type: ignore[assignment]
-            return attrs
-    return None
-
-
-def _read_zarr_bounds(store_attrs: dict[str, object] | None) -> list[float] | None:
-    """Extract the spatial:bbox from pre-read zarr store attributes, reprojected to WGS84.
-
-    Map clients (zarr-layer) expect bounds in geographic coordinates regardless of the
-    store's native CRS, so we reproject here when the store CRS is not WGS84/CRS84.
-    """
-    if store_attrs is None:
-        return None
-    bbox = store_attrs.get("spatial:bbox")
-    if not (isinstance(bbox, list) and len(bbox) == 4):
-        return None
-    xmin, ymin, xmax, ymax = (float(v) for v in bbox)
-    native_crs = store_attrs.get("proj:code")
-    if isinstance(native_crs, str) and native_crs not in ("EPSG:4326", "CRS84", "OGC:CRS84"):
-        try:
-            transformer = pyproj.Transformer.from_crs(native_crs, "EPSG:4326", always_xy=True)
-            xmin, ymin = transformer.transform(xmin, ymin)
-            xmax, ymax = transformer.transform(xmax, ymax)
-        except Exception:
-            pass
-    return [xmin, ymin, xmax, ymax]
-
-
 def get_dataset_zarr_store_file_or_404(
-    dataset_id: str, relative_path: str
-) -> FileResponse | Response | dict[str, object]:
+    dataset_id: str, relative_path: str, range_header: str | None = None
+) -> Response | dict[str, object]:
     """Serve a file, metadata document, or directory listing within a dataset Zarr store."""
     artifact = get_latest_artifact_for_dataset_or_404(dataset_id)
-    if artifact.format == ArtifactFormat.ICECHUNK:
-        store = _open_icechunk_store_or_404(artifact)
-        return _get_icechunk_store_path_or_404(dataset_id=dataset_id, store=store, relative_path=relative_path)
-
-    store_root = _get_zarr_root_or_409(artifact)
-    target = _resolve_zarr_path(store_root, relative_path)
-    if not target.exists():
-        raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
-    if target.is_dir():
-        return _zarr_directory_listing(dataset_id=dataset_id, store_root=store_root, directory=target)
-    if target.name in {".zarray", ".zattrs", ".zgroup", "zarr.json"}:
-        return JSONResponse(content=json.loads(target.read_text(encoding="utf-8")))
-
-    media_type, _ = mimetypes.guess_type(target.name)
-    if media_type is None:
-        media_type = "application/octet-stream"
-    return FileResponse(target, media_type=media_type, filename=target.name)
+    session = _open_icechunk_store_or_404(artifact)
+    return _get_icechunk_store_path_or_404(
+        dataset_id=dataset_id, session=session, relative_path=relative_path, range_header=range_header
+    )
 
 
-def _open_icechunk_store_or_404(artifact: ArtifactRecord) -> _IcechunkReadableStore:
+def serve_icechunk_file(dataset_id: str, file_path: str) -> FileResponse:
+    """Serve a raw Icechunk store file for native SDK access via icechunk.http_storage()."""
+    artifact = _get_latest_published_icechunk_artifact_cached(dataset_id)
+    store_root = Path(artifact.path or artifact.asset_paths[0]).resolve()
+
+    full_path = (store_root / file_path).resolve()
+    if not full_path.is_relative_to(store_root):
+        raise HTTPException(status_code=404, detail="Not found")
+    if not full_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Icechunk store file not found: {file_path}")
+
+    return FileResponse(full_path, media_type="application/octet-stream")
+
+
+def _get_latest_published_icechunk_artifact_cached(dataset_id: str) -> ArtifactRecord:
+    """Return the latest published Icechunk artifact, cached by records.json mtime."""
+    try:
+        mtime = ARTIFACTS_INDEX_PATH.stat().st_mtime if ARTIFACTS_INDEX_PATH.exists() else 0.0
+    except OSError:
+        mtime = 0.0
+    cached = _icechunk_artifact_cache.get(dataset_id)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    artifact = _get_latest_published_icechunk_artifact(dataset_id)
+    _icechunk_artifact_cache[dataset_id] = (mtime, artifact)
+    return artifact
+
+
+def _get_latest_published_icechunk_artifact(dataset_id: str) -> ArtifactRecord:
+    """Return the latest published Icechunk artifact for dataset_id, or raise 404/409."""
+    artifacts = latest_published_zarr_artifacts_by_dataset()
+    artifact = artifacts.get(dataset_id)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+    if artifact.format != ArtifactFormat.ICECHUNK:
+        raise HTTPException(status_code=409, detail=f"Dataset '{dataset_id}' is not Icechunk-backed")
+    return artifact
+
+
+def _open_icechunk_store_or_404(artifact: ArtifactRecord) -> _IcechunkSession:
     """Open the readonly Icechunk session store for a published artifact."""
     if artifact.format != ArtifactFormat.ICECHUNK:
         raise HTTPException(status_code=409, detail="Artifact is not an Icechunk-backed Zarr store")
@@ -655,7 +633,9 @@ def _open_icechunk_store_or_404(artifact: ArtifactRecord) -> _IcechunkReadableSt
 
     storage = icechunk.local_filesystem_storage(str(path))
     repo = icechunk.Repository.open(storage)
-    return cast(_IcechunkReadableStore, repo.readonly_session("main").store)
+    snapshot_id = repo.lookup_branch("main")
+    session_store = cast(_IcechunkReadableStore, repo.readonly_session("main").store)
+    return _IcechunkSession(store=session_store, snapshot_id=snapshot_id, store_path=str(path))
 
 
 def _run_async(awaitable: Any) -> Any:
@@ -707,7 +687,11 @@ def _icechunk_list_dir(store: _IcechunkReadableStore, prefix: str) -> list[str]:
 
 
 def _icechunk_exists(store: _IcechunkReadableStore, key: str) -> bool:
-    return cast(bool, _run_async(store.exists(key)))
+    try:
+        return cast(bool, _run_async(store.exists(key)))
+    except KeyError:
+        # Icechunk raises KeyError for Zarr v2 keys (e.g. .zgroup, .zarray)
+        return False
 
 
 def _icechunk_get(store: _IcechunkReadableStore, key: str) -> bytes | None:
@@ -719,53 +703,51 @@ def _icechunk_get(store: _IcechunkReadableStore, key: str) -> bytes | None:
     return cast(bytes, buffer)
 
 
-def _icechunk_directory_listing(
-    *,
-    dataset_id: str,
-    store: _IcechunkReadableStore,
-    prefix: str,
-    child_names: list[str] | None = None,
-) -> dict[str, object]:
-    entries = _icechunk_entries(dataset_id=dataset_id, store=store, prefix=prefix, child_names=child_names)
-    return {
-        "kind": "ZarrListing",
-        "dataset_id": dataset_id,
-        "path": "." if prefix == "" else prefix,
-        "entries": entries,
-    }
+def _build_icechunk_consolidated_metadata(session: _IcechunkSession) -> dict[str, object]:
+    """Recursively build zarr v3 consolidated metadata for all groups and arrays in the store.
 
+    Icechunk explicitly blocks ``zarr.consolidate_metadata()`` because its transactional
+    snapshot system makes a static .zmetadata incompatible with multi-writer safety.
+    We generate equivalent consolidated metadata dynamically at serve time so that HTTP
+    clients can open the store with a single request (``consolidated=True``) without
+    needing server-side directory enumeration.
 
-def _icechunk_entries(
-    *,
-    dataset_id: str,
-    store: _IcechunkReadableStore,
-    prefix: str,
-    child_names: list[str] | None = None,
-) -> list[dict[str, str]]:
-    base = "" if prefix == "" else prefix.rstrip("/") + "/"
-    names = child_names if child_names is not None else _icechunk_list_dir(store, prefix)
+    Results are cached per (store_path, snapshot_id) so repeated requests within the
+    lifetime of a snapshot — which is the common case between ingests — read once and
+    serve many times.
+    """
+    cached = _consolidated_metadata_cache.get(session.cache_key)
+    if cached is not None:
+        return cached
 
-    async def collect_entries() -> list[dict[str, str]]:
-        sem = asyncio.Semaphore(16)
+    if len(_consolidated_metadata_cache) >= _MAX_CONSOLIDATED_CACHE_ENTRIES:
+        evict_count = _MAX_CONSOLIDATED_CACHE_ENTRIES // 2
+        for key in list(_consolidated_metadata_cache)[:evict_count]:
+            # pop(..., None) rather than del: this can run in a worker thread, so a
+            # concurrent request may have already evicted the same key.
+            _consolidated_metadata_cache.pop(key, None)
 
-        async def probe(name: str) -> dict[str, str]:
-            async with sem:
-                relative_path = f"{base}{name}" if base else name
-                href = f"/zarr/{dataset_id}/{relative_path}" if relative_path else f"/zarr/{dataset_id}"
-                children = [item async for item in store.list_dir(relative_path)]
-                return {"name": name, "kind": "directory" if children else "file", "href": href}
+    node_metadata: dict[str, object] = {}
 
-        return list(await asyncio.gather(*[probe(name) for name in sorted(names)]))
+    def traverse(prefix: str) -> None:
+        try:
+            children = _icechunk_list_dir(session.store, prefix)
+        except Exception:
+            logger.warning("Failed to list Icechunk store prefix '%s' for consolidated metadata", prefix, exc_info=True)
+            return
+        for child in sorted(children):
+            path = f"{prefix}/{child}" if prefix else child
+            meta_bytes = _icechunk_get(session.store, f"{path}/zarr.json")
+            if meta_bytes is not None:
+                meta: dict[str, object] = json.loads(meta_bytes.decode("utf-8"))
+                node_metadata[path] = meta
+                if meta.get("node_type") == "group":
+                    traverse(path)
 
-    return cast(list[dict[str, str]], _run_async(collect_entries()))
-
-
-def _read_icechunk_attrs(store: _IcechunkReadableStore) -> dict[str, object] | None:
-    payload = _icechunk_get(store, "zarr.json")
-    if payload is None:
-        return None
-    attrs: dict[str, object] = json.loads(payload.decode("utf-8"))
-    return attrs.get("attributes", attrs)  # type: ignore[return-value]
+    traverse("")
+    result: dict[str, object] = {"kind": "inline", "must_understand": False, "metadata": node_metadata}
+    _consolidated_metadata_cache[session.cache_key] = result
+    return result
 
 
 def _normalize_icechunk_relative_path(relative_path: str) -> str:
@@ -781,25 +763,71 @@ def _normalize_icechunk_relative_path(relative_path: str) -> str:
     return target
 
 
+def _serve_bytes_ranged(content: bytes, media_type: str, range_header: str | None) -> Response:
+    """Serve bytes with HTTP range request support (RFC 7233).
+
+    Zarrita's sharding_indexed codec requires range requests to read the shard index
+    suffix and individual inner chunks without downloading the full shard file.
+    """
+    total = len(content)
+    base_headers: dict[str, str] = {"Accept-Ranges": "bytes", "Content-Length": str(total)}
+    if not range_header or not range_header.startswith("bytes="):
+        return Response(content=content, media_type=media_type, headers=base_headers)
+    try:
+        spec = range_header[len("bytes=") :].strip()
+        if spec.startswith("-"):
+            suffix_len = int(spec[1:])
+            start = max(0, total - suffix_len)
+            end = total - 1
+        elif spec.endswith("-"):
+            start = int(spec[:-1])
+            end = total - 1
+        else:
+            parts = spec.split("-", 1)
+            start, end = int(parts[0]), int(parts[1])
+        if start > end or start >= total or end >= total:
+            raise ValueError("unsatisfiable range")
+    except (ValueError, IndexError):
+        return Response(
+            status_code=416,
+            headers={"Content-Range": f"bytes */{total}"},
+        )
+    sliced = content[start : end + 1]
+    return Response(
+        content=sliced,
+        status_code=206,
+        media_type=media_type,
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{total}",
+            "Content-Length": str(len(sliced)),
+            "Accept-Ranges": "bytes",
+        },
+    )
+
+
 def _get_icechunk_store_path_or_404(
-    dataset_id: str, store: _IcechunkReadableStore, relative_path: str
+    dataset_id: str, session: _IcechunkSession, relative_path: str, range_header: str | None = None
 ) -> Response | dict[str, object]:
+    store = session.store
     target = _normalize_icechunk_relative_path(relative_path)
     if target == "":
-        return _icechunk_directory_listing(dataset_id=dataset_id, store=store, prefix="")
+        raise HTTPException(status_code=404, detail="Not found")
 
     if _icechunk_exists(store, target):
         payload = _icechunk_get(store, target)
         if payload is None:
             raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
         if target.endswith("zarr.json"):
-            return JSONResponse(content=json.loads(payload.decode("utf-8")))
+            meta = json.loads(payload.decode("utf-8"))
+            # Inject consolidated metadata into the root zarr.json so xarray can
+            # enumerate variables when accessing the store over HTTP, without needing
+            # directory listing or a separate consolidation step.  Result is cached
+            # per snapshot so repeated requests within a snapshot lifetime are free.
+            if target == "zarr.json" and meta.get("node_type") == "group":
+                meta["consolidated_metadata"] = _build_icechunk_consolidated_metadata(session)
+            return JSONResponse(content=meta)
         media_type, _ = mimetypes.guess_type(target)
-        return Response(content=payload, media_type=media_type or "application/octet-stream")
-
-    child_names = _icechunk_list_dir(store, target)
-    if child_names:
-        return _icechunk_directory_listing(dataset_id=dataset_id, store=store, prefix=target, child_names=child_names)
+        return _serve_bytes_ranged(payload, media_type or "application/octet-stream", range_header)
 
     raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
 
@@ -893,51 +921,6 @@ def _mutate_records(mutation: Callable[[list[ArtifactRecord]], ArtifactRecord]) 
         os.fsync(handle.fileno())
         portalocker.unlock(handle)
         return result
-
-
-def _get_zarr_root_or_409(artifact: ArtifactRecord) -> Path:
-    """Return the Zarr root path for an artifact or raise a 409 if it is not Zarr-backed."""
-    if artifact.format != ArtifactFormat.ZARR:
-        raise HTTPException(status_code=409, detail="Artifact is not a Zarr store")
-
-    store_root = Path(artifact.path or artifact.asset_paths[0]).resolve()
-    if not store_root.exists() or not store_root.is_dir():
-        raise HTTPException(status_code=404, detail="Zarr store path does not exist on disk")
-    return store_root
-
-
-def _resolve_zarr_path(store_root: Path, relative_path: str) -> Path:
-    """Resolve a requested Zarr path without allowing traversal outside the store root."""
-    candidate = (store_root / relative_path).resolve()
-    try:
-        candidate.relative_to(store_root)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Requested Zarr path is outside the artifact store") from exc
-    return candidate
-
-
-def _zarr_directory_listing(*, dataset_id: str, store_root: Path, directory: Path) -> dict[str, object]:
-    """Return a browseable directory listing for a Zarr path."""
-    relative_directory = "." if directory == store_root else directory.relative_to(store_root).as_posix()
-    entries = _zarr_entries(dataset_id=dataset_id, store_root=store_root, directory=directory)
-    return {
-        "kind": "ZarrListing",
-        "dataset_id": dataset_id,
-        "path": relative_directory,
-        "entries": entries,
-    }
-
-
-def _zarr_entries(*, dataset_id: str, store_root: Path, directory: Path) -> list[dict[str, str]]:
-    """Build directory entries for a Zarr store namespace."""
-    return [
-        {
-            "name": child.name,
-            "kind": "directory" if child.is_dir() else "file",
-            "href": f"/zarr/{dataset_id}/{child.relative_to(store_root).as_posix()}",
-        }
-        for child in sorted(directory.iterdir(), key=lambda child: child.name)
-    ]
 
 
 def _find_existing_artifact(
@@ -1159,12 +1142,9 @@ def _build_dataset_detail_record(dataset_id: str, artifacts: list[ArtifactRecord
 
 def _dataset_links(dataset_id: str, latest: ArtifactRecord) -> list[DatasetAccessLink]:
     links = [DatasetAccessLink(href=f"/datasets/{dataset_id}", rel="self", title="Dataset detail")]
-    if latest.format in {ArtifactFormat.ZARR, ArtifactFormat.ICECHUNK}:
+    if latest.format == ArtifactFormat.ICECHUNK:
         links.append(DatasetAccessLink(href=f"/zarr/{dataset_id}", rel="zarr", title="Zarr store"))
-    if latest.publication.status == PublicationStatus.PUBLISHED and latest.format in {
-        ArtifactFormat.ZARR,
-        ArtifactFormat.ICECHUNK,
-    }:
+    if latest.publication.status == PublicationStatus.PUBLISHED and latest.format == ArtifactFormat.ICECHUNK:
         links.append(DatasetAccessLink(href=f"/stac/collections/{dataset_id}", rel="stac", title="STAC collection"))
     if latest.format == ArtifactFormat.NETCDF:
         links.append(

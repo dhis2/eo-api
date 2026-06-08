@@ -1,7 +1,5 @@
-"""Dataset cache: download, store, and optimize raster data as local files."""
+"""Write raster datasets to Icechunk stores with GeoZarr conventions."""
 
-import datetime
-import inspect
 import logging
 import os
 from pathlib import Path
@@ -10,16 +8,10 @@ from typing import Any
 import xarray as xr
 import xproj  # noqa: F401  # type: ignore[import-untyped]  # pyright: ignore[reportUnusedImport]
 import zarr
-from fastapi import BackgroundTasks, HTTPException
 from geozarr_toolkit import MultiscalesConventionMetadata, create_geozarr_attrs
 from topozarr.coarsen import create_pyramid
 
 from open_climate_service import config as api_config
-from open_climate_service.shared.dynamic_import import get_dynamic_function
-from open_climate_service.shared.time import resolve_iso_period_step, time_chunk_for_iso_step
-from open_climate_service.transforms.reproject import reproject_to_instance_crs
-
-from .utils import get_time_dim, get_x_y_dims
 
 logger = logging.getLogger(__name__)
 
@@ -35,211 +27,10 @@ def _resolve_download_dir() -> Path:
 DOWNLOAD_DIR = _resolve_download_dir()
 
 
-def download_dataset(
-    dataset: dict[str, Any],
-    start: str,
-    end: str | None,
-    bbox: list[float] | None,
-    country_code: str | None,
-    overwrite: bool,
-    background_tasks: BackgroundTasks | None,
-) -> list[Path]:
-    """Download dataset files and return the NetCDF paths created or modified by this run.
-
-    The download still happens primarily through side effects in the provider function.
-    This return value is used to identify the concrete files created for this invocation.
-    When running in the background-task path, the download is deferred and this function
-    returns an empty list because no files have been created yet.
-    """
-    _validate_spatial_coverage(dataset, bbox if bbox is not None else _bbox_from_env())
-    ingestion = dataset["ingestion"]
-    eo_download_func_path = ingestion.get("function")
-    if not isinstance(eo_download_func_path, str) or not eo_download_func_path:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Dataset '{dataset['id']}' does not expose the legacy download path. "
-                "Use the plugin-backed ingestion process instead."
-            ),
-        )
-    eo_download_func = get_dynamic_function(eo_download_func_path)
-    before_files = {path.resolve(): path.stat().st_mtime_ns for path in get_cache_files(dataset)}
-
-    params = dict(ingestion.get("params", {}))
-    params.update(
-        {
-            "start": start,
-            "end": end or datetime.date.today().isoformat(),
-            "dirname": DOWNLOAD_DIR,
-            "prefix": _get_cache_prefix(dataset),
-            "overwrite": overwrite,
-        }
-    )
-
-    sig = inspect.signature(eo_download_func)
-    try:
-        if "bbox" in sig.parameters:
-            params["bbox"] = _resolve_bbox(bbox=bbox)
-        if "country_code" in sig.parameters:
-            resolved_country_code = country_code or os.getenv("COUNTRY_CODE")
-            if resolved_country_code:
-                params["country_code"] = resolved_country_code
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "Downloading this dataset requires a country code. "
-                        "Provide it through the resolved extent configuration or set COUNTRY_CODE in the environment."
-                    ),
-                )
-    except HTTPException:
-        raise
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    if background_tasks is not None:
-        background_tasks.add_task(eo_download_func, **params)
-        return []
-
-    try:
-        eo_download_func(**params)
-    except HTTPException:
-        raise
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        message = str(exc).strip() or "Unexpected error from upstream data provider"
-        raise HTTPException(status_code=502, detail=f"Upstream dataset download failed: {message}") from exc
-
-    after_files = [path.resolve() for path in get_cache_files(dataset)]
-    changed_files = [
-        path for path in after_files if path not in before_files or path.stat().st_mtime_ns != before_files[path]
-    ]
-    return changed_files
-
-
-def build_dataset_zarr(dataset: dict[str, Any], *, start: str | None = None, end: str | None = None) -> None:
-    """Collect dataset cache files into one optimised Zarr archive, clipped to request scope."""
-    logger.info(f"Optimizing cache for dataset {dataset['id']}")
-
-    files = get_cache_files(dataset)
-    logger.info(f"Opening {len(files)} files from cache")
-    ds = xr.open_mfdataset(files, parallel=False)
-
-    x_dim, y_dim = get_x_y_dims(ds)
-    dims = [x_dim, y_dim]
-
-    # trim to only minimal vars and coords before loading into memory
-    logger.info("Trimming unnecessary variables and coordinates")
-    varname = dataset["variable"]
-    ds = ds[[varname]]
-    keep_coords = [get_time_dim(ds)] + dims
-    drop_coords = [c for c in ds.coords if c not in keep_coords]
-    ds = ds.drop_vars(drop_coords)
-
-    # Normalise to canonical names so all stored Zarr files are consistent.
-    crs = api_config.get_crs()
-    time_dim = get_time_dim(ds)
-    rename_map = {k: v for k, v in [(time_dim, "t"), (x_dim, "x"), (y_dim, "y")] if k != v}
-    if rename_map:
-        ds = ds.rename(rename_map)
-    x_dim, y_dim = "x", "y"
-    dims = [x_dim, y_dim]
-
-    ds = _select_time_range(ds, dataset=dataset, start=start, end=end)
-
-    source_crs: str = dataset.get("source_crs", "EPSG:4326")
-    ds = reproject_to_instance_crs(ds, dataset, source_crs=source_crs)
-
-    xmin = ds[x_dim].min().item()
-    xmax = ds[x_dim].max().item()
-    ymin = ds[y_dim].min().item()
-    ymax = ds[y_dim].max().item()
-    bbox = [xmin, ymin, xmax, ymax]
-    shape = (ds.sizes[x_dim], ds.sizes[y_dim])
-
-    # https://github.com/zarr-developers/geozarr-toolkit/issues/15
-    geozarr_attrs = create_geozarr_attrs(
-        dimensions=dims,
-        crs=crs,
-        bbox=bbox,
-        shape=shape,
-    )
-
-    # save as zarr
-    logger.info("Saving to optimized zarr file")
-    zarr_path = DOWNLOAD_DIR / f"{_get_cache_prefix(dataset)}.zarr"
-
-    if _needs_pyramid(ds, x_dim, y_dim):
-        levels = _pyramid_levels(ds, x_dim, y_dim)
-        logger.info("Building %d-level pyramid (max dim %d pixels)", levels, max(ds.sizes[x_dim], ds.sizes[y_dim]))
-
-        # Add multiscales convention metadata to the zarr attributes
-        zarr_conventions = geozarr_attrs.get("zarr_conventions", [])
-        zarr_conventions.append(MultiscalesConventionMetadata().model_dump())
-        geozarr_attrs["zarr_conventions"] = zarr_conventions
-
-        # Load into memory then close to deterministically release netCDF file handles
-        # before create_pyramid spawns multiprocessing workers. After load() the data
-        # lives in numpy arrays and no longer needs the underlying file objects.
-        ds.load()
-        ds.close()
-
-        ds = ds.proj.assign_crs(spatial_ref=crs)
-
-        # https://github.com/carbonplan/topozarr/issues/13
-        pyramid = create_pyramid(ds, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
-
-        pyramid.dt.attrs.update(geozarr_attrs)
-        pyramid.dt.to_zarr(zarr_path, mode="w", encoding=_strip_sharding(pyramid.encoding), zarr_format=3)
-
-        # zarr-layer looks for the time coordinate at the root of the store, not inside each level.
-        # Write it as a single root-level chunk so browser clients can discover it without
-        # incurring a fan-out of tiny copied coordinate chunks from level 0.
-        _write_root_time_coordinate(zarr_path, ds, time_dim="t")
-
-        pyramid.dt.close()
-
-    else:
-        logger.info("Building flat zarr (max dim %d pixels)", max(ds.sizes[x_dim], ds.sizes[y_dim]))
-        uniform_chunks = _compute_time_space_chunks(ds, dataset)
-        logger.info(f"--> {uniform_chunks}")
-
-        ds.attrs.update(geozarr_attrs)
-        ds_chunked = ds.chunk(uniform_chunks)
-        # Remove _FillValue from each variable's encoding so that in-memory NaN values
-        # are stored as IEEE NaN in zarr rather than re-encoded as a sentinel (e.g.
-        # -999.99). ZarrLayer uses the zarr fill_value attribute (nan for floats) to
-        # render missing pixels as transparent — not a separately specified fillValue.
-        for var in ds_chunked.data_vars:
-            ds_chunked[var].encoding.pop("_FillValue", None)
-        ds_chunked.to_zarr(zarr_path, mode="w", zarr_format=3, consolidated=True)
-        ds_chunked.close()
-
-    ds.close()
-    logger.info("Finished cache optimization")
-
-
 _PYRAMID_PIXEL_THRESHOLD = 2048 * 2048
 _PYRAMID_MAX_LEVELS = 8
 _PYRAMID_TARGET_TILE_SIZE = 512
 _ROOT_TIME_COORD_MAX_CHUNK = 4096
-
-
-def _strip_sharding(
-    encoding: dict[str, dict[str, dict[str, object]]],
-) -> dict[str, dict[str, dict[str, object]]]:
-    """Remove the shards key from topozarr pyramid encoding, leaving only chunks.
-
-    zarrita (used by @carbonplan/zarr-layer) cannot decode sharding_indexed codec
-    without explicit registration, so we drop shards before writing the store.
-    """
-    stripped: dict[str, dict[str, dict[str, object]]] = {}
-    for level_path, level_enc in encoding.items():
-        stripped[level_path] = {
-            var: {k: v for k, v in var_enc.items() if k != "shards"} for var, var_enc in level_enc.items()
-        }
-    return stripped
 
 
 def _needs_pyramid(ds: xr.Dataset, x_dim: str, y_dim: str) -> bool:
@@ -256,88 +47,33 @@ def _pyramid_levels(ds: xr.Dataset, x_dim: str, y_dim: str) -> int:
     return max(2, min(levels, _PYRAMID_MAX_LEVELS))
 
 
-def _select_time_range(
-    ds: xr.Dataset,
-    *,
-    dataset: dict[str, Any],
-    start: str | None,
-    end: str | None,
-) -> xr.Dataset:
-    """Clip a cached dataset to the managed artifact's requested temporal scope."""
-    if start is None and end is None:
-        return ds
+def _write_root_time_coordinate(zarr_store: "Path | Any", ds: xr.Dataset, *, time_dim: str) -> None:
+    """Expose the time coordinate at the pyramid root with bounded chunking for browser clients.
 
-    time_dim = get_time_dim(ds)
-    selected = ds.sel({time_dim: slice(start, end)})
-    if selected.sizes.get(time_dim, 0) == 0:
-        raise ValueError(f"No cached data for dataset '{dataset['id']}' intersects requested time range {start}..{end}")
-    logger.info(
-        "Clipped dataset '%s' to requested time range %s..%s (%d steps)",
-        dataset["id"],
-        start,
-        end,
-        selected.sizes[time_dim],
-    )
-    return selected
-
-
-def _compute_time_space_chunks(
-    ds: xr.Dataset,
-    dataset: dict[str, Any],
-    max_spatial_chunk: int = 512,
-) -> dict[str, int]:
-    """Compute chunk sizes tuned for common temporal access patterns."""
-    chunks: dict[str, int] = {}
-
-    iso_step = resolve_iso_period_step(dataset)
-    dim = get_time_dim(ds)
-    if iso_step is not None:
-        try:
-            chunks[dim] = time_chunk_for_iso_step(iso_step)
-        except ValueError:
-            logger.warning(
-                "Invalid ISO 8601 step %r for dataset '%s'; defaulting time chunk to 12.",
-                iso_step,
-                dataset.get("id", "?"),
-            )
-            chunks[dim] = 12
-    else:
-        logger.warning(
-            "No ISO 8601 step for dataset '%s'; defaulting time chunk to 12. "
-            "Declare 'extents.temporal.resolution' in the template to silence this warning.",
-            dataset.get("id", "?"),
-        )
-        chunks[dim] = 12
-
-    x_dim, y_dim = get_x_y_dims(ds)
-    chunks[x_dim] = min(ds.sizes[x_dim], max_spatial_chunk)
-    chunks[y_dim] = min(ds.sizes[y_dim], max_spatial_chunk)
-
-    return chunks
-
-
-def _write_root_time_coordinate(zarr_path: Path, ds: xr.Dataset, *, time_dim: str) -> None:
-    """Expose the time coordinate at the pyramid root with bounded chunking for browser clients."""
+    zarr_store may be a filesystem Path (plain Zarr) or a zarr-compatible store object
+    (e.g. an Icechunk session store).
+    """
     if time_dim not in ds.dims:
-        logger.debug("Skipping root time coordinate write for %s: no %s dimension found", zarr_path, time_dim)
+        logger.debug("Skipping root time coordinate write: no %s dimension found", time_dim)
         return
     if time_dim not in ds.coords or ds.sizes.get(time_dim, 0) == 0:
-        logger.debug("Skipping root time coordinate write for %s: empty or missing %s coordinate", zarr_path, time_dim)
+        logger.debug("Skipping root time coordinate write: empty or missing %s coordinate", time_dim)
         return
 
-    root = zarr.open_group(str(zarr_path), mode="a", zarr_format=3)
+    store_arg = str(zarr_store) if isinstance(zarr_store, Path) else zarr_store
+    root = zarr.open_group(store_arg, mode="a", zarr_format=3)
     root_attrs = dict(root.attrs)
     if time_dim in root:
         del root[time_dim]
     time_coord = xr.Dataset(coords={time_dim: ds[time_dim]})
     time_coord.to_zarr(
-        zarr_path,
+        store_arg,
         mode="a",
         zarr_format=3,
         consolidated=False,
         encoding={time_dim: {"chunks": (min(ds.sizes[time_dim], _ROOT_TIME_COORD_MAX_CHUNK),)}},
     )
-    root = zarr.open_group(str(zarr_path), mode="a", zarr_format=3)
+    root = zarr.open_group(store_arg, mode="a", zarr_format=3)
     root.attrs.update(root_attrs)
 
 
@@ -367,60 +103,134 @@ def get_icechunk_path(dataset: dict[str, Any]) -> Path:
     return DOWNLOAD_DIR / f"{prefix}.icechunk"
 
 
-def _validate_spatial_coverage(dataset: dict[str, Any], bbox: list[float] | None) -> None:
-    """Raise HTTP 400 if the request bbox falls outside the dataset's declared extents."""
-    extents = dataset.get("extents")
-    if not extents or bbox is None:
-        return
-    spatial = extents.get("spatial")
-    if not spatial:
-        return
-    cov_bbox = spatial.get("bbox")
-    if not isinstance(cov_bbox, (list, tuple)) or len(cov_bbox) != 4:
-        return
-    cov_xmin, cov_ymin, cov_xmax, cov_ymax = cov_bbox
-    xmin, ymin, xmax, ymax = bbox
-    if ymin > cov_ymax or ymax < cov_ymin:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Dataset '{dataset['id']}' does not cover this extent. "
-                f"Latitude coverage: {cov_ymin}°–{cov_ymax}°, "
-                f"requested: {ymin}°–{ymax}°."
-            ),
-        )
-    if xmin > cov_xmax or xmax < cov_xmin:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Dataset '{dataset['id']}' does not cover this extent. "
-                f"Longitude coverage: {cov_xmin}°–{cov_xmax}°, "
-                f"requested: {xmin}°–{xmax}°."
-            ),
-        )
+def needs_pyramid(ds: xr.Dataset) -> bool:
+    """Return True when the dataset is large enough to need a multiscale pyramid."""
+    return _needs_pyramid(ds, "x", "y")
 
 
-def _resolve_bbox(*, bbox: list[float] | None) -> list[float]:
-    """Resolve bbox from request or environment."""
-    if bbox is not None:
-        return bbox
+def write_to_icechunk_store(
+    ds: xr.Dataset,
+    store_path: Path,
+    x_dim: str = "x",
+    y_dim: str = "y",
+    t_dim: str | None = "t",
+    *,
+    crs: str | None = None,
+    commit_message: str = "Materialized dataset",
+) -> None:
+    """Write *ds* to an Icechunk store, building a multiscale pyramid when needed.
 
-    env_bbox = _bbox_from_env()
-    if env_bbox is not None:
-        return env_bbox
+    Applies GeoZarr conventions throughout. Creates the store if it does not exist;
+    overwrites any existing content in the new commit.
 
-    raise ValueError(
-        "A bbox is required for this dataset. Provide it in the request or set DOWNLOAD_BBOX in the environment."
+    Three CRS calls are required: ``proj.assign_crs`` sets the xproj CRS needed by
+    topozarr, ``rio.write_crs`` populates ``spatial_ref`` attrs and encodes
+    ``grid_mapping`` per variable, then ``proj.assign_crs`` again because
+    ``rio.write_crs`` destroys xproj CRS detection.
+    """
+    import icechunk
+    import rioxarray as _rxr  # noqa: F401  # pyright: ignore[reportUnusedImport]  # activates .rio accessor
+
+    if crs is None:
+        crs = api_config.get_crs()
+
+    dims = [x_dim, y_dim]
+    xmin = float(ds[x_dim].min())
+    xmax = float(ds[x_dim].max())
+    ymin = float(ds[y_dim].min())
+    ymax = float(ds[y_dim].max())
+    geozarr_attrs = create_geozarr_attrs(
+        dimensions=dims,
+        crs=crs,
+        bbox=[xmin, ymin, xmax, ymax],
+        shape=(ds.sizes[x_dim], ds.sizes[y_dim]),
     )
 
+    ds = ds.proj.assign_crs(spatial_ref=crs)
+    ds = ds.rio.write_crs(crs)
+    ds = ds.proj.assign_crs(spatial_ref=crs)
 
-def _bbox_from_env() -> list[float] | None:
-    """Parse a default bbox from environment if configured."""
-    raw_bbox = os.getenv("DOWNLOAD_BBOX") or os.getenv("DEFAULT_DOWNLOAD_BBOX")
-    if not raw_bbox:
-        return None
+    storage = icechunk.local_filesystem_storage(str(store_path))
+    repo = icechunk.Repository.open_or_create(storage)
+    session = repo.writable_session("main")
 
-    parts = [part.strip() for part in raw_bbox.split(",")]
-    if len(parts) != 4:
-        raise ValueError("DOWNLOAD_BBOX must contain four comma-separated numbers: xmin,ymin,xmax,ymax")
-    return [float(part) for part in parts]
+    if _needs_pyramid(ds, x_dim, y_dim):
+        zarr_conventions = list(geozarr_attrs.get("zarr_conventions", []))
+        zarr_conventions.append(MultiscalesConventionMetadata().model_dump())
+        geozarr_attrs["zarr_conventions"] = zarr_conventions
+
+        levels = _pyramid_levels(ds, x_dim, y_dim)
+        logger.info(
+            "Building %d-level pyramid into Icechunk store '%s' (dims %dx%d)",
+            levels,
+            store_path.name,
+            ds.sizes[x_dim],
+            ds.sizes[y_dim],
+        )
+
+        # topozarr.create_pyramid requires fully materialised numpy arrays.
+        ds = ds.load()
+        pyramid = create_pyramid(ds, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
+        pyramid.dt.attrs.update(geozarr_attrs)
+
+        # Keep the no-data sentinel consistent across pyramid levels so the map
+        # renders the same pixels transparent at every zoom. topozarr mean-coarsens
+        # an integer-coded mask (e.g. a 0/1 hotspot raster, where 0 is the no-data
+        # background and zarr's default integer fill) into float levels that default
+        # to fill_value=NaN. The background cells stay 0.0, so they no longer match
+        # the level's own NaN fill and render opaque at overview zooms while the
+        # full-resolution level (fill_value=0) stays transparent. Pin the coarse
+        # levels' fill_value back to 0 for integer-coded variables; float variables
+        # already use NaN as both data and fill, so leave them untouched.
+        data_var_names = [str(v) for v in ds.data_vars]
+        for level_path, level_enc in pyramid.encoding.items():
+            if str(level_path).rsplit("/", 1)[-1] == "0":
+                continue  # full-resolution level already carries the correct fill
+            for var_name in data_var_names:
+                if var_name in level_enc and ds[var_name].dtype.kind != "f":
+                    level_enc[var_name]["fill_value"] = 0
+
+        pyramid.dt.to_zarr(session.store, mode="w", encoding=pyramid.encoding, zarr_format=3)
+        pyramid.dt.close()
+
+        # topozarr demotes spatial_ref from coordinate to data variable in the pyramid.
+        # Patch the root and each level group: add CRS to multiscales datasets entries so
+        # ZarrLayer can detect the coordinate system without guessing (it defaults to
+        # EPSG:3857 when crs is absent from the OME-NGFF datasets array).
+        root = zarr.open_group(session.store, mode="a")
+        root_attrs = dict(root.attrs)
+        ms = root_attrs.get("multiscales")
+        if isinstance(ms, list) and ms and isinstance(ms[0], dict):
+            datasets = ms[0].get("datasets")
+            if isinstance(datasets, list):
+                for ds_entry in datasets:
+                    if isinstance(ds_entry, dict):
+                        ds_entry.setdefault("crs", crs)
+                root_attrs["multiscales"] = ms
+                root.attrs.update(root_attrs)
+        for level_key in root.keys():
+            if isinstance(root[level_key], zarr.Group):
+                lvl_attrs = dict(root[level_key].attrs)
+                lvl_attrs["coordinates"] = "spatial_ref"
+                root[level_key].attrs.update(lvl_attrs)
+
+        if t_dim is not None:
+            _write_root_time_coordinate(session.store, ds, time_dim=t_dim)
+    else:
+        logger.info(
+            "Writing flat Icechunk store '%s' (dims %dx%d)",
+            store_path.name,
+            ds.sizes[x_dim],
+            ds.sizes[y_dim],
+        )
+        ds = ds.assign_attrs({**ds.attrs, **geozarr_attrs})
+        ds.to_zarr(session.store, mode="w", zarr_format=3)
+
+        # xarray demotes scalar coordinates (like spatial_ref) to data variables in zarr v3.
+        # Patch the root group so rioxarray can follow the CF grid_mapping attribute.
+        root_flat = zarr.open_group(session.store, mode="a")
+        flat_attrs = dict(root_flat.attrs)
+        flat_attrs["coordinates"] = "spatial_ref"
+        root_flat.attrs.update(flat_attrs)
+
+    session.commit(commit_message)
