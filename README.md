@@ -8,14 +8,37 @@ The platform is designed to operate independently of DHIS2 and can be deployed o
 
 > **Status: active development.** Current focus is on dataset ingestion, sync workflows, and GeoZarr storage. APIs and data models may change without notice.
 
-## Setup
+## Install
+
+The package ships a lightweight **client** by default and a full **server** stack as an optional extra:
+
+```bash
+pip install open-climate-service            # client only — talk to an instance over HTTP
+pip install open-climate-service[xarray]    # + open published datasets as xarray
+pip install open-climate-service[server]    # full server stack — run your own instance
+```
+
+The base client needs only `httpx` and `pystac`. See the [Python client](#python-client) section below and [docs/user_guide.md](docs/user_guide.md).
+
+### Python client
+
+```python
+from open_climate_service import ClimateService
+
+service = ClimateService("https://my-instance.example.org")
+datasets = service.datasets()                       # discover published collections
+ds = service.open_dataset(datasets[0]["id"])        # open as xarray (needs the [xarray] extra)
+workflows = service.workflows()                      # list reusable workflows (UDPs)
+```
+
+## Setup (server)
 
 ### Using uv (recommended)
 
 Install dependencies (requires [uv](https://docs.astral.sh/uv/)):
 
 ```
-uv sync
+uv sync --extra server
 ```
 
 Copy `.env.example` to `.env` and adjust values as needed. Environment variables are loaded automatically from `.env` at runtime. See `.env.example` for the full list of available options.
@@ -33,7 +56,7 @@ If you cannot use uv (e.g. mixed conda/forge environments):
 ```
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e ".[server]"
 python -m uvicorn open_climate_service.main:app --reload
 ```
 
@@ -42,7 +65,7 @@ python -m uvicorn open_climate_service.main:app --reload
 ```
 conda create -n dhis2-climate-service python=3.13
 conda activate dhis2-climate-service
-pip install -e .
+pip install -e ".[server]"
 python -m uvicorn open_climate_service.main:app --reload
 ```
 
@@ -52,7 +75,7 @@ Common Makefile targets:
 
 | Target         | Description                                      |
 | -------------- | ------------------------------------------------ |
-| `make sync`    | Install dependencies with uv                     |
+| `make sync`    | Install all dependencies with uv (client + server + xarray) |
 | `make run`     | Start the app with uvicorn (hot reload)          |
 | `make lint`    | Check linting, formatting, and types             |
 | `make fix`     | Autofix ruff lint and format issues              |

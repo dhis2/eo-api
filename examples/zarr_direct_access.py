@@ -4,15 +4,15 @@ Requires a running Open Climate Service instance with at least one published dat
 Adjust BASE_URL if the API is not running on the default local address.
 """
 
-from open_climate_service.client import Client
+from open_climate_service import ClimateService
 
 BASE_URL = "http://127.0.0.1:8000"
 
 
 def main() -> None:
     """Open a Zarr store directly and demonstrate spatial and temporal subsetting."""
-    api = Client(BASE_URL)
-    datasets = api.catalog()
+    service = ClimateService(BASE_URL)
+    datasets = service.datasets()
     if not datasets:
         print("No published datasets found. Run an ingestion first.")
         return
@@ -20,7 +20,7 @@ def main() -> None:
     first = datasets[0]
     print(f"Opening: {first['title']}\n")
 
-    ds = api.open(first["id"])
+    ds = service.open_dataset(first["id"])
     print(ds)
 
     print(f"\nDimensions:  {dict(ds.sizes)}")

@@ -3,8 +3,8 @@
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 
-sync: ## Install dependencies with uv
-	uv sync
+sync: ## Install all dependencies with uv (client + server + xarray extras)
+	uv sync --all-extras
 
 sync-gdal: ## Pin gdal override to the installed system libgdal version, then sync
 	@GDAL_VERSION=$$(gdal-config --version 2>/dev/null) && \
@@ -12,7 +12,7 @@ sync-gdal: ## Pin gdal override to the installed system libgdal version, then sy
 		echo "System GDAL: $$GDAL_VERSION" && \
 		sed -i.bak "s/\"gdal==[^\"]*\"/\"gdal==$$GDAL_VERSION\"/" pyproject.toml && \
 		rm -f pyproject.toml.bak && \
-		uv sync
+		uv sync --all-extras
 
 run: ## Start the app with uvicorn
 	uv run uvicorn open_climate_service.main:app --reload --reload-include "*.html" --reload-include "*.yaml" --reload-include "*.yml"

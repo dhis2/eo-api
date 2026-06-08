@@ -41,17 +41,33 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: GIS",
 ]
+# Base install = the lightweight client. It only talks to a running instance over
+# HTTP (discover datasets, list processes/workflows, run process graphs).
 dependencies = [
+    "httpx>=0.28.1",
+    "pystac>=1.10,<2",
+]
+
+[project.optional-dependencies]
+# Open published datasets as in-memory xarray.Dataset objects from the client
+# (reads the remote Zarr store advertised in the STAC collection).
+xarray = [
+    "xarray>=2025.12.0",
+    "zarr>=3.1.6,<4",
+    "fsspec>=2024.6.0",
+    "aiohttp>=3.10",
+]
+# Full server stack — required to run your own Open Climate Service instance.
+server = [
     "fastapi>=0.100.0",
     "jinja2>=3.1",
     "starlette>=0.27.0",
     "uvicorn>=0.41.0",
     "python-dotenv>=1.0.1",
-    "pystac>=1.10,<2",
     "geojson-pydantic>=2.1.0",
-    "httpx>=0.28.1",
     "metpy>=1.7,<2",
     "xstac>=1.0,<2",
+    "xarray>=2025.12.0",
     "zarr>=3.1.6,<4",
     "icechunk>=2.0,<3",
     "geozarr-toolkit==0.1.*",

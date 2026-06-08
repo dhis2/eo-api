@@ -1831,26 +1831,37 @@ name = "open-climate-service"
 version = "0.1.0a1"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
+    { name = "pystac" },
+]
+
+[package.optional-dependencies]
+server = [
     { name = "dhis2eo" },
     { name = "fastapi" },
     { name = "geojson-pydantic" },
     { name = "geozarr-toolkit" },
-    { name = "httpx" },
     { name = "icechunk" },
     { name = "jinja2" },
     { name = "metpy" },
     { name = "openeo-pg-parser-networkx" },
     { name = "openeo-processes-dask-slim", extra = ["implementations"] },
     { name = "portalocker" },
-    { name = "pystac" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "rioxarray" },
     { name = "starlette" },
     { name = "topozarr" },
     { name = "uvicorn" },
+    { name = "xarray" },
     { name = "xclim" },
     { name = "xstac" },
+    { name = "zarr" },
+]
+xarray = [
+    { name = "aiohttp" },
+    { name = "fsspec" },
+    { name = "xarray" },
     { name = "zarr" },
 ]
 
@@ -1868,28 +1879,34 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dhis2eo", specifier = ">=1.2.1" },
-    { name = "fastapi", specifier = ">=0.100.0" },
-    { name = "geojson-pydantic", specifier = ">=2.1.0" },
-    { name = "geozarr-toolkit", specifier = "==0.1.*" },
+    { name = "aiohttp", marker = "extra == 'xarray'", specifier = ">=3.10" },
+    { name = "dhis2eo", marker = "extra == 'server'", specifier = ">=1.2.1" },
+    { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.100.0" },
+    { name = "fsspec", marker = "extra == 'xarray'", specifier = ">=2024.6.0" },
+    { name = "geojson-pydantic", marker = "extra == 'server'", specifier = ">=2.1.0" },
+    { name = "geozarr-toolkit", marker = "extra == 'server'", specifier = "==0.1.*" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "icechunk", specifier = ">=2.0,<3" },
-    { name = "jinja2", specifier = ">=3.1" },
-    { name = "metpy", specifier = ">=1.7,<2" },
-    { name = "openeo-pg-parser-networkx", specifier = ">=2026.3.3" },
-    { name = "openeo-processes-dask-slim", extras = ["implementations"], git = "https://github.com/dhis2/openeo-processes-dask-slim?branch=main" },
-    { name = "portalocker", specifier = ">=3.2.0" },
+    { name = "icechunk", marker = "extra == 'server'", specifier = ">=2.0,<3" },
+    { name = "jinja2", marker = "extra == 'server'", specifier = ">=3.1" },
+    { name = "metpy", marker = "extra == 'server'", specifier = ">=1.7,<2" },
+    { name = "openeo-pg-parser-networkx", marker = "extra == 'server'", specifier = ">=2026.3.3" },
+    { name = "openeo-processes-dask-slim", extras = ["implementations"], marker = "extra == 'server'", git = "https://github.com/dhis2/openeo-processes-dask-slim?branch=main" },
+    { name = "portalocker", marker = "extra == 'server'", specifier = ">=3.2.0" },
     { name = "pystac", specifier = ">=1.10,<2" },
-    { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "python-multipart", specifier = ">=0.0.29" },
-    { name = "rioxarray", specifier = ">=0.17" },
-    { name = "starlette", specifier = ">=0.27.0" },
-    { name = "topozarr", specifier = "==0.0.*" },
-    { name = "uvicorn", specifier = ">=0.41.0" },
-    { name = "xclim", specifier = ">=0.61.1" },
-    { name = "xstac", specifier = ">=1.0,<2" },
-    { name = "zarr", specifier = ">=3.1.6,<4" },
+    { name = "python-dotenv", marker = "extra == 'server'", specifier = ">=1.0.1" },
+    { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.29" },
+    { name = "rioxarray", marker = "extra == 'server'", specifier = ">=0.17" },
+    { name = "starlette", marker = "extra == 'server'", specifier = ">=0.27.0" },
+    { name = "topozarr", marker = "extra == 'server'", specifier = "==0.0.*" },
+    { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.41.0" },
+    { name = "xarray", marker = "extra == 'server'", specifier = ">=2025.12.0" },
+    { name = "xarray", marker = "extra == 'xarray'", specifier = ">=2025.12.0" },
+    { name = "xclim", marker = "extra == 'server'", specifier = ">=0.61.1" },
+    { name = "xstac", marker = "extra == 'server'", specifier = ">=1.0,<2" },
+    { name = "zarr", marker = "extra == 'server'", specifier = ">=3.1.6,<4" },
+    { name = "zarr", marker = "extra == 'xarray'", specifier = ">=3.1.6,<4" },
 ]
+provides-extras = ["xarray", "server"]
 
 [package.metadata.requires-dev]
 dev = [

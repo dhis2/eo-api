@@ -32,20 +32,59 @@ The `assets.zarr` field contains everything needed to open the dataset:
 }
 ```
 
-## Opening a dataset with xarray
+## The Python client
 
-The `open_climate_service.client` module provides a `Client` class for discovering and opening datasets:
+`open_climate_service` ships a lightweight `ClimateService` client. The base install
+needs only `httpx` and `pystac`; opening datasets as xarray adds the `xarray` extra:
+
+```bash
+pip install open-climate-service            # client only — talk to an instance over HTTP
+pip install open-climate-service[xarray]    # + open published datasets as xarray
+```
 
 ```python
-from open_climate_service.client import Client
+from open_climate_service import ClimateService
 
-api = Client("http://127.0.0.1:8000")
+service = ClimateService("http://127.0.0.1:8000")
 
-datasets = api.catalog()
-for link in datasets:
+# Discover published datasets (STAC catalog)
+for link in service.datasets():
     print(link["id"], "—", link["title"])
 
-ds = api.open(datasets[0]["id"])  # open whichever dataset is published first
+# List the processes and reusable workflows the instance exposes
+service.processes()    # standard openEO processes
+service.workflows()    # stored workflows / UDPs (e.g. aggregate_to_dhis2_org_units)
+
+# Run a process graph synchronously. JSON results (e.g. a DHIS2 dataValueSet) come
+# back as a dict; file results (CSV, GeoJSON, GeoTIFF) come back as bytes.
+data_value_set = service.execute(
+    {
+        "agg": {
+            "process_id": "aggregate_to_dhis2_org_units",
+            "arguments": {
+                "dataset_id": "era5land_temperature_monthly",
+                "temporal_extent": ["2025-01-01", "2025-12-31"],
+                "geometries": {"type": "FeatureCollection", "features": []},
+                "data_element_id": "fbfJHSPpUQD",
+                "method": "mean",
+            },
+            "result": True,
+        }
+    }
+)
+```
+
+## Opening a dataset with xarray
+
+`open_dataset` reads the Zarr asset advertised in the dataset's STAC collection and returns a lazy `xarray.Dataset` (requires the `xarray` extra):
+
+```python
+from open_climate_service import ClimateService
+
+service = ClimateService("http://127.0.0.1:8000")
+
+datasets = service.datasets()
+ds = service.open_dataset(datasets[0]["id"])  # open whichever dataset is published first
 print(ds)
 ```
 

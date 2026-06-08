@@ -15,7 +15,7 @@ COPY pyproject.toml uv.lock .python-version ./
 COPY open_climate_service/ open_climate_service/
 COPY README.md .
 
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra server
 
 RUN mkdir -p /app/data/pygeoapi /app/data/artifacts && \
     printf '[]\n' > /app/data/artifacts/records.json && \
