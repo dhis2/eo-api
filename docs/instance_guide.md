@@ -56,7 +56,7 @@ Create `pyproject.toml`:
 [project]
 name = "my-climate-service"
 version = "0.1.0"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 description = "Open Climate Service instance for [context]"
 dependencies = [
     "open-climate-service @ git+https://github.com/dhis2/open-climate-service.git",
@@ -69,7 +69,7 @@ package = false
 open-climate-service = { git = "https://github.com/dhis2/open-climate-service.git", branch = "main" }
 ```
 
-The `package = false` setting tells uv that this repository is not itself a Python package — it only declares dependencies. The `[tool.uv.sources]` block pins open-climate-service to the `main` branch on GitHub. To pin to a specific release tag or commit instead, use `rev` (e.g. `rev = "<git tag or commit SHA>"`). Installing directly from git is the intended path for now — the package name is reserved on PyPI but no stable releases have been published there yet.
+The `package = false` setting tells uv that this repository is not itself a Python package — it only declares dependencies. The `[tool.uv.sources]` block pins open-climate-service to the `main` branch on GitHub. To pin to a specific release tag or commit instead, use `rev` (e.g. `rev = "<git tag or commit SHA>"`). Installing from git gives you the latest code; once a release is available on PyPI you can instead depend on `open-climate-service` from PyPI and drop the `[tool.uv.sources]` entry.
 
 Install dependencies:
 
