@@ -28,16 +28,18 @@ openeo-processes-dask-slim = { git = "https://github.com/dhis2/openeo-processes-
 
 [project]
 name = "open-climate-service"
-version = "0.1.0a1"
+version = "0.1.0"
 requires-python = ">=3.13"
 description = "Climate and Earth Observation data API"
-license = { text = "BSD-3-Clause" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [{ name = "University of Oslo", email = "climate@dhis2.org" }]
 readme = "README.md"
 keywords = ["dhis2", "climate", "zarr", "stac", "geospatial"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: GIS",
 ]
