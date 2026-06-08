@@ -44,7 +44,7 @@ Artifacts are stored in `{data_dir}/artifacts/records.json`, where `data_dir` is
 
 ### Managed dataset
 
-A **managed dataset** is the public-facing view of the most recent artifact for a given template. It is what `/datasets`, `/zarr`, `/stac`, and `/ogcapi` expose. When an operator ingests or syncs a dataset, the managed dataset view updates to reflect the new artifact — the public ID stays stable.
+A **managed dataset** is the public-facing view of the most recent artifact for a given template. It is what `/datasets`, `/zarr`, and `/stac` expose. When an operator ingests or syncs a dataset, the managed dataset view updates to reflect the new artifact — the public ID stays stable.
 
 The relationship is: one template → many artifacts over time → one managed dataset (the latest).
 
@@ -78,11 +78,10 @@ Artifact (internal record)
 Managed dataset (public API)
     ├── /datasets/{id}         — native metadata
     ├── /zarr/{id}             — raw zarr store access
-    ├── /stac/collections/{id} — STAC discovery
-    └── /ogcapi/collections/{id} — OGC API access
+    └── /stac/collections/{id} — STAC discovery
 ```
 
-The plugin owns source probing, period enumeration, and fetching one period as an `xarray.Dataset`. The framework owns job callbacks, artifact persistence, publication metadata, and all public API integration. Plugins do not need to know about Zarr conventions, STAC, OGC, or pygeoapi.
+The plugin owns source probing, period enumeration, and fetching one period as an `xarray.Dataset`. The framework owns job callbacks, artifact persistence, publication metadata, and all public API integration. Plugins do not need to know about Zarr conventions or STAC.
 
 ---
 
@@ -239,7 +238,7 @@ Plugin code (streaming plugins, `@process` functions) can rely on the following 
 | GeoZarr root attributes (`spatial:bbox`, `proj:code`) | `build_dataset_zarr`                        |
 | Artifact coverage computation                         | `_coverage_from_dataset`                    |
 | Artifact record persistence                           | `_store_artifact`                           |
-| pygeoapi publication                                  | `publish_artifact_record` if `publish=true` |
+| STAC publication                                      | `publish_artifact_record` if `publish=true` |
 | STAC collection generation                            | Dynamic from artifact record                |
 
 Plugin code only needs to produce data. Everything else is the framework's responsibility.

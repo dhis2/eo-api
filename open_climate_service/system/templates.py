@@ -44,7 +44,6 @@ def root_json(base: str) -> RootResponse:
     return RootResponse(
         message="Welcome to Open Climate Service",
         links=[
-            Link(href=f"{base}/ogcapi/", rel="ogcapi", title="OGC API"),
             Link(href=f"{base}/stac/catalog.json", rel="stac", title="STAC Catalog"),
             Link(href=f"{base}/extent", rel="extent", title="Extent"),
             Link(href=f"{base}/ingestions", rel="ingestions", title="Ingestions"),
