@@ -33,8 +33,9 @@ def main() -> None:
     geojson = json.loads(DISTRICTS_FILE.read_text())
     features = geojson["features"]
 
-    # Extract DHIS2 org unit IDs and names for display
-    district_ids = [f["properties"]["id"] for f in features]
+    # Map org unit UID → display name. aggregate_spatial labels the geometry
+    # dimension with each feature's GeoJSON `id` (the DHIS2 org unit UID), so the
+    # CSV geometry column carries the UIDs directly.
     id_to_name = {f["properties"]["id"]: f["properties"]["name"] for f in features}
 
     # Discover available temporal extent from the STAC collection
@@ -91,21 +92,12 @@ def main() -> None:
                 },
             },
         },
-        # 4. Replace Shapely geometry objects with DHIS2 org unit IDs so they
-        #    appear as the geometry label in the output — without this step the
-        #    geometry dimension uses raw geometry objects that are lost in CSV/JSON.
-        "label": {
-            "process_id": "rename_labels",
-            "arguments": {
-                "data": {"from_node": "zones"},
-                "dimension": "geometry",
-                "target": district_ids,
-            },
-        },
-        # 5. Save as CSV (geometry column now contains org unit IDs)
+        # 4. Save as CSV. aggregate_spatial already labels the geometry dimension
+        #    with each feature's GeoJSON `id` (the DHIS2 org unit UID), so the
+        #    geometry column carries the org unit IDs directly — no rename needed.
         "save": {
             "process_id": "save_result",
-            "arguments": {"data": {"from_node": "label"}, "format": "CSV"},
+            "arguments": {"data": {"from_node": "zones"}, "format": "CSV"},
             "result": True,
         },
     }
