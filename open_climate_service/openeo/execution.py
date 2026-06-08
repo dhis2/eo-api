@@ -143,6 +143,21 @@ class _RegistryOverlay:
         return self._base[key]
 
 
+def _resolve_workflow_parameters(node: Any, params: dict[str, Any]) -> Any:
+    """Replace ``{"from_parameter": name}`` refs matching a workflow parameter with its value.
+
+    References that are not workflow parameters — e.g. a reducer's ``data`` callback
+    parameter — are left untouched so the engine resolves them at call time.
+    """
+    if isinstance(node, dict):
+        if set(node) == {"from_parameter"} and node["from_parameter"] in params:
+            return params[node["from_parameter"]]
+        return {key: _resolve_workflow_parameters(value, params) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_resolve_workflow_parameters(item, params) for item in node]
+    return node
+
+
 def _augment_with_workflows(base_registry: Any) -> Any:
     """Return a registry overlay that adds currently stored workflows to the base registry.
 
@@ -164,8 +179,11 @@ def _augment_with_workflows(base_registry: Any) -> Any:
         if not wf.process_graph:
             continue
         pg_dict: dict[str, Any] = dict(wf.process_graph)
+        param_defaults: dict[str, Any] = {
+            p["name"]: p["default"] for p in (wf.parameters or []) if "name" in p and "default" in p
+        }
 
-        def _make_workflow_impl(pg: dict[str, Any], wf_id: str) -> Any:
+        def _make_workflow_impl(pg: dict[str, Any], wf_id: str, defaults: dict[str, Any]) -> Any:
             _executing: set[str] = set()
 
             def _workflow_impl(**kwargs: Any) -> Any:
@@ -178,13 +196,19 @@ def _augment_with_workflows(base_registry: Any) -> Any:
                     )
                 _executing.add(wf_id)
                 try:
-                    return OpenEOProcessGraph(pg).to_callable(overlay, parameters=kwargs)()  # pyright: ignore[reportArgumentType]
+                    # Substitute the workflow's declared parameters into the graph before
+                    # execution. The named_parameters mechanism only resolves callback
+                    # parameters (e.g. a reducer's `data`), not top-level UDP arguments, so
+                    # without this the workflow's from_parameter refs raise
+                    # ProcessParameterMissing. Declared defaults fill in omitted arguments.
+                    resolved_pg = _resolve_workflow_parameters(pg, {**defaults, **kwargs})
+                    return OpenEOProcessGraph(resolved_pg).to_callable(overlay)()  # pyright: ignore[reportArgumentType]
                 finally:
                     _executing.discard(wf_id)
 
             return _workflow_impl
 
-        workflow_map[wf.id] = Process(spec={}, implementation=_make_workflow_impl(pg_dict, wf.id))
+        workflow_map[wf.id] = Process(spec={}, implementation=_make_workflow_impl(pg_dict, wf.id, param_defaults))
 
     return overlay
 

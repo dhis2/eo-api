@@ -63,6 +63,59 @@ Calling it from a process graph is a single node:
 
 ---
 
+## Built-in workflows
+
+Open Climate Service ships with ready-to-use workflows for aggregating **any published GeoZarr dataset** to a set of **GeoJSON features** (typically DHIS2 organisation units) and exporting DHIS2-ready output:
+
+| Workflow | Output |
+|---|---|
+| `aggregate_to_dhis2_org_units` | DHIS2 `dataValueSet` JSON |
+| `aggregate_to_dhis2_org_units_chap` | CHAP wide CSV (`time_period`, `location`, one column per variable) |
+
+Both run `load_collection → aggregate_spatial → save_result`: they load the dataset over a time range, compute a spatial statistic of the variable within each feature, and emit one value per feature per time step. Each feature's GeoJSON `id` becomes the DHIS2 `orgUnit` (CHAP `location`), and each time step becomes the DHIS2 `period` (CHAP `time_period`).
+
+### Parameters
+
+| Name | Workflows | Default | Description |
+|---|---|---|---|
+| `dataset_id` | both | — | Published GeoZarr collection to aggregate (see `/datasets`) |
+| `temporal_extent` | both | — | `[start, end]` ISO-8601 dates |
+| `geometries` | both | — | GeoJSON `FeatureCollection`; each feature's `id` is the org unit / location |
+| `data_element_id` | DHIS2 only | — | DHIS2 data element id assigned to every value |
+| `method` | both | `mean` | Spatial aggregation method: `mean`, `min`, `max`, or `sum` |
+| `period_type` | both | `month` | Period type used to format each time step: `day`, `week`, `month`, `quarter`, `year` |
+
+> `period_type` **formats** each native time step into a DHIS2 period — it does not re-aggregate in time. Pick a dataset whose native temporal resolution matches the period you want (e.g. a monthly dataset for monthly values).
+
+### Example
+
+Mean monthly precipitation per district, as DHIS2 data values:
+
+```json
+{
+  "process": {
+    "process_graph": {
+      "agg": {
+        "process_id": "aggregate_to_dhis2_org_units",
+        "arguments": {
+          "dataset_id": "era5land_precipitation_monthly",
+          "temporal_extent": ["2025-01-01", "2025-12-31"],
+          "geometries": { "type": "FeatureCollection", "features": [ "...org units..." ] },
+          "data_element_id": "fbfJHSPpUQD",
+          "method": "mean",
+          "period_type": "month"
+        },
+        "result": true
+      }
+    }
+  }
+}
+```
+
+Submit it to `POST /result` (synchronous) or `POST /jobs` (batch); the result is a DHIS2 `dataValueSet` ready to POST to the DHIS2 Web API. For CHAP CSV, call `aggregate_to_dhis2_org_units_chap` with the same arguments minus `data_element_id`.
+
+---
+
 ## Three sources of workflows
 
 Workflows are loaded from three places, each overriding the previous on id collision:

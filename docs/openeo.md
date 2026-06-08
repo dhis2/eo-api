@@ -196,6 +196,10 @@ The `format` argument of `save_result` controls what the server writes. `GET /fi
 | `CSV`      | CSV        | Raster / Vector | Tabular — ideal for time series and zonal statistics output                            |
 | `GEOJSON`  | GeoJSON    | Vector          | Default for `aggregate_spatial` results; one feature per geometry                      |
 | `PARQUET`  | GeoParquet | Vector          | Columnar binary — efficient for large vector datasets                                  |
+| `DHIS2JSON` | DHIS2 JSON | Tabular        | DHIS2 `dataValueSet` — one value per org unit, period and data element                 |
+| `CHAPCSV`  | CHAP CSV   | Tabular         | Wide CSV for CHAP: `time_period`, `location`, one column per variable                   |
+
+For aggregating a dataset to DHIS2 org units and producing `DHIS2JSON` or `CHAPCSV` directly, see the built-in [org-unit aggregation workflows](workflows.md#built-in-workflows).
 
 ```bash
 # Monthly precipitation totals as NetCDF
