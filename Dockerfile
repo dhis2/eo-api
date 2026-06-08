@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:0.10-python3.13-trixie-slim
+FROM ghcr.io/astral-sh/uv:0.10-python3.12-trixie-slim
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \

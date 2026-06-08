@@ -6,6 +6,12 @@ build-backend = "uv_build"
 module-root = ""
 module-name = "open_climate_service"
 
+[tool.uv.sources]
+# The dhis2 fork relaxes the upstream <3.13 requires-python cap and drops the
+# rqadeforestation dependency (no working ARM64/macOS native binary). Dev and CI
+# resolve to it; the published wheel still depends on the plain PyPI package.
+openeo-processes-dask-slim = { git = "https://github.com/dhis2/openeo-processes-dask-slim", branch = "main" }
+
 [tool.uv]
 override-dependencies = [
     # openeo-pg-parser-networkx requires geojson-pydantic<2.0.0; our project uses >=2.1.0 which is compatible at runtime
@@ -23,13 +29,10 @@ override-dependencies = [
     "pystac>=1.10",
 ]
 
-[tool.uv.sources]
-openeo-processes-dask-slim = { git = "https://github.com/dhis2/openeo-processes-dask-slim", branch = "main" }
-
 [project]
 name = "open-climate-service"
 version = "0.1.0a1"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 description = "Climate and Earth Observation data API"
 license = { text = "BSD-3-Clause" }
 authors = [{ name = "University of Oslo", email = "climate@dhis2.org" }]
@@ -91,7 +94,7 @@ Changelog = "https://github.com/dhis2/open-climate-service/releases"
 climate-service = "open_climate_service.cli:main"
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py312"
 line-length = 120
 exclude = ["vendor/"]
 
@@ -116,7 +119,7 @@ docstring-code-format = true
 docstring-code-line-length = "dynamic"
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.12"
 plugins = ["pydantic.mypy"]
 warn_return_any = true
 warn_unused_configs = true
@@ -138,7 +141,7 @@ ignore_missing_imports = true
 [tool.pyright]
 include = ["open_climate_service", "tests"]
 exclude = ["**/.venv"]
-pythonVersion = "3.13"
+pythonVersion = "3.12"
 typeCheckingMode = "strict"
 useLibraryCodeForTypes = true
 reportPrivateUsage = false
