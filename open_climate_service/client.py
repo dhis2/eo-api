@@ -21,7 +21,7 @@ Example:
     >>> service.execute(
     ...     {  # run a process graph synchronously
     ...         "agg": {
-    ...             "process_id": "aggregate_to_dhis2_org_units",
+    ...             "process_id": "aggregate_to_dhis2_json",
     ...             "arguments": {...},
     ...             "result": True,
     ...         }

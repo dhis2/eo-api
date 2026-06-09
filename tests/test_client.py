@@ -224,12 +224,12 @@ def test_processes_returns_process_list() -> None:
 
 def test_workflows_returns_workflow_list() -> None:
     service, mock_http = _make_service()
-    mock_http.get.return_value = _make_response({"processes": [{"id": "aggregate_to_dhis2_org_units"}], "links": []})
+    mock_http.get.return_value = _make_response({"processes": [{"id": "aggregate_to_dhis2_json"}], "links": []})
 
     result = service.workflows()
 
     mock_http.get.assert_called_once_with("http://localhost/process_graphs")
-    assert result[0]["id"] == "aggregate_to_dhis2_org_units"
+    assert result[0]["id"] == "aggregate_to_dhis2_json"
 
 
 def test_execute_returns_json_for_json_result() -> None:
@@ -237,7 +237,7 @@ def test_execute_returns_json_for_json_result() -> None:
     payload = {"dataValues": [{"orgUnit": "OU_A", "period": "202501", "value": "1.0"}]}
     mock_http.post.return_value = _make_response(payload, content_type="application/json")
 
-    graph = {"agg": {"process_id": "aggregate_to_dhis2_org_units", "arguments": {}, "result": True}}
+    graph = {"agg": {"process_id": "aggregate_to_dhis2_json", "arguments": {}, "result": True}}
     result = service.execute(graph)
 
     args, kwargs = mock_http.post.call_args
