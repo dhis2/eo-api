@@ -79,9 +79,9 @@ report = dhis2.post_data_value_set(data_value_set)
 print(report["response"]["importCount"])
 ```
 
-## Producing a Chap CSV instead
+## Producing a CHAP CSV instead
 
-To feed the [Chap Modeling Platform](https://chap.dhis2.org/chap-modeling-platform/) rather than DHIS2 data values, use the companion [`aggregate_to_chap_csv`](workflows.md#built-in-workflows) workflow — same call, but omit `data_element_id`; it returns a Chap-ready CSV instead of a `dataValueSet`. Pass `path=` to write it to disk:
+To feed the [Chap Modeling Platform](https://chap.dhis2.org/chap-modeling-platform/) rather than DHIS2 data values, use the companion [`aggregate_to_chap_csv`](workflows.md#built-in-workflows) workflow — same call, but omit `data_element_id`; it returns a CHAP-ready CSV instead of a `dataValueSet`. Pass `path=` to write it to disk:
 
 ```python
 csv_path = service.execute(
