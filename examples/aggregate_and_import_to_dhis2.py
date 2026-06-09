@@ -37,7 +37,9 @@ METHOD = "mean"  # mean (default), min, max, or sum
 PERIOD_TYPE = "month"
 
 # --- DHIS2 ------------------------------------------------------------------
-DHIS2_BASE_URL = "https://climate.im.dhis2.org/climate-tools-42"  # your DHIS2 instance
+# `admin` / `district` are the public DHIS2 demo credentials, shown here for
+# illustration — replace the URL and credentials with your own instance.
+DHIS2_BASE_URL = "https://climate.im.dhis2.org/climate-tools-42"
 DHIS2_USERNAME = "admin"
 DHIS2_PASSWORD = "district"
 ORG_UNIT_LEVEL = 2  # org unit level to aggregate to
