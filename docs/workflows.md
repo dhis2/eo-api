@@ -69,8 +69,8 @@ Open Climate Service ships with ready-to-use workflows for aggregating **any pub
 
 | Workflow | Output |
 |---|---|
-| `aggregate_to_dhis2_org_units` | DHIS2 `dataValueSet` JSON |
-| `aggregate_to_dhis2_org_units_chap` | CHAP wide CSV (`time_period`, `location`, one column per variable) |
+| `aggregate_to_dhis2_json` | DHIS2 `dataValueSet` JSON |
+| `aggregate_to_chap_csv` | CHAP wide CSV (`time_period`, `location`, one column per variable) |
 
 Both run `load_collection → aggregate_spatial → save_result`: they load the dataset over a time range, compute a spatial statistic of the variable within each feature, and emit one value per feature per time step. Each feature's GeoJSON `id` becomes the DHIS2 `orgUnit` (CHAP `location`), and each time step becomes the DHIS2 `period` (CHAP `time_period`).
 
@@ -96,7 +96,7 @@ Mean monthly precipitation per district, as DHIS2 data values:
   "process": {
     "process_graph": {
       "agg": {
-        "process_id": "aggregate_to_dhis2_org_units",
+        "process_id": "aggregate_to_dhis2_json",
         "arguments": {
           "dataset_id": "era5land_precipitation_monthly",
           "temporal_extent": ["2025-01-01", "2025-12-31"],
@@ -112,7 +112,7 @@ Mean monthly precipitation per district, as DHIS2 data values:
 }
 ```
 
-Submit it to `POST /result` (synchronous) or `POST /jobs` (batch); the result is a DHIS2 `dataValueSet` ready to POST to the DHIS2 Web API. For CHAP CSV, call `aggregate_to_dhis2_org_units_chap` with the same arguments minus `data_element_id`.
+Submit it to `POST /result` (synchronous) or `POST /jobs` (batch); the result is a DHIS2 `dataValueSet` ready to POST to the DHIS2 Web API. For CHAP CSV, call `aggregate_to_chap_csv` with the same arguments minus `data_element_id`.
 
 ---
 

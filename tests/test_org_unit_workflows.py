@@ -82,13 +82,13 @@ _GEOMETRIES = {
 
 def test_both_workflows_registered_as_processes() -> None:
     ids = {wf.id for wf in workflow_store.list_workflows().processes}
-    assert {"aggregate_to_dhis2_org_units", "aggregate_to_dhis2_org_units_chap"} <= ids
+    assert {"aggregate_to_dhis2_json", "aggregate_to_chap_csv"} <= ids
 
 
 def test_aggregate_to_org_units_dhis2json() -> None:
     overlay = _overlay_with_mock_dataset()
     # period_type omitted -> declared default "month" applies
-    envelope = overlay["aggregate_to_dhis2_org_units"].implementation(
+    envelope = overlay["aggregate_to_dhis2_json"].implementation(
         dataset_id="my_dataset",
         temporal_extent=["2025-01-01", "2025-02-28"],
         geometries=_GEOMETRIES,
@@ -105,7 +105,7 @@ def test_aggregate_to_org_units_dhis2json() -> None:
 
 def test_aggregate_to_org_units_chap_csv() -> None:
     overlay = _overlay_with_mock_dataset()
-    envelope = overlay["aggregate_to_dhis2_org_units_chap"].implementation(
+    envelope = overlay["aggregate_to_chap_csv"].implementation(
         dataset_id="my_dataset",
         temporal_extent=["2025-01-01", "2025-02-28"],
         geometries=_GEOMETRIES,
@@ -123,7 +123,7 @@ def test_aggregate_to_org_units_chap_csv() -> None:
 @pytest.mark.parametrize(("method", "expected"), [("mean", "3"), ("sum", "12"), ("min", "0"), ("max", "6")])
 def test_method_selects_reducer(method: str, expected: str) -> None:
     overlay = _overlay_with_mock_dataset()
-    envelope = overlay["aggregate_to_dhis2_org_units"].implementation(
+    envelope = overlay["aggregate_to_dhis2_json"].implementation(
         dataset_id="my_dataset",
         temporal_extent=["2025-01-01", "2025-02-28"],
         geometries=_GEOMETRIES,

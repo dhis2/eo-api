@@ -2,7 +2,7 @@
 
 This guide shows the full round-trip: pull organisation unit boundaries from DHIS2, aggregate a published climate dataset to those org units with Open Climate Service, and import the result back into DHIS2 as data values.
 
-The spatial aggregation happens server-side via the built-in [`aggregate_to_dhis2_org_units`](workflows.md#built-in-workflows) workflow, which returns a ready-to-import DHIS2 `dataValueSet`. Because each org unit's GeoJSON `id` is its DHIS2 UID, the result imports without any remapping.
+The spatial aggregation happens server-side via the built-in [`aggregate_to_dhis2_json`](workflows.md#built-in-workflows) workflow, which returns a ready-to-import DHIS2 `dataValueSet`. Because each org unit's GeoJSON `id` is its DHIS2 UID, the result imports without any remapping.
 
 The full runnable script is [`examples/aggregate_and_import_to_dhis2.py`](https://github.com/dhis2/open-climate-service/blob/main/examples/aggregate_and_import_to_dhis2.py).
 
@@ -40,7 +40,7 @@ print(len(org_units["features"]), "org units")
 
 ## 2. Aggregate on Open Climate Service
 
-Run the `aggregate_to_dhis2_org_units` workflow with `ClimateService.execute()`. It loads the dataset over the time range, aggregates it within each org-unit polygon, and returns a DHIS2 `dataValueSet`.
+Run the `aggregate_to_dhis2_json` workflow with `ClimateService.execute()`. It loads the dataset over the time range, aggregates it within each org-unit polygon, and returns a DHIS2 `dataValueSet`.
 
 ```python
 from open_climate_service import ClimateService
@@ -50,7 +50,7 @@ service = ClimateService("http://127.0.0.1:8000")
 data_value_set = service.execute(
     {
         "agg": {
-            "process_id": "aggregate_to_dhis2_org_units",
+            "process_id": "aggregate_to_dhis2_json",
             "arguments": {
                 "dataset_id": "era5land_temperature_monthly",  # a published collection
                 "temporal_extent": ["2025-01-01", "2025-12-31"],
@@ -80,13 +80,13 @@ The data element and organisation units referenced in the payload must already e
 
 ## Producing a CHAP CSV instead
 
-To feed the [Chap modelling platform](https://chap.dhis2.org/) rather than DHIS2 data values, use the companion [`aggregate_to_dhis2_org_units_chap`](workflows.md#built-in-workflows) workflow — same call, but omit `data_element_id`; it returns a CHAP-ready CSV instead of a `dataValueSet`. Pass `path=` to write it to disk:
+To feed the [Chap modelling platform](https://chap.dhis2.org/) rather than DHIS2 data values, use the companion [`aggregate_to_chap_csv`](workflows.md#built-in-workflows) workflow — same call, but omit `data_element_id`; it returns a CHAP-ready CSV instead of a `dataValueSet`. Pass `path=` to write it to disk:
 
 ```python
 csv_path = service.execute(
     {
         "agg": {
-            "process_id": "aggregate_to_dhis2_org_units_chap",
+            "process_id": "aggregate_to_chap_csv",
             "arguments": {
                 "dataset_id": "era5land_precipitation_monthly",
                 "temporal_extent": ["2025-01-01", "2025-12-31"],
@@ -103,5 +103,5 @@ csv_path = service.execute(
 
 ## See also
 
-- [Workflows](workflows.md) — reference for the `aggregate_to_dhis2_org_units[_chap]` workflows.
+- [Workflows](workflows.md) — reference for the `aggregate_to_dhis2_json` and `aggregate_to_chap_csv` workflows.
 - [openEO](openeo.md) — process graphs, export formats, and more examples.

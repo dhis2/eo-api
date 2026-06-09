@@ -3,7 +3,7 @@
 End-to-end pipeline driven from Python:
 
   1. Fetch organisation unit boundaries from DHIS2 as GeoJSON.
-  2. Run the built-in ``aggregate_to_dhis2_org_units`` workflow on an Open Climate
+  2. Run the built-in ``aggregate_to_dhis2_json`` workflow on an Open Climate
      Service instance — it loads a dataset, aggregates it within each org-unit
      polygon, and returns a ready-to-import DHIS2 ``dataValueSet``.
   3. Import that ``dataValueSet`` back into DHIS2.
@@ -64,7 +64,7 @@ def main() -> None:
     data_value_set = service.execute(
         {
             "agg": {
-                "process_id": "aggregate_to_dhis2_org_units",
+                "process_id": "aggregate_to_dhis2_json",
                 "arguments": {
                     "dataset_id": DATASET_ID,
                     "temporal_extent": TEMPORAL_EXTENT,

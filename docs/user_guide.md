@@ -53,14 +53,14 @@ for link in service.datasets():
 
 # List the processes and reusable workflows the instance exposes
 service.processes()    # standard openEO processes
-service.workflows()    # stored workflows / UDPs (e.g. aggregate_to_dhis2_org_units)
+service.workflows()    # stored workflows / UDPs (e.g. aggregate_to_dhis2_json)
 
 # Run a process graph synchronously. JSON results (e.g. a DHIS2 dataValueSet) come
 # back as a dict; file results (CSV, GeoJSON, GeoTIFF) come back as bytes.
 data_value_set = service.execute(
     {
         "agg": {
-            "process_id": "aggregate_to_dhis2_org_units",
+            "process_id": "aggregate_to_dhis2_json",
             "arguments": {
                 "dataset_id": "era5land_temperature_monthly",
                 "temporal_extent": ["2025-01-01", "2025-12-31"],
