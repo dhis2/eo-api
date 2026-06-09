@@ -39,7 +39,7 @@ print(len(org_units["features"]), "org units")
 ```
 
 !!! note
-    `admin` / `district` are the public DHIS2 demo credentials, shown for illustration — point the client at your own instance and credentials.
+`admin` / `district` are the public DHIS2 demo credentials, shown for illustration — point the client at your own instance and credentials.
 
 ## 2. Aggregate on Open Climate Service
 
@@ -81,7 +81,7 @@ print(report["response"]["importCount"])
 
 ## Producing a CHAP CSV instead
 
-To feed the [Chap Modeling Platform](https://chap.dhis2.org/chap-modeling-platform/) rather than DHIS2 data values, use the companion [`aggregate_to_chap_csv`](workflows.md#built-in-workflows) workflow — same call, but omit `data_element_id`; it returns a CHAP-ready CSV instead of a `dataValueSet`. Pass `path=` to write it to disk:
+To feed the [Chap Modeling Platform](https://chap.dhis2.org/chap-modeling-platform/) rather than DHIS2 data values, use the companion [`aggregate_to_chap_csv`](workflows.md#built-in-workflows) workflow — same call, but omit `data_element_id`; it returns a Chap-ready CSV instead of a `dataValueSet`. Pass `path=` to write it to disk:
 
 ```python
 csv_path = service.execute(
