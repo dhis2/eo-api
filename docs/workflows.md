@@ -131,18 +131,20 @@ It runs `load_collection → reduce_dimension → save_result`, reducing the tim
 | `variable` | Variable/band name carried through to the published dataset |
 | `temporal_extent` | `[start, end]` ISO-8601 dates; the change is `value(last) − value(first)` within this range |
 
-The `output_dataset_id` must have a **dataset template** registered on the instance: a YAML in `plugins_dir/datasets/` with `sync: {kind: static}` and a `display` block. No ingestion plugin (`.py`) is needed — the data is produced by the workflow, not ingested:
+The `output_dataset_id` must have a **dataset template** registered on the instance: a YAML in the built-in `plugins/datasets/` folder (or an instance's `plugins_dir/datasets/`) with `sync: {kind: static}` and a `display` block. No ingestion plugin (`.py`) is needed — the data is produced by the workflow, not ingested. Open Climate Service bundles `worldpop_population_change` (a second entry in `worldpop.yaml`) for the population example below:
 
 ```yaml
 - id: worldpop_population_change
-  name: Population change 2015–2030
-  variable: population
+  name: Population change (WorldPop Global2)
+  short_name: Population change
+  variable: pop_change
   period_type: yearly
   sync:
     kind: static
+  units: people
   display:
     colormap: RdBu
-    range: [-500, 500]
+    range: [-50.0, 50.0]
 ```
 
 ### Example
@@ -158,7 +160,7 @@ Zarr output cannot be produced synchronously, so submit it as a **batch job** (`
         "arguments": {
           "dataset_id": "worldpop_population_yearly",
           "output_dataset_id": "worldpop_population_change",
-          "variable": "population",
+          "variable": "pop_change",
           "temporal_extent": ["2015-01-01", "2030-12-31"]
         },
         "result": true
