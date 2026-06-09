@@ -1,8 +1,8 @@
-# Importing data to DHIS2
+# Importing data to DHIS2 and Chap
 
-This guide shows the full round-trip: pull organisation unit boundaries from DHIS2, aggregate a published climate dataset to those org units with Open Climate Service, and import the result back into DHIS2 as data values.
+This guide shows the full round-trip: pull organisation unit boundaries from DHIS2, aggregate a published dataset to those org units with Open Climate Service, and import the result back into DHIS2 as data values.
 
-The spatial aggregation happens server-side via the built-in [`aggregate_to_dhis2_json`](workflows.md#built-in-workflows) workflow, which returns a ready-to-import DHIS2 `dataValueSet`. Because each org unit's GeoJSON `id` is its DHIS2 UID, the result imports without any remapping.
+The spatial aggregation happens via the built-in [`aggregate_to_dhis2_json`](workflows.md#built-in-workflows) workflow, which returns a ready-to-import DHIS2 `dataValueSet`. Because each org unit's GeoJSON `id` is its DHIS2 UID, the result imports without any remapping.
 
 The full runnable script is [`examples/aggregate_and_import_to_dhis2.py`](https://github.com/dhis2/open-climate-service/blob/main/examples/aggregate_and_import_to_dhis2.py).
 
