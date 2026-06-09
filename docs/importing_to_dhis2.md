@@ -9,7 +9,7 @@ The full runnable script is [`examples/aggregate_and_import_to_dhis2.py`](https:
 ## Prerequisites
 
 - A running Open Climate Service instance with the dataset published (see [Accessing data](user_guide.md)).
-- A DHIS2 instance whose organisation units have geometry, plus a data element to import into.
+- A DHIS2 instance whose organisation units have geometry, plus a data element to import into. The data element referenced in the payload must already exist in DHIS2 — see the DHIS2 Climate Tools [Prepare metadata](https://climate-tools.dhis2.org/guides/import-data/prepare-metadata/) guide for creating it.
 - The two clients:
 
   ```bash
@@ -75,8 +75,6 @@ The workflow fills in `orgUnit`, `period`, `value`, and `dataElement` for every 
 report = dhis2.post_data_value_set(data_value_set)
 print(report["response"]["importCount"])
 ```
-
-The data element referenced in the payload must already exist in DHIS2 — see the DHIS2 Climate Tools [Prepare metadata](https://climate-tools.dhis2.org/guides/import-data/prepare-metadata/) guide for creating it.
 
 ## Producing a CHAP CSV instead
 
