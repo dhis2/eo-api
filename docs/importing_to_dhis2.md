@@ -76,7 +76,7 @@ report = dhis2.post_data_value_set(data_value_set)
 print(report["response"]["importCount"])
 ```
 
-The data element and organisation units referenced in the payload must already exist in DHIS2.
+The data element and organisation units referenced in the payload must already exist in DHIS2 — see the DHIS2 Climate Tools [Prepare metadata](https://climate-tools.dhis2.org/guides/import-data/prepare-metadata/) guide for creating them.
 
 ## Producing a CHAP CSV instead
 

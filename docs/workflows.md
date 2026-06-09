@@ -114,8 +114,6 @@ Mean monthly precipitation per district, as DHIS2 data values:
 
 Submit it to `POST /result` (synchronous) or `POST /jobs` (batch); the result is a DHIS2 `dataValueSet` ready to POST to the DHIS2 Web API. For CHAP CSV, call `aggregate_to_chap_csv` with the same arguments minus `data_element_id`.
 
-For a full end-to-end walkthrough — fetching org units from DHIS2, aggregating, and importing the result back — see [Importing data to DHIS2 and Chap](importing_to_dhis2.md).
-
 ---
 
 ## Three sources of workflows
