@@ -40,14 +40,14 @@ def test_temporal_change_computes_last_minus_first() -> None:
     envelope = overlay["temporal_change"].implementation(
         dataset_id="worldpop_population_yearly",
         output_dataset_id="worldpop_population_change",
-        variable="population",
+        variable="pop_change",
         temporal_extent=["2015-01-01", "2030-12-31"],
     )
 
     # save_result envelope carries the managed-publish options through unchanged.
     assert envelope.format.upper() == "ZARR"
     assert envelope.options["dataset_id"] == "worldpop_population_change"
-    assert envelope.options["variable"] == "population"
+    assert envelope.options["variable"] == "pop_change"
     assert envelope.options["publish"] is True
 
     # The time dimension is reduced away, leaving a 2-D change raster ...
