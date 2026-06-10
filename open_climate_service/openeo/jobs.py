@@ -1004,9 +1004,9 @@ def _build_chap_csv_frame(df: Any, options: dict[str, Any]) -> Any:
             if not isinstance(cube_labels_raw, dict):
                 raise ValueError("CHAPCSV option 'cube_labels' must be an object mapping cube ids to output columns")
             rename_map: dict[str, str] = {}
-            for raw_key, raw_value in cube_labels_raw.items():
+            for raw_key, label_value in cube_labels_raw.items():
                 key = str(raw_key).strip()
-                value = str(raw_value).strip()
+                value = str(label_value).strip()
                 if not key or not value:
                     raise ValueError("CHAPCSV option 'cube_labels' must map non-empty cube ids to non-empty labels")
                 rename_map[key] = value
@@ -1027,8 +1027,8 @@ def _build_chap_csv_frame(df: Any, options: dict[str, Any]) -> Any:
             "location": str(location),
         }
         for value_field in value_fields:
-            value = record.get(value_field)
-            row[value_field] = "" if _is_nullish(value) else _to_dhis2_value_string(value)
+            raw_value: Any | None = record.get(value_field)
+            row[value_field] = "" if _is_nullish(raw_value) else _to_dhis2_value_string(raw_value)
         rows.append(row)
 
     return pd.DataFrame(rows, columns=["time_period", "location", *value_fields])
