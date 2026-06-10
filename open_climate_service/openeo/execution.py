@@ -278,7 +278,10 @@ def _load_collection_impl(
         end = t_extent[1] if len(t_extent) > 1 else None
         try:
             t_dim = get_time_dim(ds)
-            available = ds[t_dim].values
+            # Keep a lazy handle to the original time coordinate; only materialise
+            # it (in the empty-selection branch below) so valid requests don't pay
+            # to load the full coordinate on every call.
+            available_coord = ds[t_dim]
             ds = ds.sel({t_dim: slice(start, end)})
         except (ValueError, KeyError):
             # ValueError: no recognisable time dimension
@@ -295,7 +298,7 @@ def _load_collection_impl(
                     detail=(
                         f"load_collection: dataset '{id}' has no data in the requested "
                         f"temporal_extent [{start}, {end}]. Available time coverage: "
-                        f"{_format_time_coverage(available)}."
+                        f"{_format_time_coverage(available_coord.values)}."
                     ),
                 )
 
