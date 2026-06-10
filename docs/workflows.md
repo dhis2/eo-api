@@ -116,6 +116,64 @@ Submit it to `POST /result` (synchronous) or `POST /jobs` (batch); the result is
 
 ---
 
+## Mapping change between two periods
+
+`temporal_change` computes the per-pixel **net change** of a variable between the first and last time step in a range (`last − first`) and publishes it as a new single-band GeoZarr dataset — for example population change between two census years, or NDVI change between two dekads. Positive values are increases and negative values decreases, so the result suits a diverging colormap centred on zero.
+
+It runs `load_collection → reduce_dimension → save_result`, reducing the time dimension away to a 2-D `(y, x)` raster. Only the earliest and latest time step in `temporal_extent` contribute; any steps in between are ignored.
+
+### Parameters
+
+| Name | Description |
+|---|---|
+| `dataset_id` | Published GeoZarr collection to load (see `/datasets`) |
+| `output_dataset_id` | Id of the change dataset to publish (needs a dataset template — see below) |
+| `variable` | Variable/band name carried through to the published dataset |
+| `temporal_extent` | `[start, end]` ISO-8601 dates; the change is `value(last) − value(first)` within this range |
+
+The `output_dataset_id` must have a **dataset template** registered on the instance: a YAML in the built-in `plugins/datasets/` folder (or an instance's `plugins_dir/datasets/`) with `sync: {kind: static}` and a `display` block. No ingestion plugin (`.py`) is needed — the data is produced by the workflow, not ingested. Open Climate Service bundles `worldpop_population_change` (a second entry in `worldpop.yaml`) for the population example below:
+
+```yaml
+- id: worldpop_population_change
+  name: Population change (WorldPop Global2)
+  short_name: Population change
+  variable: pop_change
+  period_type: yearly
+  sync:
+    kind: static
+  units: people
+  display:
+    colormap: RdBu
+    range: [-50.0, 50.0]
+```
+
+### Example
+
+Zarr output cannot be produced synchronously, so submit it as a **batch job** (`POST /jobs`, then `POST /jobs/{id}/results`):
+
+```json
+{
+  "process": {
+    "process_graph": {
+      "change": {
+        "process_id": "temporal_change",
+        "arguments": {
+          "dataset_id": "worldpop_population_yearly",
+          "output_dataset_id": "worldpop_population_change",
+          "variable": "pop_change",
+          "temporal_extent": ["2015-01-01", "2030-12-31"]
+        },
+        "result": true
+      }
+    }
+  }
+}
+```
+
+When the job finishes, the new change dataset appears under `/datasets` and on the map viewer.
+
+---
+
 ## Three sources of workflows
 
 Workflows are loaded from three places, each overriding the previous on id collision:
