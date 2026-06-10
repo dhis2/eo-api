@@ -108,6 +108,17 @@ def test_aggregate_spatial_with_time_dimension() -> None:
     np.testing.assert_allclose(out["v"].isel(geometry=0).values, [5.5, 105.5])
 
 
+def test_aggregate_spatial_preserves_non_spatial_dimensions() -> None:
+    cube1 = xr.concat([_grid(y_ascending=True), _grid(y_ascending=True) + 100], dim="t").assign_coords(t=[0, 1])
+    cube2 = cube1 + 1000
+    merged = xr.concat([cube1, cube2], dim="__cubes__").assign_coords(__cubes__=["cube1", "cube2"])
+    out = aggregate_spatial(merged, _box(-0.4, -0.4, 1.4, 1.4), _mean)
+    assert list(out["__cubes__"].values) == ["cube1", "cube2"]
+    assert list(out["t"].values) == [0, 1]
+    np.testing.assert_allclose(out["v"].sel(__cubes__="cube1", geometry="0").values, [5.5, 105.5])
+    np.testing.assert_allclose(out["v"].sel(__cubes__="cube2", geometry="0").values, [1005.5, 1105.5])
+
+
 def test_aggregate_spatial_multiple_geometries_labelled() -> None:
     da = _grid(y_ascending=True)
     fc = {

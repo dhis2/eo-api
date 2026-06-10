@@ -932,6 +932,59 @@ def test_build_chap_csv_frame_requires_at_least_one_value_column() -> None:
         )
 
 
+def test_build_chap_csv_frame_pivots_merged_cubes_wide() -> None:
+    frame = _build_chap_csv_frame(
+        [
+            {"t": "2024-01-01", "geometry": "OU_1", "__cubes__": "cube1", "tp": 1.5},
+            {"t": "2024-01-01", "geometry": "OU_1", "__cubes__": "cube2", "tp": 2.5},
+            {"t": "2024-02-01", "geometry": "OU_1", "__cubes__": "cube1", "tp": 3.5},
+            {"t": "2024-02-01", "geometry": "OU_1", "__cubes__": "cube2", "tp": 4.5},
+        ],
+        {"period_type": "monthly"},
+    )
+    assert list(frame.columns) == ["time_period", "location", "cube1", "cube2"]
+    assert frame.to_dict(orient="records") == [
+        {"time_period": "202401", "location": "OU_1", "cube1": "1.5", "cube2": "2.5"},
+        {"time_period": "202402", "location": "OU_1", "cube1": "3.5", "cube2": "4.5"},
+    ]
+
+
+def test_build_chap_csv_frame_renames_merged_cubes_with_explicit_labels() -> None:
+    frame = _build_chap_csv_frame(
+        [
+            {"t": "2024-01-01", "geometry": "OU_1", "__cubes__": "cube1", "tp": 1.5},
+            {"t": "2024-01-01", "geometry": "OU_1", "__cubes__": "cube2", "tp": 2.5},
+        ],
+        {"period_type": "monthly", "cube_labels": {"cube1": "tp", "cube2": "t2m"}},
+    )
+    assert list(frame.columns) == ["time_period", "location", "tp", "t2m"]
+    assert frame.to_dict(orient="records") == [
+        {"time_period": "202401", "location": "OU_1", "tp": "1.5", "t2m": "2.5"},
+    ]
+
+
+def test_merge_cubes_wrapper_preserves_named_dataarrays_as_dataset() -> None:
+    from open_climate_service.openeo.execution import _build_process_registry
+
+    reg = _build_process_registry()
+    merge = reg["merge_cubes"].implementation
+    cube1 = xr.DataArray(
+        np.ones((2, 2, 2), dtype=np.float32),
+        dims=("t", "y", "x"),
+        coords={"t": [0, 1], "y": [0, 1], "x": [0, 1]},
+        name="tp",
+    )
+    cube2 = xr.DataArray(
+        np.full((2, 2, 2), 2.0, dtype=np.float32),
+        dims=("t", "y", "x"),
+        coords={"t": [0, 1], "y": [0, 1], "x": [0, 1]},
+        name="t2m",
+    )
+    merged = merge(cube1=cube1, cube2=cube2)
+    assert isinstance(merged, xr.Dataset)
+    assert list(merged.data_vars) == ["tp", "t2m"]
+
+
 def test_dhis2_period_string_accepts_existing_monthly_string() -> None:
     assert _to_dhis2_period_string("202401") == "202401"
 

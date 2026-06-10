@@ -86,6 +86,40 @@ def _make_sorted_atp(original_fn: Any) -> Any:
     return _sorted_atp
 
 
+def _make_named_merge_cubes(original_fn: Any) -> Any:
+    """Wrap merge_cubes to preserve DataArray names as dataset variables when possible.
+
+    The upstream implementation stacks two named DataArrays onto a synthetic
+    ``__cubes__`` dimension. That loses semantic variable names like ``tp`` and
+    ``t2m``, which then forces downstream CHAPCSV export to relabel ``cube1`` /
+    ``cube2`` manually. When both inputs are named DataArrays with distinct names,
+    we can preserve the richer structure by merging them into a Dataset directly.
+
+    Fall back to the upstream implementation for unnamed arrays, colliding names,
+    or any merge/alignment shape we cannot represent safely as a Dataset.
+    """
+
+    def _named_merge_cubes(cube1: Any, cube2: Any, **kwargs: Any) -> Any:
+        if (
+            isinstance(cube1, xr.DataArray)
+            and isinstance(cube2, xr.DataArray)
+            and cube1.name
+            and cube2.name
+            and cube1.name != cube2.name
+        ):
+            try:
+                return xr.merge(
+                    [cube1.to_dataset(name=str(cube1.name)), cube2.to_dataset(name=str(cube2.name))],
+                    join="exact",
+                    compat="override",
+                )
+            except Exception:
+                pass
+        return original_fn(cube1=cube1, cube2=cube2, **kwargs)
+
+    return _named_merge_cubes
+
+
 def _build_process_registry() -> Any:
     """Build the base process registry (lazy-initialised singleton).
 
@@ -115,6 +149,10 @@ def _build_process_registry() -> Any:
     registry["aggregate_temporal_period"] = Process(
         spec=getattr(specs_module, "aggregate_temporal_period", {}),
         implementation=_make_sorted_atp(impls_module.aggregate_temporal_period),
+    )
+    registry["merge_cubes"] = Process(
+        spec=getattr(specs_module, "merge_cubes", {}),
+        implementation=_make_named_merge_cubes(impls_module.merge_cubes),
     )
 
     # @process-decorated plugin functions — override standard processes with same id.
