@@ -278,11 +278,26 @@ def _load_collection_impl(
         end = t_extent[1] if len(t_extent) > 1 else None
         try:
             t_dim = get_time_dim(ds)
+            available = ds[t_dim].values
             ds = ds.sel({t_dim: slice(start, end)})
         except (ValueError, KeyError):
             # ValueError: no recognisable time dimension
             # KeyError: coordinate exists but is not an indexable dimension
             pass
+        else:
+            # An empty temporal selection would otherwise flow into downstream
+            # reducers (reduce_dimension, aggregate_*) as a zero-length cube and
+            # surface as a cryptic "ndim=0" / "zero-size array" / broadcast error.
+            # Fail early here, where we can name the dataset and its coverage.
+            if ds.sizes.get(t_dim, 0) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"load_collection: dataset '{id}' has no data in the requested "
+                        f"temporal_extent [{start}, {end}]. Available time coverage: "
+                        f"{_format_time_coverage(available)}."
+                    ),
+                )
 
     if bbox is not None:
         x_dim = next((d for d in ("x", "longitude") if d in ds.dims), None)
@@ -338,6 +353,27 @@ def _save_result_impl(data: Any, format: str = "Zarr", options: dict[str, Any] |
 # ---------------------------------------------------------------------------
 # Internal helpers shared with _load_collection_impl
 # ---------------------------------------------------------------------------
+
+
+def _format_time_coverage(values: Any) -> str:
+    """Human-readable summary of a time coordinate's coverage for error messages."""
+    import numpy as np
+
+    vals = np.asarray(values).ravel()
+    n = int(vals.size)
+    if n == 0:
+        return "no timesteps"
+
+    def _fmt(v: Any) -> str:
+        try:
+            return str(np.datetime_as_string(v, unit="D"))
+        except (TypeError, ValueError):
+            return str(v)
+
+    step_word = "step" if n == 1 else "steps"
+    if n == 1:
+        return f"{_fmt(vals[0])} ({n} {step_word})"
+    return f"{_fmt(vals.min())} to {_fmt(vals.max())} ({n} {step_word})"
 
 
 def _get_published_artifact(collection_id: str) -> Any:

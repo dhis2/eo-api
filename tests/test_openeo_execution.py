@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import xarray as xr
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from open_climate_service.ingestions.schemas import ArtifactFormat
@@ -179,6 +180,32 @@ def test_load_collection_returns_georegistered_cube(monkeypatch: pytest.MonkeyPa
     # (resample_cube_spatial) can georegister it.
     assert cube.rio.crs is not None
     assert cube.rio.crs.to_epsg() == 4326
+
+
+def test_load_collection_empty_temporal_extent_raises_clear_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The mock cube only covers 2021; a 2030 extent selects zero timesteps.
+    monkeypatch.setattr("open_climate_service.openeo.execution._get_published_artifact", lambda _id: object())
+    monkeypatch.setattr("open_climate_service.openeo.execution._open_artifact", lambda _a: _streaming_style_cube())
+
+    with pytest.raises(HTTPException) as excinfo:
+        _load_collection_impl("pop_collection", temporal_extent=["2030-01-01", "2030-12-31"])
+
+    # Fails early with an actionable message instead of letting an empty cube
+    # reach reduce_dimension (which would raise a cryptic ndim=0 / broadcast error).
+    assert excinfo.value.status_code == 400
+    detail = str(excinfo.value.detail)
+    assert "pop_collection" in detail
+    assert "2030" in detail
+    assert "2021" in detail  # reports the available coverage
+
+
+def test_load_collection_overlapping_temporal_extent_returns_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("open_climate_service.openeo.execution._get_published_artifact", lambda _id: object())
+    monkeypatch.setattr("open_climate_service.openeo.execution._open_artifact", lambda _a: _streaming_style_cube())
+
+    cube = _load_collection_impl("pop_collection", temporal_extent=["2021-01-01", "2021-12-31"])
+
+    assert cube.sizes["t"] == 1
 
 
 # ---------------------------------------------------------------------------
