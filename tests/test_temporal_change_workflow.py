@@ -26,9 +26,7 @@ def _overlay_with_mock_dataset() -> Any:
         },
     )
     reg = _build_process_registry()
-    reg["load_collection"] = Process(
-        spec={}, implementation=lambda id=None, temporal_extent=None, **k: ds["pop"]
-    )
+    reg["load_collection"] = Process(spec={}, implementation=lambda id=None, temporal_extent=None, **k: ds["pop"])
     return _augment_with_workflows(reg)
 
 
