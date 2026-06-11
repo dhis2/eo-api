@@ -49,7 +49,8 @@ def test_write_to_icechunk_store_builds_pyramid(tmp_path: Path) -> None:
     # Must not raise (regression: topozarr Pyramid.write API, not pyramid.dt.*).
     write_to_icechunk_store(ds, store_path, crs="EPSG:4326")
 
-    store = icechunk.Repository.open(icechunk.local_filesystem_storage(str(store_path))).readonly_session("main").store
+    repo = icechunk.Repository.open(icechunk.local_filesystem_storage(str(store_path)))
+    store = repo.readonly_session("main").store
     root = zarr.open_group(store, mode="r")
 
     # Root carries the multiscales metadata, and the level groups exist.
@@ -58,6 +59,6 @@ def test_write_to_icechunk_store_builds_pyramid(tmp_path: Path) -> None:
     assert {"0", "1"} <= level_groups
 
     # Full-resolution level reads back at the original size with the variable intact.
-    lvl0 = xr.open_zarr(store, group="0", consolidated=False, zarr_format=3)
-    assert "hotspot" in lvl0.data_vars
-    assert lvl0.sizes["y"] == 2100 and lvl0.sizes["x"] == 2100
+    with xr.open_zarr(store, group="0", consolidated=False, zarr_format=3) as lvl0:
+        assert "hotspot" in lvl0.data_vars
+        assert lvl0.sizes["y"] == 2100 and lvl0.sizes["x"] == 2100
