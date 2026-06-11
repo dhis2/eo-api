@@ -24,8 +24,8 @@ ecosystem, hardening it for production, and broadening the data and analysis it 
   browser-based rendering
 - Local filesystem storage; S3-compatible and self-hosted (sovereign) object storage for
   cloud and country deployments
-- STAC catalogue plus raw Zarr access — direct `xarray`, `stackstac`, and QGIS use
-  without API knowledge
+- STAC catalogue plus raw Zarr access — direct `xarray` / `stackstac` use without API
+  knowledge
 
 **Processing and analysis**
 
