@@ -109,7 +109,7 @@ This mirrors the approach used in the CHAP Modelling Platform, where generic mod
 
 ### 6.2 Data storage and serving
 
-- Store all datasets as GeoZarr — cloud-native, chunked, and multiscale, in the instance CRS (WGS84 by default).
+- Store all datasets as GeoZarr — cloud-native, chunked, and multiscale, in the source data's native CRS.
 - Expose datasets via a `/zarr/{dataset_id}` endpoint using HTTP range requests, enabling chunk-level access by any compatible client.
 - Expose dataset discovery metadata via a `/datasets` endpoint and a STAC catalogue.
 
@@ -176,7 +176,7 @@ The API is built on FastAPI and exposes the following endpoint groups:
 
 All datasets are stored as GeoZarr. Key properties:
 
-- Configurable CRS — WGS84 (EPSG:4326) by default, or a projected CRS per instance.
+- Stored in the source data's native CRS, recorded in the GeoZarr `proj:code` metadata.
 - CF-compliant coordinate attributes and `_ARRAY_DIMENSIONS` metadata.
 - Multiscale pyramid overview levels declared under the `multiscales` key in `.zattrs` — required for efficient zoom-level-aware chunk fetching by zarr-layer.
 - Chunk shape tuned per dataset to balance three access patterns: time series queries, polygon aggregation, and browser tile rendering.
