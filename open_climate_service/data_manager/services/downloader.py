@@ -171,27 +171,22 @@ def write_to_icechunk_store(
         # topozarr.create_pyramid requires fully materialised numpy arrays.
         ds = ds.load()
         pyramid = create_pyramid(ds, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
-        pyramid.dt.attrs.update(geozarr_attrs)
+        # Pyramid.write() writes the root group attributes from ``pyramid.attrs``,
+        # so merge the GeoZarr conventions (multiscales / proj / spatial) in here.
+        pyramid.attrs.update(geozarr_attrs)
 
         # Keep the no-data sentinel consistent across pyramid levels so the map
         # renders the same pixels transparent at every zoom. topozarr mean-coarsens
         # an integer-coded mask (e.g. a 0/1 hotspot raster, where 0 is the no-data
-        # background and zarr's default integer fill) into float levels that default
-        # to fill_value=NaN. The background cells stay 0.0, so they no longer match
-        # the level's own NaN fill and render opaque at overview zooms while the
-        # full-resolution level (fill_value=0) stays transparent. Pin the coarse
-        # levels' fill_value back to 0 for integer-coded variables; float variables
-        # already use NaN as both data and fill, so leave them untouched.
-        data_var_names = [str(v) for v in ds.data_vars]
-        for level_path, level_enc in pyramid.encoding.items():
-            if str(level_path).rsplit("/", 1)[-1] == "0":
-                continue  # full-resolution level already carries the correct fill
-            for var_name in data_var_names:
-                if var_name in level_enc and ds[var_name].dtype.kind != "f":
-                    level_enc[var_name]["fill_value"] = 0
+        # background) into float levels that would otherwise default to a NaN fill,
+        # leaving the 0.0 background opaque at overview zooms. Pin the fill_value to
+        # 0 for integer-coded variables (Pyramid.write applies it across all levels);
+        # float variables already use NaN as both data and fill, so leave them be.
+        for var_name, var_da in ds.data_vars.items():
+            if var_da.dtype.kind != "f" and pyramid.fill_values.get(str(var_name)) is None:
+                pyramid.fill_values[str(var_name)] = 0
 
-        pyramid.dt.to_zarr(session.store, mode="w", encoding=pyramid.encoding, zarr_format=3)
-        pyramid.dt.close()
+        pyramid.write(session.store, mode="w")
 
         # topozarr demotes spatial_ref from coordinate to data variable in the pyramid.
         # Patch the root and each level group: add CRS to multiscales datasets entries so

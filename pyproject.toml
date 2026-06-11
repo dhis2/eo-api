@@ -77,7 +77,7 @@ server = [
     "zarr>=3.1.6,<4",
     "icechunk>=2.0,<3",
     "geozarr-toolkit==0.1.*",
-    "topozarr==0.0.*",
+    "topozarr>=0.0.91,<0.1",
     "rioxarray>=0.17",
     "portalocker>=3.2.0",
     "dhis2eo>=1.2.1",
