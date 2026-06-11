@@ -24,7 +24,7 @@ from open_climate_service.data_manager.services.downloader import (  # noqa: E40
 )
 
 
-def _pyramid_sized_cube() -> xr.Dataset:
+def _pyramid_sized_cube():
     # Larger than the 2048x2048 pyramid threshold; integer var exercises the
     # no-data fill_value handling that used to be pinned via pyramid.encoding.
     ny = nx = 2100
