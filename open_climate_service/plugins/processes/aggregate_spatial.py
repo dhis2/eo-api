@@ -70,13 +70,12 @@ def _dataset_reduce_spatial(
     reducer: Callable,
     y_dim: str,
     x_dim: str,
-    t_dim: str | None,
     context: Any = None,
 ) -> xr.Dataset:
     """Apply spatial mask and reducer to each variable in a Dataset.
 
-    Iterates over time steps so the reducer receives a 1-D array of pixel values
-    (matching the OpenEO reducer contract: array-in, scalar-out).
+    Reduces only over the spatial dimensions while preserving any other dimensions
+    (e.g. time or ``merge_cubes``' synthetic ``__cubes__`` dimension).
 
     Pixels are selected by boolean-indexing the raw arrays with ``mask`` directly
     rather than materialising ``ds.where(mask)`` — the latter allocates a full
@@ -88,40 +87,22 @@ def _dataset_reduce_spatial(
         # Only floating arrays can carry NaN; np.isnan raises on integer dtypes.
         return pixels[~np.isnan(pixels)] if np.issubdtype(pixels.dtype, np.floating) else pixels
 
-    if t_dim is None or t_dim not in ds.dims:
-        # No temporal dimension — reduce directly
-        result_vars: dict[str, Any] = {}
-        for var in ds.data_vars:
-            vname = str(var)
-            pixels = _drop_nan(ds[vname].values[mask])
-            result_vars[vname] = xr.DataArray(reduce(pixels))
-        return xr.Dataset(result_vars)
-
-    t_vals = ds[t_dim].values
-    var_names = [str(v) for v in ds.data_vars]
-
-    # Pre-extract numpy arrays with the time axis first so each time step is a
-    # simple row index rather than an xarray label lookup (O(1) vs O(log N)).
     mask_flat = mask.ravel()
-    var_arrs: dict[str, np.ndarray] = {}
-    for vname in var_names:
-        arr = ds[vname].values
-        t_axis = list(ds[vname].dims).index(t_dim)
-        if t_axis != 0:
-            arr = np.moveaxis(arr, t_axis, 0)
-        var_arrs[vname] = arr.reshape(len(t_vals), -1)
-
-    rows: list[dict[str, float]] = []
-    for t_idx in range(len(t_vals)):
-        row: dict[str, float] = {}
-        for vname in var_names:
-            pixels = _drop_nan(var_arrs[vname][t_idx][mask_flat])
-            row[vname] = reduce(pixels)
-        rows.append(row)
-
-    return xr.Dataset(
-        {v: xr.DataArray([row[v] for row in rows], coords={t_dim: t_vals}, dims=[t_dim]) for v in var_names}
-    )
+    result_vars: dict[str, Any] = {}
+    for var in ds.data_vars:
+        vname = str(var)
+        da = ds[vname]
+        remaining_dims = [d for d in da.dims if d not in {y_dim, x_dim}]
+        arr = da.transpose(*remaining_dims, y_dim, x_dim).values
+        arr = arr.reshape((-1, mask_flat.size))
+        reduced = [reduce(_drop_nan(pixels[mask_flat])) for pixels in arr]
+        if remaining_dims:
+            coords = {d: da.coords[d].values for d in remaining_dims if d in da.coords}
+            shape = tuple(int(da.sizes[d]) for d in remaining_dims)
+            result_vars[vname] = xr.DataArray(np.array(reduced).reshape(shape), coords=coords, dims=remaining_dims)
+        else:
+            result_vars[vname] = xr.DataArray(reduced[0])
+    return xr.Dataset(result_vars)
 
 
 @process(
@@ -157,7 +138,6 @@ def aggregate_spatial(
 
     x_dim = _find_dim(data, ["x", "longitude", "lon"])
     y_dim = _find_dim(data, ["y", "latitude", "lat"])
-    t_dim = _find_dim(data, ["t", "time"])
     if x_dim is None or y_dim is None:
         raise ValueError(f"aggregate_spatial: cannot identify x/y dimensions in {list(data.dims)}")
 
@@ -188,7 +168,7 @@ def aggregate_spatial(
         if height > 1 and float(y_coords[1]) > float(y_coords[0]):
             mask = mask[::-1]
 
-        geom_ds = _dataset_reduce_spatial(data, mask, reducer, y_dim, x_dim, t_dim, context)
+        geom_ds = _dataset_reduce_spatial(data, mask, reducer, y_dim, x_dim, context)
         results.append(geom_ds)
 
     combined = xr.concat(results, dim=geom_dim)

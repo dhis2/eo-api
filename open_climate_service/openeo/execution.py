@@ -86,6 +86,36 @@ def _make_sorted_atp(original_fn: Any) -> Any:
     return _sorted_atp
 
 
+def _make_named_merge_cubes(original_fn: Any) -> Any:
+    """Wrap merge_cubes to preserve DataArray names on the ``__cubes__`` axis.
+
+    The upstream implementation returns a DataArray stacked on a synthetic
+    ``__cubes__`` dimension with labels like ``cube1`` / ``cube2``. That loses
+    semantic source names like ``tp`` and ``t2m``. Keep the upstream return type
+    unchanged, but relabel ``__cubes__`` to the original DataArray names when
+    both inputs are named and distinct.
+    """
+
+    def _named_merge_cubes(cube1: Any, cube2: Any, **kwargs: Any) -> Any:
+        merged = original_fn(cube1=cube1, cube2=cube2, **kwargs)
+        if (
+            isinstance(cube1, xr.DataArray)
+            and isinstance(cube2, xr.DataArray)
+            and cube1.name
+            and cube2.name
+            and cube1.name != cube2.name
+            and isinstance(merged, xr.DataArray)
+            and "__cubes__" in merged.dims
+        ):
+            try:
+                return merged.assign_coords(__cubes__=[str(cube1.name), str(cube2.name)])
+            except Exception as exc:
+                logger.debug("Falling back to default __cubes__ labels after merge_cubes", exc_info=exc)
+        return merged
+
+    return _named_merge_cubes
+
+
 def _build_process_registry() -> Any:
     """Build the base process registry (lazy-initialised singleton).
 
@@ -115,6 +145,10 @@ def _build_process_registry() -> Any:
     registry["aggregate_temporal_period"] = Process(
         spec=getattr(specs_module, "aggregate_temporal_period", {}),
         implementation=_make_sorted_atp(impls_module.aggregate_temporal_period),
+    )
+    registry["merge_cubes"] = Process(
+        spec=getattr(specs_module, "merge_cubes", {}),
+        implementation=_make_named_merge_cubes(impls_module.merge_cubes),
     )
 
     # @process-decorated plugin functions — override standard processes with same id.

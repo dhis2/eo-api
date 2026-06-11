@@ -958,6 +958,7 @@ def _build_chap_csv_frame(df: Any, options: dict[str, Any]) -> Any:
     period_field = _optional_str_option(options, "period_field") or "t"
     location_field = _optional_str_option(options, "location_field") or "geometry"
     period_type = _optional_str_option(options, "period_type")
+    cube_labels_raw = options.get("cube_labels")
 
     frame = pd.DataFrame(df).copy()
     if location_field not in frame.columns:
@@ -969,6 +970,47 @@ def _build_chap_csv_frame(df: Any, options: dict[str, Any]) -> Any:
         raise ValueError(f"Missing location field '{location_field}' in aggregated result")
     if period_field not in frame.columns:
         raise ValueError(f"Missing period field '{period_field}' in aggregated result")
+
+    # merge_cubes produces a single value column plus a synthetic "__cubes__"
+    # label dimension. Pivot that long form to one CHAP value column per cube.
+    if "__cubes__" in frame.columns:
+        cube_field = "__cubes__"
+        non_value_fields = {
+            location_field,
+            period_field,
+            cube_field,
+            "geometry",
+            "spatial_ref",
+            "index",
+            "band",
+            "bands",
+        }
+        candidate_value_fields = [
+            str(c) for c in frame.columns if c not in non_value_fields and not str(c).startswith("level_")
+        ]
+        if len(candidate_value_fields) != 1:
+            raise ValueError(
+                "CHAPCSV export with merged cubes requires exactly one value column before pivoting; "
+                f"found {candidate_value_fields}"
+            )
+        value_field = candidate_value_fields[0]
+        frame = (
+            frame[[period_field, location_field, cube_field, value_field]]
+            .pivot(index=[period_field, location_field], columns=cube_field, values=value_field)
+            .reset_index()
+        )
+        frame.columns.name = None
+        if cube_labels_raw is not None:
+            if not isinstance(cube_labels_raw, dict):
+                raise ValueError("CHAPCSV option 'cube_labels' must be an object mapping cube ids to output columns")
+            rename_map: dict[str, str] = {}
+            for raw_key, label_value in cube_labels_raw.items():
+                key = str(raw_key).strip()
+                value = str(label_value).strip()
+                if not key or not value:
+                    raise ValueError("CHAPCSV option 'cube_labels' must map non-empty cube ids to non-empty labels")
+                rename_map[key] = value
+            frame = frame.rename(columns=rename_map)
 
     value_fields = _select_chap_value_fields(frame, location_field, period_field)
     rows: list[dict[str, str]] = []
@@ -985,8 +1027,8 @@ def _build_chap_csv_frame(df: Any, options: dict[str, Any]) -> Any:
             "location": str(location),
         }
         for value_field in value_fields:
-            value = record.get(value_field)
-            row[value_field] = "" if _is_nullish(value) else _to_dhis2_value_string(value)
+            raw_value: Any | None = record.get(value_field)
+            row[value_field] = "" if _is_nullish(raw_value) else _to_dhis2_value_string(raw_value)
         rows.append(row)
 
     return pd.DataFrame(rows, columns=["time_period", "location", *value_fields])
@@ -996,6 +1038,7 @@ def _select_chap_value_fields(frame: Any, location_field: str, period_field: str
     excluded = {
         location_field,
         period_field,
+        "__cubes__",
         "geometry",
         "spatial_ref",
         "index",
