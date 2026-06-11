@@ -106,7 +106,7 @@ A plain Zarr store has no concept of spatial coordinates. A map viewer opening i
 | `proj:code`        | `EPSG:4326`               | CRS of the stored coordinates  |
 | `zarr_conventions` | `[{...}]`                 | Convention declarations        |
 
-These attributes are computed from the actual coordinate bounds of the written data and the instance CRS. They are always written by the framework after transforms and reprojection have run. This guarantees they always reflect the final stored data.
+These attributes are computed from the actual coordinate bounds of the written data and its CRS. They are always written by the framework after any transforms have run. This guarantees they always reflect the final stored data.
 
 `zarr_conventions` for a flat store contains the base GeoZarr convention declaration. For pyramid stores it also includes a `multiscales` entry that declares the level structure.
 
@@ -116,7 +116,14 @@ The pyramid metadata follows the **GeoZarr `multiscales.layout` format** (not OM
 
 ## CRS handling
 
-The instance CRS is configured in `climate-service.yaml`:
+Datasets are stored in their **native CRS** — the CRS of the source data. The framework
+records this CRS in the GeoZarr metadata rather than reprojecting the data: the `proj:code`
+root attribute and the per-variable `spatial_ref` coordinate capture it, so clients and the
+map viewer can position the data correctly. The stored `spatial:bbox` is therefore in the
+native CRS — degrees for a geographic dataset, eastings and northings for a projected one.
+
+An instance can declare a default CRS used when tagging stored data, via an optional `crs:`
+field in `climate-service.yaml` (defaulting to `EPSG:4326`):
 
 ```yaml
 extent:
@@ -124,9 +131,8 @@ extent:
   crs: EPSG:32633 # optional; defaults to EPSG:4326
 ```
 
-Datasets are always stored in the instance CRS. During ingestion, data is reprojected from its source CRS (declared as `source_crs` in the template, default `EPSG:4326`) to the instance CRS. The stored `spatial:bbox` is therefore in the instance CRS — UTM eastings and northings for a UTM instance, degrees for a WGS84 instance.
-
-STAC metadata also stores the WGS84 bounding box alongside the native bbox, so catalogue clients that expect geographic coordinates always get one regardless of the instance CRS.
+STAC metadata also stores the WGS84 bounding box alongside the native bbox, so catalogue
+clients that expect geographic coordinates always get one regardless of the native CRS.
 
 ---
 
