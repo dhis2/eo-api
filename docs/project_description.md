@@ -109,7 +109,7 @@ This mirrors the approach used in the CHAP Modelling Platform, where generic mod
 
 ### 6.2 Data storage and serving
 
-- Store all datasets as GeoZarr — cloud-native, chunked, and multiscale, in the source data's native CRS.
+- Store all datasets as GeoZarr — cloud-native, chunked, and multiscale — without reprojecting: the stored coordinates keep the source's native CRS, tagged in the GeoZarr metadata.
 - Expose datasets via a `/zarr/{dataset_id}` endpoint using HTTP range requests, enabling chunk-level access by any compatible client.
 - Expose dataset discovery metadata via a `/datasets` endpoint and a STAC catalogue.
 
@@ -176,7 +176,7 @@ The API is built on FastAPI and exposes the following endpoint groups:
 
 All datasets are stored as GeoZarr. Key properties:
 
-- Stored in the source data's native CRS, recorded in the GeoZarr `proj:code` metadata.
+- Stored without reprojection — coordinates keep the source's native CRS, recorded in the GeoZarr `proj:code` metadata from the CRS the ingestion declares (the instance `crs:`, default `EPSG:4326`, is the fallback). The framework does not auto-detect per-source CRS or reconcile mixed coordinate systems.
 - CF-compliant coordinate attributes and `_ARRAY_DIMENSIONS` metadata.
 - Multiscale pyramid overview levels declared under the `multiscales` key in `.zattrs` — required for efficient zoom-level-aware chunk fetching by zarr-layer.
 - Chunk shape tuned per dataset to balance three access patterns: time series queries, polygon aggregation, and browser tile rendering.
@@ -221,7 +221,7 @@ Long-running jobs (ingestion, sync, aggregation) are executed asynchronously. Th
 | xclim                         | Climate-index library (179 CF-compliant indicators) exposed automatically as openEO processes.                                                                                          |
 | xstac                         | Derives STAC and datacube metadata from the published Zarr datasets.                                                                                                                     |
 | fsspec                        | Unified filesystem abstraction for storage backends (local, S3-compatible, Azure Blob, GCS, Ceph/RGW). Backend is environment-variable configuration only.                               |
-| zarr-layer (MapLibre)         | TypeScript library for rendering Zarr directly as a native MapLibre Custom Layer in the browser. GPU reprojection from EPSG:4326 to Spherical Mercator; uses multiscale levels per zoom. |
+| zarr-layer (MapLibre)         | TypeScript library for rendering Zarr directly as a native MapLibre Custom Layer in the browser. GPU reprojection from the stored CRS to Spherical Mercator; uses multiscale levels per zoom. |
 | Docker                        | Containerised deployment. Supports local, cloud-hosted, and country sovereign deployments.                                                                                               |
 | dhis2eo                      | Core climate/EO extraction library used by the Open Climate Service for upstream dataset access and processing integration.                                                                        |
 | dhis2-python-client          | Planned DHIS2 Web API integration library for future data value push and related DHIS2 write workflows.                                                                                  |
