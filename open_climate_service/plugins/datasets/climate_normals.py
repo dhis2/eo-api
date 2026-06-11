@@ -1,19 +1,19 @@
 """Climate normals (day-of-year climatology) as a streaming dataset plugin.
 
 Computes a WMO-style day-of-year climatology (default reference period 1991–2020)
-and exposes it as an ordinary daily dataset on a *nominal* leap year (2000), so it
-flows through the standard ingestion → registry → STAC → publish pipeline and
-renders in the map viewer like any other daily dataset — no bespoke endpoint.
+by reading the reference period **directly from the Earth Data Hub** daily ERA5-Land
+Zarr store — so no prior 30-year ingestion is required.
 
-Two reference-data sources are supported via ``ingestion.params``:
+The result is exposed as an ordinary daily dataset on a *nominal* leap year (2000), so
+it flows through the standard ingestion → registry → STAC → publish pipeline and renders
+in the map viewer like any other daily dataset — no bespoke endpoint, no special
+day-of-year handling downstream.
 
-- ``reference: edh`` — read the reference period directly from the Earth Data Hub
-  daily ERA5-Land Zarr store. This avoids ingesting 30 years of data first.
-- ``reference: dataset`` — read it from an already-ingested managed GeoZarr store
-  (``source_dataset_id``) that itself covers the reference period.
+Computing normals from an already-ingested managed dataset is handled the openEO way (a
+process graph over a loaded collection + ``save_result``), not by this plugin.
 
-The heavy climatology is computed once per ingestion (cached) and then served one
-day at a time to fit the per-period streaming contract.
+The heavy climatology is computed once per ingestion (cached) and then served one day at
+a time to fit the per-period streaming contract.
 """
 
 from __future__ import annotations
@@ -38,7 +38,6 @@ _DEFAULT_SMOOTHING = 31
 
 _EDH_DAILY_URL = "https://api.earthdatahub.destine.eu/era5/era5-land-daily-utc-v1.zarr"
 _EDH_API_KEY_ENV = "EDH_API_KEY"
-_EDH_GRID_DEG = 0.1
 
 
 def _nominal_dates() -> list[str]:
@@ -76,18 +75,14 @@ def _apply_unit_transform(ds: xr.Dataset, variable: str, transform: str | None) 
 
 
 class ClimateNormalsPlugin:
-    """Streaming plugin that materialises a day-of-year climatology.
+    """Streaming plugin that materialises a day-of-year climatology from Earth Data Hub.
 
     Args (from ``ingestion.params``):
-        reference: ``edh`` (read the Earth Data Hub daily store directly) or
-            ``dataset`` (read an ingested managed GeoZarr store).
         variable: output variable name written into the store.
-        source_dataset_id: managed dataset id to read when ``reference: dataset``.
-        edh_variable: EDH variable name (e.g. ``t2m``, ``tp``) when ``reference: edh``.
+        edh_variable: EDH variable name to read (e.g. ``t2m``, ``tp``).
         period: ``[start_year, end_year]`` reference period (default 1991–2020).
         smoothing_window: circular rolling-mean window in days (default 31; 0 disables).
-        unit_transform: ``kelvin_to_celsius`` | ``metres_to_mm`` | ``none``. EDH
-            sources usually need one; managed-dataset sources are already converted.
+        unit_transform: ``kelvin_to_celsius`` | ``metres_to_mm`` | ``none``.
     """
 
     max_concurrency = 1  # single heavy compute; serialise access to the cache
@@ -96,24 +91,16 @@ class ClimateNormalsPlugin:
     def __init__(
         self,
         *,
-        reference: str = "edh",
         variable: str,
-        source_dataset_id: str | None = None,
-        edh_variable: str | None = None,
+        edh_variable: str,
         period: list[int] | tuple[int, int] = _DEFAULT_PERIOD,
         smoothing_window: int = _DEFAULT_SMOOTHING,
         unit_transform: str | None = None,
         **_: Any,
     ) -> None:
-        if reference not in {"edh", "dataset"}:
-            raise ValueError(f"reference must be 'edh' or 'dataset', got {reference!r}")
-        if reference == "edh" and not edh_variable:
-            raise ValueError("reference='edh' requires 'edh_variable' in params")
-        if reference == "dataset" and not source_dataset_id:
-            raise ValueError("reference='dataset' requires 'source_dataset_id' in params")
-        self.reference = reference
+        if not edh_variable:
+            raise ValueError("ClimateNormalsPlugin requires 'edh_variable' in params")
         self.variable = variable
-        self.source_dataset_id = source_dataset_id
         self.edh_variable = edh_variable
         self.period = (int(period[0]), int(period[1]))
         self.smoothing_window = int(smoothing_window)
@@ -161,22 +148,15 @@ class ClimateNormalsPlugin:
 
     def _compute_climatology(self, bbox: list[float]) -> xr.Dataset:
         region = self._load_reference(bbox)
-        time_dim = "valid_time" if "valid_time" in region.dims else "t"
-        normals = region.groupby(f"{time_dim}.dayofyear").mean(time_dim)
+        normals = region.groupby("valid_time.dayofyear").mean("valid_time")
         if self.smoothing_window > 0:
             normals[self.variable] = _circular_rolling_mean(normals[self.variable], self.smoothing_window)
         normals = _apply_unit_transform(normals, self.variable, self.unit_transform)
         return normals.load()
 
     def _load_reference(self, bbox: list[float]) -> xr.Dataset:
-        """Load the reference-period data as a (time, y, x) dataset named ``self.variable``."""
+        """Load the reference-period data from EDH as a (valid_time, y, x) dataset."""
         start_year, end_year = self.period
-        if self.reference == "edh":
-            return self._load_reference_edh(bbox, start_year, end_year)
-        return self._load_reference_dataset(start_year, end_year)
-
-    def _load_reference_edh(self, bbox: list[float], start_year: int, end_year: int) -> xr.Dataset:
-        assert self.edh_variable is not None
         eps = 0.05
         xmin, ymin, xmax, ymax = map(float, bbox)
         lon_min = (xmin % 360) - eps
@@ -197,27 +177,6 @@ class ClimateNormalsPlugin:
         region = region.rename({"longitude": "x", "latitude": "y"})
         if self.edh_variable != self.variable:
             region = region.rename({self.edh_variable: self.variable})
-        return region
-
-    def _load_reference_dataset(self, start_year: int, end_year: int) -> xr.Dataset:
-        from open_climate_service.data_accessor.services.accessor import open_icechunk_dataset
-        from open_climate_service.data_manager.services.downloader import get_icechunk_path
-
-        assert self.source_dataset_id is not None
-        store_path = get_icechunk_path({"id": self.source_dataset_id})
-        if not store_path.exists():
-            raise ValueError(
-                f"Source dataset '{self.source_dataset_id}' has no managed store at {store_path}. "
-                f"Ingest it (covering {start_year}–{end_year}) before computing normals from it."
-            )
-        ds = open_icechunk_dataset(str(store_path))
-        if self.variable not in ds:
-            raise ValueError(f"Variable '{self.variable}' not found in source dataset '{self.source_dataset_id}'")
-        time_dim = "t" if "t" in ds.dims else ("valid_time" if "valid_time" in ds.dims else "time")
-        region = ds[[self.variable]].sel({time_dim: slice(f"{start_year}-01-01", f"{end_year}-12-31")}).load()
-        ds.close()
-        if time_dim != "valid_time" and time_dim != "t":
-            region = region.rename({time_dim: "t"})
         return region
 
 

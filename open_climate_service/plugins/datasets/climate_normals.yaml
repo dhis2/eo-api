@@ -23,7 +23,6 @@
   ingestion:
     plugin: open_climate_service.plugins.datasets.climate_normals.ClimateNormalsPlugin
     params:
-      reference: edh
       edh_variable: t2m
       variable: t2m
       period: [1991, 2020]
@@ -54,7 +53,6 @@
   ingestion:
     plugin: open_climate_service.plugins.datasets.climate_normals.ClimateNormalsPlugin
     params:
-      reference: edh
       edh_variable: tp
       variable: tp
       period: [1991, 2020]
@@ -68,24 +66,7 @@
     colormap: blues
     range: [0.0, 20.0]
 
-# Compute normals from an already-ingested managed GeoZarr store (must already cover
-# the reference period). Copy and adjust `source_dataset_id` / `variable`:
-#
-# - id: era5land_temperature_normal_from_store
-#   name: 2m temperature normal (from managed store)
-#   variable: t2m
-#   period_type: daily
-#   sync:
-#     kind: static
-#   extents:
-#     temporal: { begin: "2000-01-01", end: "2000-12-31", resolution: P1D }
-#   ingestion:
-#     plugin: open_climate_service.plugins.datasets.climate_normals.ClimateNormalsPlugin
-#     params:
-#       reference: dataset
-#       source_dataset_id: era5land_temperature_daily
-#       variable: t2m
-#       period: [1991, 2020]
-#       smoothing_window: 31
-#   units: degC
-#   display: { colormap: rdbu_r, range: [-30.0, 30.0] }
+# To compute normals from an already-ingested managed GeoZarr store (one that already
+# covers the reference period), use the openEO route instead of this plugin: a process
+# graph that loads the collection, computes the climatology, and publishes via
+# save_result. This plugin only covers the Earth Data Hub "no 30-year ingestion" path.

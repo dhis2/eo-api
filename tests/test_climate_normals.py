@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -27,9 +26,7 @@ def _synthetic_region(*, var: str = "t2m", time_dim: str = "valid_time", years: 
 
 
 def _edh_plugin(**overrides: object) -> ClimateNormalsPlugin:
-    kwargs: dict[str, object] = dict(
-        reference="edh", edh_variable="t2m", variable="t2m", smoothing_window=0, unit_transform=None
-    )
+    kwargs: dict[str, object] = dict(edh_variable="t2m", variable="t2m", smoothing_window=0, unit_transform=None)
     kwargs.update(overrides)
     return ClimateNormalsPlugin(**kwargs)  # type: ignore[arg-type]
 
@@ -100,27 +97,6 @@ def test_load_reference_edh_normalises_longitude_and_renames(monkeypatch: pytest
     assert float(region["x"].min()) < 0  # 0–360 normalised to -180/180
 
 
-def test_load_reference_dataset_reads_managed_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    from open_climate_service.data_accessor.services import accessor
-    from open_climate_service.data_manager.services import downloader
-
-    store = tmp_path / "src.icechunk"
-    store.mkdir()
-    monkeypatch.setattr(downloader, "get_icechunk_path", lambda dataset: store)
-    monkeypatch.setattr(accessor, "open_icechunk_dataset", lambda path: _synthetic_region(time_dim="t"))
-
-    plugin = ClimateNormalsPlugin(
-        reference="dataset", source_dataset_id="era5land_temperature_daily", variable="t2m", smoothing_window=0
-    )
-    region = plugin._load_reference([10.0, 1.0, 11.0, 2.0])
-
-    assert "t" in region.dims and "t2m" in region.data_vars
-
-
 def test_param_validation() -> None:
-    with pytest.raises(ValueError, match="reference must be"):
-        ClimateNormalsPlugin(reference="bogus", variable="t2m")
     with pytest.raises(ValueError, match="edh_variable"):
-        ClimateNormalsPlugin(reference="edh", variable="t2m")
-    with pytest.raises(ValueError, match="source_dataset_id"):
-        ClimateNormalsPlugin(reference="dataset", variable="t2m")
+        ClimateNormalsPlugin(variable="t2m", edh_variable="")
