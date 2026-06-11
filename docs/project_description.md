@@ -20,7 +20,7 @@ The platform is being developed in close collaboration with HISP groups in the c
 
 ## 2. Overview
 
-The Open Climate Service is a no-code data integration platform that enables earth observation (EO) and climate data from multiple upstream sources to be downloaded, processed, harmonised, and loaded into DHIS2 and the CHAP Modelling Platform.
+The Open Climate Service is a data integration platform that enables earth observation (EO) and climate data from multiple upstream sources to be downloaded, processed, harmonised, and loaded into DHIS2 and the CHAP Modelling Platform.
 
 The platform is built as a Python-based REST API (FastAPI) and exposes native REST endpoints together with a STAC catalogue for discovery. Data is stored in cloud-native GeoZarr format and can be consumed by the DHIS2 Climate App, the DHIS2 Maps App, DHIS2 Climate Tools, the CHAP Modelling Platform, and third-party tools such as QGIS.
 
