@@ -15,7 +15,7 @@ ecosystem, hardening it for production, and broadening the data and analysis it 
 **Data ingestion and sync**
 
 - Ingest climate and Earth Observation datasets for a configured spatial extent
-- Keep datasets current through `/sync` — append new periods, rematerialise releases
+- Keep datasets current — append new periods and rematerialise releases on sync
 - Built-in dataset catalogue (CHIRPS, ERA5 / ERA5-Land, WorldPop)
 
 **GeoZarr storage and discovery**
@@ -24,14 +24,14 @@ ecosystem, hardening it for production, and broadening the data and analysis it 
   browser-based rendering
 - Local filesystem storage; S3-compatible and self-hosted (sovereign) object storage for
   cloud and country deployments
-- STAC catalogue plus raw `/zarr` access — direct `xarray`, `stackstac`, and QGIS use
+- STAC catalogue plus raw Zarr access — direct `xarray`, `stackstac`, and QGIS use
   without API knowledge
 
 **Processing and analysis**
 
-- openEO adopted as the process execution and chaining standard — the API exposes
-  `POST /result` (synchronous) and `POST /jobs` (batch), backed by
-  openeo-pg-parser-networkx and openeo-processes-dask (120+ standard processes)
+- openEO adopted as the process execution and chaining standard, with both synchronous
+  and batch execution, backed by openeo-pg-parser-networkx and openeo-processes-dask
+  (120+ standard processes)
 - Custom processes, including climate indices
 - Derived datasets materialised back into managed GeoZarr stores
   (e.g. change between two periods, population-weighted exposure)
