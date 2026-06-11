@@ -329,6 +329,52 @@ def test_manage_page_shows_split_publication_and_sync_columns(
     assert "const message = err instanceof Error ? err.message : String(err);" in response.text
 
 
+def test_ingestable_templates_excludes_static_workflow_outputs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Templates with no ingestion.plugin (e.g. workflow outputs) are not ingestable."""
+    monkeypatch.setattr(
+        system_templates,
+        "_load_templates",
+        lambda: [
+            {"id": "chirps3_precipitation_daily", "ingestion": {"plugin": "pkg.Plugin"}},
+            {"id": "worldpop_population_yearly", "ingestion": {"plugin": "pkg.Plugin"}},
+            {"id": "worldpop_population_change", "sync": {"kind": "static"}},  # derived, no plugin
+        ],
+    )
+
+    ingestable_ids = [t["id"] for t in system_templates._ingestable_templates()]
+
+    assert "worldpop_population_change" not in ingestable_ids
+    assert ingestable_ids == ["chirps3_precipitation_daily", "worldpop_population_yearly"]
+
+
+def test_manage_page_dropdown_excludes_static_templates(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The /manage ingest dropdown lists only ingestable templates."""
+    monkeypatch.setattr(
+        system_templates,
+        "_load_templates",
+        lambda: [
+            {
+                "id": "chirps3_precipitation_daily",
+                "name": "Total precipitation (CHIRPS3)",
+                "ingestion": {"plugin": "p"},
+            },
+            {
+                "id": "worldpop_population_change",
+                "name": "Population change (WorldPop Global2)",
+                "sync": {"kind": "static"},
+            },
+        ],
+    )
+    monkeypatch.setattr(system_templates, "_load_extent", lambda: {"id": "sle", "name": "Sierra Leone", "bbox": []})
+    monkeypatch.setattr(system_templates, "_load_datasets", lambda: [])
+
+    response = client.get("/manage")
+
+    assert response.status_code == 200
+    assert 'value="chirps3_precipitation_daily"' in response.text
+    assert 'value="worldpop_population_change"' not in response.text
+
+
 def test_map_viewer_initializes_at_latest_timestep(client: TestClient) -> None:
     response = client.get("/map")
 

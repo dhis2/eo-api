@@ -136,6 +136,17 @@ def _load_templates() -> list[dict[str, Any]]:
         return []
 
 
+def _ingestable_templates() -> list[dict[str, Any]]:
+    """Return only templates that can be ingested from a source.
+
+    Ingestable templates declare an ``ingestion.plugin``. Derived/static templates
+    (e.g. workflow outputs published via ``save_result``, which have ``sync.kind:
+    static`` and no upstream fetch path) are excluded so they don't appear in the
+    ingest form.
+    """
+    return [t for t in _load_templates() if (t.get("ingestion") or {}).get("plugin")]
+
+
 def _load_datasets() -> list[Any]:
     try:
         return list_datasets().items
@@ -165,7 +176,7 @@ def render_manage(version: str, base: str, message: str | None = None, error: st
         base=base,
         name=api_config.get_name(),
         extent=_load_extent(),
-        templates=_load_templates(),
+        templates=_ingestable_templates(),
         datasets=_load_datasets(),
         today=today,
         year_ago=year_ago,
