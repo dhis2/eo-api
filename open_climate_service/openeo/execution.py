@@ -87,35 +87,31 @@ def _make_sorted_atp(original_fn: Any) -> Any:
 
 
 def _make_named_merge_cubes(original_fn: Any) -> Any:
-    """Wrap merge_cubes to preserve DataArray names as dataset variables when possible.
+    """Wrap merge_cubes to preserve DataArray names on the ``__cubes__`` axis.
 
-    The upstream implementation stacks two named DataArrays onto a synthetic
-    ``__cubes__`` dimension. That loses semantic variable names like ``tp`` and
-    ``t2m``, which then forces downstream CHAPCSV export to relabel ``cube1`` /
-    ``cube2`` manually. When both inputs are named DataArrays with distinct names,
-    we can preserve the richer structure by merging them into a Dataset directly.
-
-    Fall back to the upstream implementation for unnamed arrays, colliding names,
-    or any merge/alignment shape we cannot represent safely as a Dataset.
+    The upstream implementation returns a DataArray stacked on a synthetic
+    ``__cubes__`` dimension with labels like ``cube1`` / ``cube2``. That loses
+    semantic source names like ``tp`` and ``t2m``. Keep the upstream return type
+    unchanged, but relabel ``__cubes__`` to the original DataArray names when
+    both inputs are named and distinct.
     """
 
     def _named_merge_cubes(cube1: Any, cube2: Any, **kwargs: Any) -> Any:
+        merged = original_fn(cube1=cube1, cube2=cube2, **kwargs)
         if (
             isinstance(cube1, xr.DataArray)
             and isinstance(cube2, xr.DataArray)
             and cube1.name
             and cube2.name
             and cube1.name != cube2.name
+            and isinstance(merged, xr.DataArray)
+            and "__cubes__" in merged.dims
         ):
             try:
-                return xr.merge(
-                    [cube1.to_dataset(name=str(cube1.name)), cube2.to_dataset(name=str(cube2.name))],
-                    join="exact",
-                    compat="override",
-                )
-            except Exception:
-                pass
-        return original_fn(cube1=cube1, cube2=cube2, **kwargs)
+                return merged.assign_coords(__cubes__=[str(cube1.name), str(cube2.name)])
+            except Exception as exc:
+                logger.debug("Falling back to default __cubes__ labels after merge_cubes", exc_info=exc)
+        return merged
 
     return _named_merge_cubes
 

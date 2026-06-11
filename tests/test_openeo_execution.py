@@ -963,7 +963,7 @@ def test_build_chap_csv_frame_renames_merged_cubes_with_explicit_labels() -> Non
     ]
 
 
-def test_merge_cubes_wrapper_preserves_named_dataarrays_as_dataset() -> None:
+def test_merge_cubes_wrapper_preserves_named_dataarrays_on_cube_axis() -> None:
     from open_climate_service.openeo.execution import _build_process_registry
 
     reg = _build_process_registry()
@@ -981,8 +981,9 @@ def test_merge_cubes_wrapper_preserves_named_dataarrays_as_dataset() -> None:
         name="t2m",
     )
     merged = merge(cube1=cube1, cube2=cube2)
-    assert isinstance(merged, xr.Dataset)
-    assert list(merged.data_vars) == ["tp", "t2m"]
+    assert isinstance(merged, xr.DataArray)
+    assert "__cubes__" in merged.dims
+    assert list(merged["__cubes__"].values) == ["tp", "t2m"]
 
 
 def test_dhis2_period_string_accepts_existing_monthly_string() -> None:

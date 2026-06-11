@@ -70,7 +70,6 @@ def _dataset_reduce_spatial(
     reducer: Callable,
     y_dim: str,
     x_dim: str,
-    t_dim: str | None,
     context: Any = None,
 ) -> xr.Dataset:
     """Apply spatial mask and reducer to each variable in a Dataset.
@@ -139,7 +138,6 @@ def aggregate_spatial(
 
     x_dim = _find_dim(data, ["x", "longitude", "lon"])
     y_dim = _find_dim(data, ["y", "latitude", "lat"])
-    t_dim = _find_dim(data, ["t", "time"])
     if x_dim is None or y_dim is None:
         raise ValueError(f"aggregate_spatial: cannot identify x/y dimensions in {list(data.dims)}")
 
@@ -170,7 +168,7 @@ def aggregate_spatial(
         if height > 1 and float(y_coords[1]) > float(y_coords[0]):
             mask = mask[::-1]
 
-        geom_ds = _dataset_reduce_spatial(data, mask, reducer, y_dim, x_dim, t_dim, context)
+        geom_ds = _dataset_reduce_spatial(data, mask, reducer, y_dim, x_dim, context)
         results.append(geom_ds)
 
     combined = xr.concat(results, dim=geom_dim)
