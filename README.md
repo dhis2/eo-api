@@ -16,7 +16,7 @@ pip install open-climate-service[xarray]    # + open published datasets as xarra
 pip install open-climate-service[server]    # full server stack — run your own instance
 ```
 
-> **Running a server?** The recommended ways to run an instance are **uv** or **Docker** — see [Run a server](#run-a-server) and the [setup guide](https://dhis2.github.io/open-climate-service/setup_guide/). The `[server]` extra installs with `pip` on Linux x86-64; on macOS or ARM, use uv or Docker. The client and `[xarray]` extras work on any platform.
+> **Running a server?** The recommended ways to run an instance are **uv** or **Docker** — see [Run a server](#run-a-server), the [quick start](https://dhis2.github.io/open-climate-service/setup_guide/) (try it locally), and the [instance guide](https://dhis2.github.io/open-climate-service/instance_guide/) (operational deployments). The `[server]` extra installs with `pip` on Linux x86-64; on macOS or ARM, use uv or Docker. The client and `[xarray]` extras work on any platform.
 
 ## Quick start (client)
 
@@ -30,7 +30,7 @@ ds = service.open_dataset(datasets[0]["id"])   # open as xarray (needs the [xarr
 
 ## Run a server
 
-To run your own instance, see the [setup guide](https://dhis2.github.io/open-climate-service/setup_guide/). In short:
+To try it locally, see the [quick start](https://dhis2.github.io/open-climate-service/setup_guide/); for an operational deployment, see the [instance guide](https://dhis2.github.io/open-climate-service/instance_guide/). In short:
 
 ```bash
 uv sync --extra server
@@ -39,7 +39,9 @@ uv run uvicorn open_climate_service.main:app --reload
 
 ## Documentation
 
-- [Get started](https://dhis2.github.io/open-climate-service/setup_guide/) — set up an instance and ingest data
+- [Quick start](https://dhis2.github.io/open-climate-service/setup_guide/) — try it locally and ingest data
+- [Instance guide](https://dhis2.github.io/open-climate-service/instance_guide/) — run a service for your country (recommended)
+- [Using the web interface](https://dhis2.github.io/open-climate-service/web_interface/) — manage ingestion, sync, and the map viewer
 - [Accessing data](https://dhis2.github.io/open-climate-service/user_guide/) — the Python client, STAC, and xarray
 - [openEO](https://dhis2.github.io/open-climate-service/openeo/) — process graphs, workflows, and exports
 - [API reference](https://dhis2.github.io/open-climate-service/managed_data_api_guide/)

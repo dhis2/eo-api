@@ -2,7 +2,7 @@
 
 This guide shows how to discover and access data from a running Open Climate Service instance. It assumes the API is running locally at `http://127.0.0.1:8000` and that at least one dataset has been ingested and published.
 
-For configuring a new instance for your country, see [setup_guide.md](setup_guide.md). For the full ingestion and sync API reference, see [managed_data_api_guide.md](managed_data_api_guide.md).
+For configuring a new instance for your country, see the [instance guide](instance_guide.md). To browse datasets visually instead of through code, use the built-in [map viewer](web_interface.md#the-map-viewer-map). For the full ingestion and sync API reference, see [managed_data_api_guide.md](managed_data_api_guide.md).
 
 ## Discovering datasets
 

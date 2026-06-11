@@ -1,56 +1,103 @@
 # Roadmap
 
-## Step 1 — Foundation (target: DAC 2026)
+The Open Climate Service has delivered its foundation. An instance can ingest climate
+and Earth Observation data, keep it current, store it as cloud-native GeoZarr, make it
+discoverable through STAC, derive new products from it through openEO processes
+(including climate indices), and chain those steps into reusable workflows.
 
-The first step delivers a working foundation that country teams and tool developers can build on. The scope is deliberately narrow: ingest data, keep it current, store it efficiently, and make it discoverable.
+The focus now shifts from building the core platform to **integrating it with the DHIS2
+ecosystem, hardening it for production, and broadening the data and analysis it offers.**
 
-**Ingestion and sync**
+---
+
+## Delivered
+
+**Data ingestion and sync**
 
 - Ingest climate and Earth Observation datasets for a configured spatial extent
-- Keep datasets up to date
-- Support the built-in dataset catalogue (CHIRPS, ERA5, WorldPop)
+- Keep datasets current — append new periods and rematerialise releases on sync
+- Built-in dataset catalogue (CHIRPS, ERA5 / ERA5-Land, WorldPop)
 
-**GeoZarr storage**
+**GeoZarr storage and discovery**
 
-- Store all datasets as GeoZarr stores
-- Multiscale pyramid support for efficient browser-based rendering
-- Local filesystem storage; S3-compatible object storage for cloud deployments
+- All datasets stored as cloud-native GeoZarr, with multiscale pyramids for efficient
+  browser-based rendering
+- Local filesystem storage; S3-compatible and self-hosted (sovereign) object storage for
+  cloud and country deployments
+- STAC catalogue plus raw Zarr access — direct `xarray` / `stackstac` use without API
+  knowledge
 
-**STAC catalogue**
+**Processing and analysis**
 
-- STAC endpoint for dataset discovery
-- Collection-level assets with xarray and datacube extensions
-- Enables direct `xarray` and `stackstac` access without API knowledge
-
-**Primary consumers**
-
-- [DHIS2 Climate Tools](https://github.com/dhis2/climate-app) — direct GeoZarr integration
-- Any tool with native Zarr or STAC support
-
----
-
-## Step 2 — Data processing and DHIS2 integration (autumn 2026)
-
-The second step adds the ability to derive new datasets from ingested data and connect the output to DHIS2.
-
-**Data processing**
-
-- Compute derived variables: climate normals, anomalies, exposure indices
-- openEO has been adopted as the process execution and chaining standard — the API exposes `POST /result` (synchronous) and `POST /jobs` (batch) backed by openeo-pg-parser-networkx and openeo-processes-dask (120+ standard processes)
-
-**DHIS2 integration**
-
-- Spatial aggregation using DHIS2 org unit boundaries
-- Push aggregated climate values into DHIS2 data elements against org unit hierarchies
-
----
-
-## Step 3 — Workflows and orchestration
-
-The third step adds automation so that datasets and derived products stay current without manual intervention.
+- openEO adopted as the process execution and chaining standard, with both synchronous
+  and batch execution, backed by openeo-pg-parser-networkx and openeo-processes-dask
+  (120+ standard processes)
+- Custom processes, including climate indices
+- Derived datasets materialised back into managed GeoZarr stores
+  (e.g. change between two periods, population-weighted exposure)
 
 **Workflows**
 
-- Event-driven cascades: a sync that updates a base dataset triggers downstream derived products automatically
-- Scheduled jobs for recurring operations (monthly normals, weekly anomaly updates)
-- Integration with external orchestration tools via the standard API surface
+- Named, reusable workflows that chain processes end to end — e.g. aggregate to org-unit
+  boundaries, population-weighted aggregation, and change between periods
+- Workflow outputs published as managed datasets, discoverable like any other
+
+---
+
+## Focus areas
+
+These are the priorities for taking the Open Climate Service from a working platform to
+production-ready shared infrastructure for the DHIS2 climate and health ecosystem. They
+are largely parallel rather than strictly sequential.
+
+### DHIS2 integration
+
+The highest-value next step is direct integration with the DHIS2 ecosystem so that climate
+and EO data flows into the tools country teams already use:
+
+- **DHIS2 Climate App** — consume Open Climate Service datasets and aggregation directly
+- **DHIS2 Maps App** — render GeoZarr layers and import aggregated values
+- **CHAP Modelling Platform** — supply harmonised climate inputs to models
+- Push aggregated values into DHIS2 data elements against org-unit hierarchies
+
+### Stability
+
+- Harden ingestion, sync, and job execution against partial failures and stale jobs
+- Replace the interim JSON-backed artifact store with a proper transactional store
+- Broaden automated test coverage, including integration tests against running instances
+
+### Security and authentication
+
+- Authentication and authorisation for the API
+- Per-instance access control for write and admin operations
+- Secure handling of upstream provider credentials
+
+### Performance and scalability
+
+- Faster ingestion and processing for large extents and long time ranges
+- Tune chunking, pyramids, and Dask execution for concurrent, long-running jobs
+- Scale-out execution for batch jobs
+
+### Automation and scheduling
+
+- Scheduled sync and recurring derived-product updates (e.g. monthly normals, weekly
+  anomaly refreshes)
+- Event-driven cascades — a sync that updates a base dataset triggers downstream derived
+  products automatically
+
+### More datasets, processing and workflows
+
+- Expand the built-in dataset catalogue — more sources, variables, and resolutions
+- More built-in analysis: climate normals, anomalies, exposure indices, and additional
+  climate indices
+- More reusable workflows for common climate-and-health use cases
+
+### Building competence and partnerships
+
+- Build climate-data competence within HISP groups and country teams
+- Grow partnerships with data providers and the wider climate / EO and DHIS2 communities
+
+### Knowledge sharing
+
+- Documentation, guides, and worked examples
+- Training materials and presentations for implementers and analysts
