@@ -13,7 +13,6 @@ from open_climate_service.data_registry import routes as dataset_template_routes
 from open_climate_service.extents import routes as extent_routes
 from open_climate_service.ingestions import routes as ingestion_routes
 from open_climate_service.jobs.service import get_job_service
-from open_climate_service.normals import routes as normals_routes
 from open_climate_service.openeo import routes as openeo_routes
 from open_climate_service.openeo.jobs import get_openeo_job_service
 from open_climate_service.stac import routes as stac_routes
@@ -147,7 +146,6 @@ def create_app() -> FastAPI:
     _app.include_router(ingestion_routes.zarr_router, prefix="/zarr", tags=["Zarr"])
     _app.include_router(ingestion_routes.icechunk_router, prefix="/icechunk", tags=["Icechunk"])
     _app.include_router(ingestion_routes.sync_router, prefix="/sync", tags=["Sync"])
-    _app.include_router(normals_routes.router, prefix="/normals", tags=["Normals"])
     _app.include_router(openeo_routes.processes_router, prefix="/processes", tags=["openEO"])
 
     return _app
