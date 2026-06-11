@@ -1,5 +1,7 @@
 # Open Climate Service — Product Requirements Document (PRD)
 
+> **Internal working document.** This PRD captures the original MVP/hackathon scope and is kept for historical context. The published, maintained project overview is [`docs/project_description.md`](docs/project_description.md) (the "Project overview" page in the documentation site).
+
 ## 1) Overview
 Open Climate Service is a no-code geospatial data integration platform that enables users to discover, fetch, process, harmonize, and load earth observation and related datasets into DHIS2 and the CHAP Modelling Platform.
 

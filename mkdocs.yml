@@ -69,7 +69,6 @@ nav:
       - Architecture: architecture.md
       - Zarr and GeoZarr: zarr_and_geozarr.md
       - Project overview: project_description.md
-      - Implementation status: implementation-status.md
   - Guides:
       - Instance guide: instance_guide.md
       - Using the web interface: web_interface.md

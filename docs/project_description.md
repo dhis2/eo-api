@@ -109,15 +109,13 @@ This mirrors the approach used in the CHAP Modelling Platform, where generic mod
 
 ### 6.2 Data storage and serving
 
-- Store all datasets as GeoZarr — cloud-native, chunked, multiscale, EPSG:4326.
+- Store all datasets as GeoZarr — cloud-native, chunked, and multiscale, in the instance CRS (WGS84 by default).
 - Expose datasets via a `/zarr/{dataset_id}` endpoint using HTTP range requests, enabling chunk-level access by any compatible client.
 - Expose dataset discovery metadata via a `/datasets` endpoint and a STAC catalogue.
 
 ### 6.3 Visualisation
 
-- Support on-the-fly map tile rendering with custom styling.
-- Support image tile generation using TiTiler.
-- Support direct browser rendering of Zarr data via zarr-layer (MapLibre custom layer) with GPU reprojection from EPSG:4326 to Spherical Mercator and client-side dynamic colour classification.
+- Support direct browser rendering of Zarr data via zarr-layer (MapLibre custom layer) with GPU reprojection from the stored CRS to Spherical Mercator and client-side dynamic colour classification.
 - Support point queries (single location time series) for preview before import.
 
 ### 6.4 Aggregation
@@ -178,7 +176,7 @@ The API is built on FastAPI and exposes the following endpoint groups:
 
 All datasets are stored as GeoZarr. Key properties:
 
-- EPSG:4326 coordinate reference system.
+- Configurable CRS — WGS84 (EPSG:4326) by default, or a projected CRS per instance.
 - CF-compliant coordinate attributes and `_ARRAY_DIMENSIONS` metadata.
 - Multiscale pyramid overview levels declared under the `multiscales` key in `.zattrs` — required for efficient zoom-level-aware chunk fetching by zarr-layer.
 - Chunk shape tuned per dataset to balance three access patterns: time series queries, polygon aggregation, and browser tile rendering.
@@ -212,16 +210,16 @@ Long-running jobs (ingestion, sync, aggregation) are executed asynchronously. Th
 
 | Technology                    | Role in the Open Climate Service                                                                                                                                                                  |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FastAPI (Python)              | Core REST API framework. Handles ingestion, sync, dataset, and OGC endpoints. Each pipeline step is exposed as a separate endpoint.                                                      |
+| FastAPI (Python)              | Core REST API framework. Handles ingestion, sync, dataset, processing, and STAC endpoints. Each pipeline step is exposed as a separate endpoint.                                                      |
 | Xarray + Zarr                 | In-memory dataset model and cloud-native chunked storage format. GeoZarr conventions applied for geospatial metadata and multiscale pyramid support.                                     |
 | Dask                          | Parallel computation within jobs — processes Zarr chunks concurrently for aggregation, reprojection, and derived variable computation. Works natively with Xarray.                       |
 | rioxarray                     | Raster operations on Xarray datasets — reprojection, clipping, resampling, and CRS management.                                                                                           |
-| exactextract                  | Polygon aggregation (zonal statistics) to org unit features. Supports weighted partial-pixel coverage for accurate population aggregation.                                               |
-| xarray-multiscale             | Generates multiscale pyramid overview levels at ingest time, required for zarr-layer zoom-level-aware chunk fetching.                                                                    |
-| rechunker                     | Reshapes existing Zarr stores to a new chunk layout without full rewrite. Used for per-dataset chunk shape tuning.                                                                       |
-| cf-xarray                     | CF convention handling — maps standard dimension names and attributes across source datasets.                                                                                            |
-| numba                         | JIT compilation for custom processing functions (e.g. consecutive rainy days, heat index) applied pixel-wise over large arrays.                                                          |
-| TiTiler                       | On-the-fly raster tile server. Serves map tiles with dynamic styling.                                                                                                                    |
+| openeo-pg-parser-networkx + openeo-processes-dask | openEO process-graph parsing and execution — the processing and aggregation engine (temporal/spatial aggregation, derived variables, and reusable workflows).        |
+| topozarr                      | Builds multiscale pyramid overview levels at ingest time, for zarr-layer zoom-level-aware chunk fetching.                                                                               |
+| geozarr-toolkit               | Applies GeoZarr metadata conventions (multiscales, CRS, spatial) to stored datasets.                                                                                                    |
+| icechunk                      | Transactional, versioned storage engine for the managed Zarr datasets.                                                                                                                  |
+| xclim                         | Climate-index library (179 CF-compliant indicators) exposed automatically as openEO processes.                                                                                          |
+| xstac                         | Derives STAC and datacube metadata from the published Zarr datasets.                                                                                                                     |
 | fsspec                        | Unified filesystem abstraction for storage backends (local, S3-compatible, Azure Blob, GCS, Ceph/RGW). Backend is environment-variable configuration only.                               |
 | zarr-layer (MapLibre)         | TypeScript library for rendering Zarr directly as a native MapLibre Custom Layer in the browser. GPU reprojection from EPSG:4326 to Spherical Mercator; uses multiscale levels per zoom. |
 | Docker                        | Containerised deployment. Supports local, cloud-hosted, and country sovereign deployments.                                                                                               |

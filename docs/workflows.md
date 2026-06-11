@@ -214,7 +214,7 @@ The workflow appears in `GET /process_graphs` immediately on the next request â€
 ### Via API
 
 ```bash
-curl -X PUT http://localhost:8000/process_graphs/monthly_precipitation \
+curl -X PUT http://127.0.0.1:8000/process_graphs/monthly_precipitation \
   -H "Content-Type: application/json" \
   -d @monthly_precipitation.json
 ```
@@ -228,7 +228,7 @@ curl -X PUT http://localhost:8000/process_graphs/monthly_precipitation \
 ```python
 from openeo import connect
 
-conn = connect("http://localhost:8000")
+conn = connect("http://127.0.0.1:8000")
 
 result = conn.execute({
     "process_graph": {
@@ -246,7 +246,7 @@ result = conn.execute({
 ```javascript
 import { OpenEO } from "@openeo/js-client";
 
-const conn = await OpenEO.connect("http://localhost:8000");
+const conn = await OpenEO.connect("http://127.0.0.1:8000");
 
 const process = await conn.buildProcess((builder) =>
   builder.monthly_precipitation("chirps3_precipitation_daily")
