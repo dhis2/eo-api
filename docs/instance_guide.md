@@ -13,7 +13,9 @@ Use an instance repository when you:
 - Want to pin your service to a specific version of open-climate-service and upgrade deliberately
 - Want to share your configuration with others, or deploy across multiple environments
 
-If you only need to run climate-service with built-in datasets and no custom plugins, the [setup guide](setup_guide.md) (cloning open-climate-service directly) is simpler.
+This is the recommended path for running an actual climate service. If you only want to
+try Open Climate Service locally with the built-in datasets, the [quick start](setup_guide.md)
+(cloning open-climate-service directly) is faster.
 
 ---
 
@@ -154,7 +156,9 @@ make install
 make run
 ```
 
-Visit `http://localhost:8000` to confirm the API is running. The `/extent` endpoint should return your configured bounding box.
+Visit `http://localhost:8000` to confirm the service is running. From there, open
+`/manage` to ingest data and `/map` to view it — see [Using the web interface](web_interface.md).
+The `/extent` endpoint should return your configured bounding box.
 
 ---
 
