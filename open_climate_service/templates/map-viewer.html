@@ -207,7 +207,7 @@
 
           <div id="time-section" class="panel-section hidden">
             <div class="time-header">
-              <label style="margin-bottom:0">Time step</label>
+              <label id="time-label" style="margin-bottom:0">Time step</label>
               <span id="time-count" class="time-count"></span>
             </div>
             <div style="margin-bottom:0.4rem">
@@ -255,23 +255,29 @@
         }
       }
 
-      // Resolve the temporal dimension key and step list from cube:dimensions.
-      function getTimeDimKey(dimensions) {
-        for (const [key, val] of Object.entries(dimensions ?? {})) {
+      // Resolve the primary "stepping" dimension key from cube:dimensions. Prefer a
+      // non-temporal, non-spatial dimension (e.g. dayofyear, bands) so the slider can
+      // drive an ordinal axis; otherwise fall back to the temporal dimension.
+      function getStepDimKey(dimensions) {
+        const entries = Object.entries(dimensions ?? {});
+        for (const [key, val] of entries) {
+          if (val.type === "spatial" || val.type === "temporal") continue;
+          if (Array.isArray(val.values) || val.extent) return key;
+        }
+        for (const [key, val] of entries) {
           if (val.type === "temporal") return key;
         }
         return "time";
       }
 
-      function buildTimeSteps(dimensions) {
-        if (!dimensions) return [];
-        const timeDim = Object.values(dimensions).find(
-          (d) => d.type === "temporal"
-        );
-        if (!timeDim) return [];
-        if (Array.isArray(timeDim.values)) return timeDim.values;
-        const [start, end] = timeDim.extent ?? [];
-        const step = timeDim.step;
+      // Build the step list for a dimension: explicit `values` (temporal or ordinal),
+      // else a temporal extent + ISO duration step.
+      function buildSteps(dimensions, dimKey) {
+        const dim = (dimensions ?? {})[dimKey];
+        if (!dim) return [];
+        if (Array.isArray(dim.values)) return dim.values;
+        const [start, end] = dim.extent ?? [];
+        const step = dim.step;
         if (!start) return [];
         if (!step || !end) return [start];
         return generateDateRange(start, end, step);
@@ -339,6 +345,7 @@
 
       const selectEl = document.getElementById("dataset-select");
       const timeSection = document.getElementById("time-section");
+      const timeLabelEl = document.getElementById("time-label");
       const timeSlider = document.getElementById("time-slider");
       const timeValueEl = document.getElementById("time-value");
       const timeCountEl = document.getElementById("time-count");
@@ -484,8 +491,8 @@
           "data";
 
         const dimensions = collection["cube:dimensions"] ?? {};
-        timeDimKey = getTimeDimKey(dimensions);
-        timeSteps = buildTimeSteps(dimensions);
+        timeDimKey = getStepDimKey(dimensions);
+        timeSteps = buildSteps(dimensions, timeDimKey);
 
         // For projected-CRS stores, pass crs + proj4 string so ZarrLayer
         // reprojects natively instead of treating coordinates as WGS84 degrees.
@@ -540,9 +547,16 @@
         }
 
 
-        // Time slider.
+        // Dimension slider (temporal, or an ordinal axis such as day-of-year).
         if (timeStepCount() > 1) {
           const initialIndex = initialTimeIndex();
+          const stepDim = dimensions[timeDimKey] ?? {};
+          timeLabelEl.textContent =
+            stepDim.type === "temporal"
+              ? "Time step"
+              : timeDimKey === "dayofyear"
+                ? "Day of year"
+                : timeDimKey;
           timeSlider.max = timeStepCount() - 1;
           timeSlider.value = initialIndex;
           timeValueEl.textContent = timeStepAt(initialIndex);

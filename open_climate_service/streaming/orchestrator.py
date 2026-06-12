@@ -63,7 +63,9 @@ def _strip_cf_encoding(ds: xr.Dataset, period_type: str, *, time_dim: str) -> No
     for name in list(ds.data_vars) + list(ds.coords):
         ds[name].encoding.clear()
         ds[name].attrs = {key: value for key, value in ds[name].attrs.items() if key not in cf_keys}
-    if time_dim in ds.coords:
+    # Only force datetime CF encoding for an actual datetime axis. An ordinal step
+    # dimension (e.g. an integer day-of-year climatology) is left as-is.
+    if time_dim in ds.coords and ds[time_dim].dtype.kind == "M":
         units = "hours since 1970-01-01" if period_type == "hourly" else "days since 1970-01-01"
         ds[time_dim].encoding.update({"units": units, "dtype": "int32"})
 
