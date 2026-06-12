@@ -31,11 +31,11 @@ def _edh_plugin(**overrides: object) -> ClimateNormalsPlugin:
     return ClimateNormalsPlugin(**kwargs)  # type: ignore[arg-type]
 
 
-def test_periods_span_a_nominal_leap_year() -> None:
+def test_periods_are_dayofyear_ids() -> None:
     periods = asyncio.run(_edh_plugin().periods("ignored", "ignored"))
     assert len(periods) == 366
-    assert periods[0] == "2000-01-01"
-    assert periods[-1] == "2000-12-31"
+    assert periods[0] == "1"
+    assert periods[-1] == "366"
 
 
 def test_compute_climatology_groups_by_dayofyear(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -50,16 +50,15 @@ def test_compute_climatology_groups_by_dayofyear(monkeypatch: pytest.MonkeyPatch
     assert float(clim["t2m"].sel(dayofyear=366).isel(y=0, x=0)) == pytest.approx(366.0)
 
 
-def test_fetch_period_maps_nominal_date_to_dayofyear(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_period_returns_single_dayofyear(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = _edh_plugin()
     monkeypatch.setattr(plugin, "_load_reference", lambda bbox: _synthetic_region())
 
-    ds = plugin._fetch_sync("2000-04-09", [10.0, 1.0, 11.0, 2.0])  # 2000-04-09 is day-of-year 100
+    ds = plugin._fetch_sync("100", [10.0, 1.0, 11.0, 2.0])
 
-    assert ds.sizes["t"] == 1
-    assert str(ds["t"].values[0])[:10] == "2000-04-09"
-    assert "dayofyear" not in ds.dims  # collapsed to the single fetched day
-    assert float(ds["t2m"].isel(t=0, y=0, x=0)) == pytest.approx(100.0)
+    assert ds.sizes["dayofyear"] == 1  # one step, appended along the dayofyear axis
+    assert int(ds["dayofyear"].values[0]) == 100
+    assert float(ds["t2m"].isel(dayofyear=0, y=0, x=0)) == pytest.approx(100.0)
 
 
 def test_unit_transform_is_applied(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -10,16 +10,12 @@
   name: 2m temperature normal (ERA5-Land, 1991–2020)
   short_name: Temperature normal
   variable: t2m
-  period_type: daily
+  period_type: climatology
   sync:
     kind: static
   extents:
     spatial:
       bbox: [-180, -90, 180, 90]
-    temporal:
-      begin: "2000-01-01"
-      end: "2000-12-31"
-      resolution: P1D
   ingestion:
     plugin: open_climate_service.plugins.datasets.climate_normals.ClimateNormalsPlugin
     params:
@@ -40,16 +36,12 @@
   name: Total precipitation normal (ERA5-Land, 1991–2020)
   short_name: Precipitation normal
   variable: tp
-  period_type: daily
+  period_type: climatology
   sync:
     kind: static
   extents:
     spatial:
       bbox: [-180, -90, 180, 90]
-    temporal:
-      begin: "2000-01-01"
-      end: "2000-12-31"
-      resolution: P1D
   ingestion:
     plugin: open_climate_service.plugins.datasets.climate_normals.ClimateNormalsPlugin
     params:

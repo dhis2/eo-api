@@ -4,22 +4,21 @@ Computes a WMO-style day-of-year climatology (default reference period 1991–20
 by reading the reference period **directly from the Earth Data Hub** daily ERA5-Land
 Zarr store — so no prior 30-year ingestion is required.
 
-The result is exposed as an ordinary daily dataset on a *nominal* leap year (2000), so
-it flows through the standard ingestion → registry → STAC → publish pipeline and renders
-in the map viewer like any other daily dataset — no bespoke endpoint, no special
-day-of-year handling downstream.
+The result is stored with a real ``dayofyear`` dimension (1..366) — a non-temporal
+stepping axis declared in STAC ``cube:dimensions`` and rendered by the map viewer's
+generic dimension slider (see the ordinal-dimension support). It flows through the
+standard ingestion → registry → STAC → publish pipeline; no bespoke endpoint.
 
 Computing normals from an already-ingested managed dataset is handled the openEO way (a
 process graph over a loaded collection + ``save_result``), not by this plugin.
 
-The heavy climatology is computed once per ingestion (cached) and then served one day at
-a time to fit the per-period streaming contract.
+The heavy climatology is computed once per ingestion (cached) and then served one
+day-of-year at a time to fit the per-period streaming contract.
 """
 
 from __future__ import annotations
 
 import os
-from datetime import date, timedelta
 from threading import Lock
 from typing import Any
 from urllib.parse import urlparse, urlunparse
@@ -30,26 +29,12 @@ import xarray as xr
 from open_climate_service.streaming.protocol import GridSpec
 from open_climate_service.transforms.unit_conversion import kelvin_to_celsius, metres_to_mm
 
-# Nominal (leap) year the day-of-year axis is mapped onto, so dayofyear 1..366
-# becomes 2000-01-01 .. 2000-12-31 — a normal daily time axis.
-_NOMINAL_YEAR = 2000
 _DEFAULT_PERIOD = (1991, 2020)
 _DEFAULT_SMOOTHING = 31
+_DAYOFYEAR_DIM = "dayofyear"
 
 _EDH_DAILY_URL = "https://api.earthdatahub.destine.eu/era5/era5-land-daily-utc-v1.zarr"
 _EDH_API_KEY_ENV = "EDH_API_KEY"
-
-
-def _nominal_dates() -> list[str]:
-    """ISO dates for day-of-year 1..366 on the nominal leap year."""
-    base = date(_NOMINAL_YEAR, 1, 1)
-    return [(base + timedelta(days=i)).isoformat() for i in range(366)]
-
-
-def _dayofyear_for(period_id: str) -> int:
-    """Day-of-year (1..366) for a nominal-year ISO date."""
-    d = date.fromisoformat(period_id[:10])
-    return (d - date(_NOMINAL_YEAR, 1, 1)).days + 1
 
 
 def _circular_rolling_mean(da: xr.DataArray, window: int) -> xr.DataArray:
@@ -119,13 +104,16 @@ class ClimateNormalsPlugin:
             crs=4326,
             dtype=np.dtype(clim[self.variable].dtype),
             nodata=None,
+            time_dim=_DAYOFYEAR_DIM,  # the stepping axis is day-of-year, not datetime
         )
 
     async def periods(self, start: str, end: str) -> list[str]:
-        # Day-of-year climatology spans a full (nominal leap) year regardless of
-        # the requested range — one entry per day-of-year.
+        # One entry per day-of-year present in the climatology (1..366), independent
+        # of the requested range. probe() runs first and populates the cache.
         _ = start, end
-        return _nominal_dates()
+        if self._climatology is not None:
+            return [str(int(d)) for d in self._climatology[_DAYOFYEAR_DIM].values]
+        return [str(d) for d in range(1, 367)]
 
     async def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
         import asyncio
@@ -136,9 +124,8 @@ class ClimateNormalsPlugin:
 
     def _fetch_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
         clim = self._ensure_climatology(bbox)
-        doy = _dayofyear_for(period_id)
-        day = clim.sel(dayofyear=doy, drop=True)
-        return day.expand_dims(t=[np.datetime64(period_id[:10], "D")])
+        # Keep dayofyear as a length-1 dimension so the orchestrator appends along it.
+        return clim.sel({_DAYOFYEAR_DIM: [int(period_id)]})
 
     def _ensure_climatology(self, bbox: list[float]) -> xr.Dataset:
         with self._lock:
