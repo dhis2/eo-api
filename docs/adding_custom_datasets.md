@@ -134,9 +134,10 @@ extents:
     resolution: P1D              # ISO 8601 duration: PT1H, P1D, P1M, P1Y
 ```
 
-**CF metadata** — stamped onto the stored variable (and backfilled at load) so the GeoZarr
-store is CF-compliant and CF-aware tools (xclim climate indices, cf-xarray, QGIS) work
-without per-process glue:
+**CF metadata** — stamped onto the stored variable at ingest so the GeoZarr store is
+CF-compliant on disk and CF-aware tools (xclim climate indices, cf-xarray, QGIS) work
+without per-process glue. These fields take effect when the store is written, so changing
+them requires re-ingesting the dataset:
 
 | Field | Required | Description |
 | ----- | -------- | ----------- |
