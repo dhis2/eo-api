@@ -362,14 +362,24 @@ def _load_collection_impl(
                 ),
             )
 
+    # Backfill the cube's `units` from the dataset's declared units so unit-aware
+    # processes (e.g. xclim's spi / climate indices) can find them. The stored Zarr
+    # variable does not retain a units attribute, so without this xclim raises a
+    # confusing KeyError 'units'. Only set it when the data doesn't already carry one.
+    def _with_units(da: xr.DataArray) -> xr.DataArray:
+        units = getattr(artifact, "units", None)
+        if units and not da.attrs.get("units"):
+            return da.assign_attrs(units=units)
+        return da
+
     if len(available_vars) == 1:
-        return ds[available_vars[0]]
+        return _with_units(ds[available_vars[0]])
 
     # Multi-band: stack variables on a new "bands" dimension
     import pandas as pd
 
     return xr.concat(
-        [ds[b] for b in available_vars],
+        [_with_units(ds[b]) for b in available_vars],
         dim=pd.Index(available_vars, name="bands"),
     )
 
