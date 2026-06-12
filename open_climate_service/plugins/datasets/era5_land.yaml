@@ -17,6 +17,8 @@
     params:
       variable: t2m
   units: degC
+  standard_name: air_temperature
+  cell_methods: "time: mean"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/era5-land-daily
@@ -42,6 +44,8 @@
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandPrecipDailyPlugin
     params: {}
   units: mm
+  standard_name: lwe_thickness_of_precipitation_amount
+  cell_methods: "time: sum"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land
@@ -69,6 +73,8 @@
     params:
       variable: t2m
   units: degC
+  standard_name: air_temperature
+  cell_methods: "time: mean"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means
@@ -94,6 +100,8 @@
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandMonthlyPrecipitationPlugin
     params: {}
   units: mm
+  standard_name: lwe_thickness_of_precipitation_amount
+  cell_methods: "time: sum"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means
@@ -120,6 +128,8 @@
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandTempDailyFromHourlyPlugin
     params: {}
   units: degC
+  standard_name: air_temperature
+  cell_methods: "time: mean"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land
@@ -145,6 +155,8 @@
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandPrecipDailyPlugin
     params: {}
   units: mm
+  standard_name: lwe_thickness_of_precipitation_amount
+  cell_methods: "time: sum"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land

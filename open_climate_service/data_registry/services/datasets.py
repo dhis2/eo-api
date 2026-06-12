@@ -159,3 +159,14 @@ def _validate_dataset_template(dataset: object, *, source: str) -> None:
         has_plugin = isinstance(plugin, str) and bool(plugin)
         if not has_plugin:
             raise ValueError(f"Dataset template '{dataset_id}' in {source} must define ingestion.plugin")
+
+    # Surface non-CF/udunits units so unit-aware processes (xclim indices) don't fail
+    # cryptically later. Warn rather than reject — not every variable is a physical
+    # quantity (e.g. population counts) (#280).
+    units = dataset.get("units")
+    if isinstance(units, str):
+        from open_climate_service.shared.cf import validate_units
+
+        message = validate_units(units)
+        if message:
+            logger.warning("Dataset template '%s' in %s: %s", dataset_id, source, message)

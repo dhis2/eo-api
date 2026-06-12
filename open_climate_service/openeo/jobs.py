@@ -549,6 +549,12 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         if current_name != desired_name:
             ds = ds.rename({current_name: desired_name})
 
+    # Stamp CF attributes (units / standard_name / cell_methods) from the template so the
+    # published store is CF-compliant on disk (#280).
+    from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
+
+    apply_cf_metadata(ds, cf_attrs_from_template(template))
+
     try:
         x_dim, y_dim = get_x_y_dims(ds)
     except ValueError as exc:

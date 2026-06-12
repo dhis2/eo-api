@@ -19,6 +19,7 @@ from open_climate_service.data_accessor.services.accessor import open_icechunk_d
 from open_climate_service.data_manager.services.utils import get_time_dim
 from open_climate_service.ingestions import services as ingestion_services
 from open_climate_service.ingestions.schemas import ArtifactFormat
+from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
 
 logger = logging.getLogger(__name__)
 
@@ -362,16 +363,33 @@ def _load_collection_impl(
                 ),
             )
 
+    # Backfill CF attributes (units / standard_name / cell_methods) from the dataset
+    # template so unit-aware processes (xclim's spi / climate indices) work even when the
+    # stored variable predates CF-stamping at ingest. Existing attributes win (#280).
+    cf_attrs = _template_cf_attrs(artifact, id)
+
     if len(available_vars) == 1:
-        return ds[available_vars[0]]
+        return apply_cf_metadata(ds[available_vars[0]], cf_attrs)
 
     # Multi-band: stack variables on a new "bands" dimension
     import pandas as pd
 
     return xr.concat(
-        [ds[b] for b in available_vars],
+        [apply_cf_metadata(ds[b], cf_attrs) for b in available_vars],
         dim=pd.Index(available_vars, name="bands"),
     )
+
+
+def _template_cf_attrs(artifact: Any, dataset_id: str) -> dict[str, str]:
+    """Resolve CF variable attributes for a loaded collection from its dataset template."""
+    from open_climate_service.data_registry.services import datasets as registry
+
+    template_id = getattr(artifact, "source_dataset_id", None) or dataset_id
+    try:
+        template = registry.get_dataset(template_id) or registry.get_dataset(dataset_id)
+    except Exception:
+        template = None
+    return cf_attrs_from_template(template)
 
 
 class SaveResultEnvelope:

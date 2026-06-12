@@ -25,6 +25,7 @@ from typing import Any
 
 import xarray as xr
 
+from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
 from open_climate_service.streaming.protocol import GridSpec, IngestionPlugin
 from open_climate_service.streaming.store import (
     is_store_empty,
@@ -126,6 +127,9 @@ async def run_streaming_ingest(
     # Icechunk transaction batching.
     commit_batch_size = max(1, int(plugin.commit_batch_size))
     expected_spatial_shape: tuple[int, int] | None = None
+    # CF attributes (units / standard_name / cell_methods) declared on the template,
+    # stamped onto each written period so the store is CF-compliant on disk (#280).
+    cf_attrs = cf_attrs_from_template(dataset)
 
     async def _fetch(period_id: str) -> xr.Dataset:
         return await plugin.fetch_period(period_id, bbox, **params)
@@ -146,6 +150,7 @@ async def run_streaming_ingest(
             period_id, task = in_flight.popleft()
             ds = await task
             _strip_cf_encoding(ds, period_type, time_dim=spec.time_dim)
+            apply_cf_metadata(ds, cf_attrs)
             try:
                 spatial_shape = (int(ds.sizes[spec.y_dim]), int(ds.sizes[spec.x_dim]))
             except KeyError as exc:
