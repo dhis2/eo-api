@@ -990,6 +990,50 @@ def test_build_chap_csv_frame_renames_merged_cubes_with_explicit_labels() -> Non
     ]
 
 
+def test_process_registry_builds_with_full_server_impl_stack() -> None:
+    """Guard against the [server] curated dep list drifting from upstream (#288).
+
+    openeo-processes-dask eagerly imports its whole implementation stack (xvec, odc,
+    dask_geopandas, planetary_computer, pystac_client, stac_validator, …) at module load.
+    Importing it here fails if any of those are missing from the [server] extra, and
+    building the registry confirms the standard + backend processes are all present.
+    A new openeo-processes-dask release that adds an eager import we don't declare would
+    fail this test in CI — before it reaches an instance as a mid-job ModuleNotFoundError.
+    """
+    import importlib
+
+    # Triggers the eager import of the full implementation stack.
+    importlib.import_module("openeo_processes_dask.process_implementations")
+
+    from open_climate_service.openeo.execution import _build_process_registry
+
+    predefined = _build_process_registry()[("predefined", None)]
+    assert len(predefined) > 50  # the full standard process library loaded
+    expected = ("spi", "load_collection", "save_result", "ndvi", "reduce_dimension", "aggregate_temporal_period")
+    for process_id in expected:
+        assert process_id in predefined, f"expected process '{process_id}' missing from the registry"
+
+
+def test_registry_build_missing_server_dep_raises_actionable_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing [server] impl dep yields one clear, actionable message, not a deep
+    ModuleNotFoundError mid-job (#289)."""
+    import importlib
+
+    import open_climate_service.openeo.execution as ex
+
+    monkeypatch.setattr(ex, "_registry", None)  # bypass the singleton so the import runs
+    real_import = importlib.import_module
+
+    def fake_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "openeo_processes_dask.process_implementations":
+            raise ModuleNotFoundError("No module named 'xvec'", name="xvec")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(ex.importlib, "import_module", fake_import)
+    with pytest.raises(RuntimeError, match=r"missing server dependency 'xvec'"):
+        ex._build_process_registry()
+
+
 def test_merge_cubes_wrapper_preserves_named_dataarrays_on_cube_axis() -> None:
     from open_climate_service.openeo.execution import _build_process_registry
 

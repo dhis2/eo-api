@@ -128,10 +128,25 @@ def _build_process_registry() -> Any:
         return _registry
 
     from openeo_pg_parser_networkx.process_registry import Process, ProcessRegistry
-    from openeo_processes_dask.process_implementations.core import process as wrap_fn
 
-    impls_module = importlib.import_module("openeo_processes_dask.process_implementations")
-    specs_module = importlib.import_module("openeo_processes_dask.specs")
+    # openeo-processes-dask eagerly imports its whole implementation stack (xvec, odc,
+    # dask_geopandas, planetary_computer, …) at module load, so the open-climate-service
+    # [server] extra must provide all of it. If any piece is missing, surface one clear,
+    # actionable message instead of a deep ModuleNotFoundError mid-job (#289).
+    try:
+        from openeo_processes_dask.process_implementations.core import process as wrap_fn
+
+        impls_module = importlib.import_module("openeo_processes_dask.process_implementations")
+        specs_module = importlib.import_module("openeo_processes_dask.specs")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            f"Could not build the openEO process registry: missing server dependency '{exc.name}'. "
+            "Your environment is missing part of the open-climate-service [server] extra "
+            "(openeo-processes-dask eagerly imports its full implementation stack). "
+            "Re-sync the environment with `uv sync` (run `uv lock --upgrade-package open-climate-service` "
+            "first if you just upgraded). Don't `pip install` it by hand — uv sync prunes that. "
+            "See the instance guide's 'Upgrading and troubleshooting' section."
+        ) from exc
 
     registry = ProcessRegistry(wrap_funcs=[wrap_fn])
 
