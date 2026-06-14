@@ -158,6 +158,58 @@ def test_orchestrator_uses_store_state_as_resume_truth(monkeypatch: pytest.Monke
     assert cursor_saves[-1] == {"last_committed": "2026-01-03"}
 
 
+class _PlaceholderAttrsPlugin(_FakePlugin):
+    """Emits the kind of generic/placeholder CF attrs GRIB & unit-conversions leave behind."""
+
+    async def fetch_period(self, period_id: str, bbox: list[float], **params: Any) -> xr.Dataset:
+        ds = await super().fetch_period(period_id, bbox, **params)
+        ds["precip"].attrs.update({"units": "mm", "standard_name": "unknown"})
+        return ds
+
+
+def test_orchestrator_stamps_cf_attrs_from_template(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The template is authoritative: its CF fields overwrite placeholder source attrs (#280).
+
+    The source variable arrives with a dimensionally-generic ``units='mm'`` and a placeholder
+    ``standard_name='unknown'``; the template declares the rate ``mm/d`` and the real
+    standard name, which must win on disk so xclim-style unit checks pass.
+    """
+    store_path = tmp_path / "streaming-store.zarr"
+    repo = _FakeRepo(str(store_path))
+
+    monkeypatch.setattr(streaming_orchestrator, "open_or_create_repo", lambda path: repo)
+    monkeypatch.setattr(
+        streaming_orchestrator,
+        "read_committed_period_ids",
+        lambda path, period_type, time_dim="t": _read_committed_periods_from_zarr(path, period_type, time_dim=time_dim),
+    )
+    monkeypatch.setattr(streaming_orchestrator, "is_store_empty", lambda path: not path.exists())
+
+    run_streaming_ingest_sync(
+        plugin=_PlaceholderAttrsPlugin(),
+        params={},
+        dataset={
+            "units": "mm/d",
+            "standard_name": "lwe_precipitation_rate",
+            "cell_methods": "time: mean",
+        },
+        bbox=[0.0, 0.0, 1.0, 1.0],
+        start="2026-01-01",
+        end="2026-01-03",
+        store_path=store_path,
+        period_type="daily",
+    )
+
+    written = xr.open_zarr(store_path, consolidated=None)
+    try:
+        attrs = written["precip"].attrs
+        assert attrs.get("units") == "mm/d"  # template rate overrides source 'mm'
+        assert attrs.get("standard_name") == "lwe_precipitation_rate"  # overrides 'unknown'
+        assert attrs.get("cell_methods") == "time: mean"
+    finally:
+        written.close()
+
+
 def test_orchestrator_refuses_destructive_first_write_when_existing_store_is_not_empty(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

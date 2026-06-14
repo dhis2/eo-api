@@ -1,6 +1,7 @@
 - id: era5land_temperature_daily
   name: 2m temperature (ERA5-Land)
   short_name: 2m temperature
+  standard_name: air_temperature
   variable: t2m
   period_type: daily
   sync:
@@ -17,6 +18,7 @@
     params:
       variable: t2m
   units: degC
+  cell_methods: "time: mean"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/era5-land-daily
@@ -25,8 +27,9 @@
     range: [-30.0, 30.0]
 
 - id: era5land_precipitation_daily
-  name: Total precipitation (ERA5-Land)
-  short_name: Total precipitation
+  name: Precipitation rate (ERA5-Land)
+  short_name: Precipitation
+  standard_name: lwe_precipitation_rate
   variable: tp
   period_type: daily
   sync:
@@ -41,7 +44,11 @@
   ingestion:
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandPrecipDailyPlugin
     params: {}
-  units: mm
+  # Daily precipitation as a rate (mm/day): a daily total in mm equals the mean daily
+  # rate (the cell is one day), so this is a relabel, not a value change. Storing precip
+  # as a flux is what xclim drought indices (SPI/SPEI) consume directly.
+  units: mm/d
+  cell_methods: "time: mean"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land
@@ -53,6 +60,7 @@
 - id: era5land_temperature_monthly
   name: 2m temperature (ERA5-Land)
   short_name: 2m temperature
+  standard_name: air_temperature
   variable: t2m
   period_type: monthly
   sync:
@@ -69,6 +77,7 @@
     params:
       variable: t2m
   units: degC
+  cell_methods: "time: mean"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means
@@ -77,8 +86,9 @@
     range: [-30.0, 30.0]
 
 - id: era5land_precipitation_monthly
-  name: Total precipitation (ERA5-Land)
-  short_name: Total precipitation
+  name: Precipitation rate (ERA5-Land)
+  short_name: Precipitation
+  standard_name: lwe_precipitation_rate
   variable: tp
   period_type: monthly
   sync:
@@ -93,18 +103,23 @@
   ingestion:
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandMonthlyPrecipitationPlugin
     params: {}
-  units: mm
+  # Mean daily precipitation rate (a flux), not the calendar-month total: this is the
+  # dimensionally-correct input xclim drought indices (SPI/SPEI) consume directly.
+  # Monthly total is a trivial rate * days_in_month derivation downstream.
+  units: mm/d
+  cell_methods: "time: mean"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means
   display:
     colormap: blues
-    range: [0.0, 100.0]
+    range: [0.0, 20.0]
     nodata: 0.0
 
 - id: era5land_temperature_daily_from_hourly
   name: 2m temperature (ERA5-Land, local time)
   short_name: 2m temperature
+  standard_name: air_temperature
   variable: t2m
   period_type: daily
   sync:
@@ -120,6 +135,7 @@
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandTempDailyFromHourlyPlugin
     params: {}
   units: degC
+  cell_methods: "time: mean"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land
@@ -128,8 +144,9 @@
     range: [-30.0, 30.0]
 
 - id: era5land_precipitation_daily_from_hourly
-  name: Total precipitation (ERA5-Land, local time)
-  short_name: Total precipitation
+  name: Precipitation rate (ERA5-Land, local time)
+  short_name: Precipitation
+  standard_name: lwe_precipitation_rate
   variable: tp
   period_type: daily
   sync:
@@ -144,7 +161,9 @@
   ingestion:
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandPrecipDailyPlugin
     params: {}
-  units: mm
+  # Daily precipitation rate (mm/day) — see era5land_precipitation_daily.
+  units: mm/d
+  cell_methods: "time: mean"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land

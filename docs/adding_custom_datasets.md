@@ -134,11 +134,21 @@ extents:
     resolution: P1D              # ISO 8601 duration: PT1H, P1D, P1M, P1Y
 ```
 
-**Units and display**
+**CF metadata** — stamped onto the stored variable at ingest so the GeoZarr store is
+CF-compliant on disk and CF-aware tools (xclim climate indices, cf-xarray, QGIS) work
+without per-process glue. These fields take effect when the store is written, so changing
+them requires re-ingesting the dataset:
 
 | Field | Required | Description |
 | ----- | -------- | ----------- |
-| `units` | No | Physical units of the stored data (e.g. `mm`, `degC`, `m`) |
+| `units` | No | Physical units, as a **CF/udunits** string (e.g. `mm`, `mm/d`, `degC`, `kg m-2 s-1`). Validated at registration — a non-udunits value (e.g. `people`) is logged as a warning. Use `""` for a dimensionless quantity (e.g. a standardized index). For unit-aware processes (e.g. SPI) the unit must be *dimensionally* correct — a precipitation **rate** is `mm/d`, not bare `mm`. |
+| `standard_name` | No | CF [standard name](https://cfconventions.org/standard-names.html) (e.g. `air_temperature`, `lwe_thickness_of_precipitation_amount`). |
+| `cell_methods` | No | CF cell methods describing the temporal aggregation (e.g. `time: mean`, `time: sum`). |
+
+**Display**
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
 | `resolution` | No | Human-readable spatial resolution (e.g. `5 km x 5 km`) |
 | `display.colormap` | No | Colormap name for map rendering (e.g. `blues`, `rdbu_r`) |
 | `display.range` | No | `[min, max]` display range for the colormap |

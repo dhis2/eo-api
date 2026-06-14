@@ -19,7 +19,11 @@ from open_climate_service.data_manager.services.utils import get_time_dim, get_x
 from open_climate_service.data_registry.services import datasets as registry_datasets
 from open_climate_service.ingestions import services as ingestion_services
 from open_climate_service.ingestions.schemas import ArtifactFormat, ArtifactRecord
-from open_climate_service.shared.time import parse_period_string_to_datetime, resolve_iso_period_step
+from open_climate_service.shared.time import (
+    parse_period_string_to_datetime,
+    period_type_to_iso_step,
+    resolve_iso_period_step,
+)
 
 CATALOG_TITLE = "Open Climate Service"
 CATALOG_DESCRIPTION = "Published Open Climate Service GeoZarr datasets"
@@ -132,7 +136,13 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
     collection_payload["license"] = template.license
     _remove_helper_variables(collection_payload)
     _round_spatial_steps(collection_payload)
-    _override_time_step(collection_payload, resolve_iso_period_step(source_dataset))
+    # Prefer an explicit extents.temporal.resolution; fall back to the dataset's
+    # period_type so openEO save_result outputs (which omit the extents block) still
+    # get a temporal step — the map viewer needs it to build the time slider.
+    _override_time_step(
+        collection_payload,
+        resolve_iso_period_step(source_dataset) or period_type_to_iso_step(source_dataset.get("period_type")),
+    )
     _override_spatial_extent_from_artifact(collection_payload, artifact)
     _override_temporal_extent_from_artifact(collection_payload, artifact)
     _sanitize_variable_attrs(collection_payload)
@@ -381,11 +391,18 @@ def _build_cube_variables(ds: xr.Dataset) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for name in ds.data_vars:
         var = ds[name]
-        result[str(name)] = {
+        entry: dict[str, Any] = {
             "type": "data",
             "dimensions": [str(d) for d in var.dims],
             "unit": var.attrs.get("units"),
         }
+        # Surface the CF semantics we stamp onto the store so catalog clients can
+        # identify the quantity, not just its unit (#283).
+        for cf_key in ("standard_name", "cell_methods"):
+            value = var.attrs.get(cf_key)
+            if isinstance(value, str):
+                entry[cf_key] = value
+        result[str(name)] = entry
     return result
 
 
@@ -442,6 +459,13 @@ def _sanitize_variable_attrs(collection: dict[str, Any]) -> None:
         if isinstance(units, str):
             kept_attrs["units"] = units
             variable["unit"] = units
+        # Surface the CF semantics we stamp onto the store as top-level cube:variable
+        # fields (and keep them in attrs) so catalog clients see the quantity (#283).
+        for cf_key in ("standard_name", "cell_methods"):
+            value = attrs.get(cf_key)
+            if isinstance(value, str):
+                kept_attrs[cf_key] = value
+                variable[cf_key] = value
         variable["attrs"] = kept_attrs
 
 

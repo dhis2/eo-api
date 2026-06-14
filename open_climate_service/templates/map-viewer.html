@@ -278,12 +278,29 @@
       }
 
       function generateDateRange(start, end, step) {
-        const inc = parseDuration(step);
-        if (!inc) return [start];
-        const startMs = new Date(start).getTime();
-        const endMs = new Date(end).getTime();
-        if (isNaN(startMs) || isNaN(endMs)) return [start];
-        const count = Math.max(1, Math.floor((endMs - startMs) / inc) + 1);
+        const m = step.match(/^P(?:T(\d+)H|(\d+)D|(\d+)M|(\d+)Y)$/);
+        if (!m) return [start];
+        const sd = new Date(start);
+        const ed = new Date(end);
+        if (isNaN(sd.getTime()) || isNaN(ed.getTime())) return [start];
+        // Months and years must step by the calendar, not a fixed 30-/365-day
+        // approximation: the approximation drifts over multi-year ranges and
+        // overcounts steps, leaving the slider with more positions than the store
+        // has time slices (so the last position reads out of bounds and renders blank).
+        if (m[3]) {
+          const n = parseInt(m[3]);
+          const months =
+            (ed.getUTCFullYear() - sd.getUTCFullYear()) * 12 +
+            (ed.getUTCMonth() - sd.getUTCMonth());
+          return { lazy: true, start, calUnit: "M", n, count: Math.max(1, Math.floor(months / n) + 1) };
+        }
+        if (m[4]) {
+          const n = parseInt(m[4]);
+          const years = ed.getUTCFullYear() - sd.getUTCFullYear();
+          return { lazy: true, start, calUnit: "Y", n, count: Math.max(1, Math.floor(years / n) + 1) };
+        }
+        const inc = m[1] ? parseInt(m[1]) * 3_600_000 : parseInt(m[2]) * 86_400_000;
+        const count = Math.max(1, Math.floor((ed.getTime() - sd.getTime()) / inc) + 1);
         return { lazy: true, start, inc, count };
       }
 
@@ -297,20 +314,18 @@
 
       function timeStepAt(i) {
         if (Array.isArray(timeSteps)) return timeSteps[i];
-        return new Date(new Date(timeSteps.start).getTime() + i * timeSteps.inc)
-          .toISOString()
-          .slice(0, 10);
-      }
-
-      // Minimal ISO 8601 duration parser for common climate period types.
-      function parseDuration(iso) {
-        const m = iso.match(/^P(?:T(\d+)H|(\d+)D|(\d+)M|(\d+)Y)$/);
-        if (!m) return null;
-        if (m[1]) return parseInt(m[1]) * 3_600_000; // PT#H
-        if (m[2]) return parseInt(m[2]) * 86_400_000; // P#D
-        if (m[3]) return parseInt(m[3]) * 30 * 86_400_000; // P#M (approximation)
-        if (m[4]) return parseInt(m[4]) * 365 * 86_400_000; // P#Y (approximation)
-        return null;
+        const sd = new Date(timeSteps.start);
+        if (timeSteps.calUnit === "M") {
+          const d = new Date(sd);
+          d.setUTCMonth(d.getUTCMonth() + i * timeSteps.n);
+          return d.toISOString().slice(0, 10);
+        }
+        if (timeSteps.calUnit === "Y") {
+          const d = new Date(sd);
+          d.setUTCFullYear(d.getUTCFullYear() + i * timeSteps.n);
+          return d.toISOString().slice(0, 10);
+        }
+        return new Date(sd.getTime() + i * timeSteps.inc).toISOString().slice(0, 10);
       }
 
       const MAP_UNAVAILABLE_MESSAGE =

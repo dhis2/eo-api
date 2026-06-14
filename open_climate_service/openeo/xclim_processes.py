@@ -13,6 +13,43 @@ logger = logging.getLogger(__name__)
 _cache: list[Any] | None = None
 
 
+def call_with_ocs_time_dim(func: Any, *args: Any, **kwargs: Any) -> Any:
+    """Call an xclim function, mapping the OCS ``t`` dimension to/from ``time``.
+
+    Our GeoZarr stores name the temporal dimension ``t``, but xclim indicators and
+    indices require a dimension literally named ``time`` (they index ``da.time``
+    directly). This renames ``t`` -> ``time`` on every xarray argument on the way
+    in, and renames ``time`` -> ``t`` back on the result, so xclim works against our
+    cubes without the caller adding ``rename_dimension`` to every process graph.
+    """
+    import xarray as xr
+
+    renamed = False
+
+    def _to_time(value: Any) -> Any:
+        nonlocal renamed
+        if isinstance(value, (xr.DataArray, xr.Dataset)) and "t" in value.dims and "time" not in value.dims:
+            renamed = True
+            return value.rename({"t": "time"})
+        return value
+
+    args = tuple(_to_time(a) for a in args)
+    kwargs = {key: _to_time(value) for key, value in kwargs.items()}
+    result = func(*args, **kwargs)
+
+    def _to_t(value: Any) -> Any:
+        if isinstance(value, (xr.DataArray, xr.Dataset)) and "time" in value.dims and "t" not in value.dims:
+            return value.rename({"time": "t"})
+        return value
+
+    if not renamed:
+        return result
+    # Restore the OCS `t` name on the output(s). Some indicators return a tuple of arrays.
+    if isinstance(result, tuple):
+        return tuple(_to_t(item) for item in result)
+    return _to_t(result)
+
+
 def scan() -> list[Any]:
     """Return all xclim indicators as process callables (cached after first call)."""
     global _cache
@@ -96,7 +133,7 @@ def _make_callable(indicator: Any, meta: dict[str, Any]) -> Any:
     """Wrap an xclim indicator as a bare callable with process metadata attached."""
 
     def _call(**kwargs: Any) -> Any:
-        return indicator(**kwargs)
+        return call_with_ocs_time_dim(indicator, **kwargs)
 
     setattr(_call, _OCS_PROCESS_ATTR, meta)
     return _call
