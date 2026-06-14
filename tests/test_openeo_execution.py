@@ -1114,6 +1114,40 @@ def test_persist_result_writes_icechunk_when_dataset_id_in_options(
     assert publish_flag is True  # publish defaults to True when key is absent
 
 
+def test_persist_result_stamps_cf_attrs_from_template(
+    job_service: OpenEOJobService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CF attributes from the dataset template are persisted onto the managed store variable (#280)."""
+    from open_climate_service.data_accessor.services.accessor import open_icechunk_dataset
+
+    def _cf_template(dataset_id: str) -> dict[str, Any]:
+        return {
+            "id": dataset_id,
+            "units": "mm",
+            "standard_name": "lwe_thickness_of_precipitation_amount",
+            "cell_methods": "time: sum",
+        }
+
+    monkeypatch.setattr("open_climate_service.data_manager.services.downloader.DOWNLOAD_DIR", tmp_path)
+    monkeypatch.setattr("open_climate_service.data_registry.services.datasets.get_dataset", _cf_template)
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.services.register_artifact_record",
+        lambda record, publish: record,
+    )
+
+    envelope = SaveResultEnvelope(_small_dataset(), "Zarr", {"dataset_id": "cf_aggregate", "publish": False})
+    job_service._persist_result("job-cf", envelope)
+
+    written = open_icechunk_dataset(str(tmp_path / "cf_aggregate.icechunk"))
+    try:
+        attrs = written["precip"].attrs
+        assert attrs.get("units") == "mm"
+        assert attrs.get("standard_name") == "lwe_thickness_of_precipitation_amount"
+        assert attrs.get("cell_methods") == "time: sum"
+    finally:
+        written.close()
+
+
 def test_persist_result_does_not_publish_when_publish_false(
     job_service: OpenEOJobService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -4,9 +4,9 @@ Stamp CF attributes (``units``, ``standard_name``, ``cell_methods``) onto stored
 loaded variables from the dataset template, so CF-aware tools — xclim's climate indices,
 cf-xarray, QGIS, earthkit — work against our GeoZarr stores without per-process wrappers.
 
-The single source of truth is the dataset template; the same attributes are applied both
-when writing a store (so it is CF-compliant on disk) and as a backfill when loading
-already-ingested data.
+The single source of truth is the dataset template. Attributes are stamped only on the
+write paths (streaming ingest and managed publish) so the store is CF-compliant on disk;
+there is no read-time backfill — to make an existing store CF-compliant, re-ingest it.
 """
 
 from __future__ import annotations
@@ -97,7 +97,8 @@ def validate_units(units: str) -> str | None:
         return None
     try:
         from xclim.core.units import units2pint
-    except Exception:
+    except ImportError:
+        # xclim is an optional (server-only) dependency; skip validation when absent.
         return None
     try:
         units2pint(units)
