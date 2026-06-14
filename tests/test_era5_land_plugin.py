@@ -251,7 +251,7 @@ def test_era5_land_monthly_fetch_renames_coords_and_converts_temperature(
     np.testing.assert_allclose(ds["t2m"].values, [[[300.0 - 273.15]]], atol=1e-3)
 
 
-def test_era5_land_monthly_precipitation_converts_metres_to_mm(
+def test_era5_land_monthly_precipitation_converts_metres_to_mm_rate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plugin = ERA5LandMonthlyPrecipitationPlugin()
@@ -266,8 +266,10 @@ def test_era5_land_monthly_precipitation_converts_metres_to_mm(
     monkeypatch.setattr(ERA5LandMonthlyPlugin, "_fetch_sync", fake_parent_fetch)
     ds = asyncio.run(plugin.fetch_period("2024-01", [-1.0, 8.0, 31.0, 10.0]))
 
-    # 0.05 m/day × 1000 mm/m × 31 days (January 2024) = 1550 mm monthly total
-    np.testing.assert_allclose(ds["tp"].values, [[[1550.0]]], atol=1e-1)
+    # CDS gives the mean daily total (m/day). We store the mean daily *rate* in mm/day,
+    # NOT the calendar-month total: 0.05 m/day × 1000 mm/m = 50 mm/day. (A flux is the
+    # dimensionally-correct input for xclim indices; the monthly total is rate × days.)
+    np.testing.assert_allclose(ds["tp"].values, [[[50.0]]], atol=1e-1)
 
 
 def test_monthly_availability_cutoff_uses_cds_end_datetime() -> None:
