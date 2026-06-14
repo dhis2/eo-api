@@ -15,7 +15,11 @@ _ISO_DURATION_RE = re.compile(r"^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?
 _PERIOD_TYPE_ISO_STEP = {
     "hourly": "PT1H",
     "daily": "P1D",
+    # A week is exactly 7 days; "P7D" (not "P1W") so the map viewer's duration parser,
+    # which handles H/D/M/Y but not W, can build the slider.
+    "weekly": "P7D",
     "monthly": "P1M",
+    "quarterly": "P3M",
     "yearly": "P1Y",
 }
 

@@ -13,7 +13,9 @@ from open_climate_service.shared.time import (
     [
         ("hourly", "PT1H"),
         ("daily", "P1D"),
+        ("weekly", "P7D"),
         ("monthly", "P1M"),
+        ("quarterly", "P3M"),
         ("yearly", "P1Y"),
         ("climatology", None),
         (None, None),
