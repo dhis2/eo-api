@@ -139,8 +139,9 @@ def _build_process_registry() -> Any:
         impls_module = importlib.import_module("openeo_processes_dask.process_implementations")
         specs_module = importlib.import_module("openeo_processes_dask.specs")
     except ModuleNotFoundError as exc:
+        missing = exc.name or "an openeo-processes-dask dependency"
         raise RuntimeError(
-            f"Could not build the openEO process registry: missing server dependency '{exc.name}'. "
+            f"Could not build the openEO process registry: missing server dependency '{missing}'. "
             "Your environment is missing part of the open-climate-service [server] extra "
             "(openeo-processes-dask eagerly imports its full implementation stack). "
             "Re-sync the environment with `uv sync` (run `uv lock --upgrade-package open-climate-service` "
