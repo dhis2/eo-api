@@ -295,23 +295,22 @@ class ERA5LandMonthlyPlugin:
 
 
 class ERA5LandMonthlyPrecipitationPlugin(ERA5LandMonthlyPlugin):
-    """ERA5-Land monthly total precipitation plugin.
+    """ERA5-Land monthly precipitation plugin (mean daily rate, mm/day).
 
-    CDS returns the monthly mean of daily totals (m/day). Multiplying by the
-    number of days in the month converts this to the calendar-month total in mm,
-    which is the natural unit for DHIS2 and climate-health reporting.
+    CDS returns the monthly mean of daily totals (m/day). We convert m -> mm to
+    store the mean daily precipitation *rate* (mm/day) — the dimensionally-correct
+    precipitation flux that xclim's indices (SPI/SPEI, …) consume directly. We
+    deliberately do not pre-multiply by days-in-month: the calendar-month total is
+    a trivial ``rate * days_in_month`` derivation, while keeping the rate lets xclim
+    integrate over the exact period length itself.
     """
 
     def __init__(self, **_: Any) -> None:
         super().__init__(variable="tp")
 
     def _fetch_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
-        year = int(period_id[:4])
-        month = int(period_id[5:7])
-        _, days_in_month = calendar.monthrange(year, month)
         ds = super()._fetch_sync(period_id, bbox)
-        ds = metres_to_mm(ds, {"variable": self.variable})
-        return ds.assign(tp=ds["tp"] * days_in_month)
+        return metres_to_mm(ds, {"variable": self.variable})
 
 
 def _parse_monthly(period: str) -> datetime:

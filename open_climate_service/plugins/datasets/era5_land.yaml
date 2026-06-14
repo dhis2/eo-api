@@ -83,8 +83,8 @@
     range: [-30.0, 30.0]
 
 - id: era5land_precipitation_monthly
-  name: Total precipitation (ERA5-Land)
-  short_name: Total precipitation
+  name: Precipitation rate (ERA5-Land)
+  short_name: Precipitation
   variable: tp
   period_type: monthly
   sync:
@@ -99,15 +99,18 @@
   ingestion:
     plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandMonthlyPrecipitationPlugin
     params: {}
-  units: mm
-  standard_name: lwe_thickness_of_precipitation_amount
-  cell_methods: "time: sum"
+  # Mean daily precipitation rate (a flux), not the calendar-month total: this is the
+  # dimensionally-correct input xclim drought indices (SPI/SPEI) consume directly.
+  # Monthly total is a trivial rate * days_in_month derivation downstream.
+  units: mm/d
+  standard_name: lwe_precipitation_rate
+  cell_methods: "time: mean"
   resolution: 9 km x 9 km
   source: ERA5-Land Reanalysis
   source_url: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means
   display:
     colormap: blues
-    range: [0.0, 100.0]
+    range: [0.0, 20.0]
     nodata: 0.0
 
 - id: era5land_temperature_daily_from_hourly
