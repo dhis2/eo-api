@@ -12,12 +12,17 @@ from the web interface.
 
 ## Prerequisites
 
-- Python 3.13 or higher
+- Python 3.12 or higher
 - [uv](https://docs.astral.sh/uv/) for dependency management
 - Git
 - Make (`make` — available by default on macOS and most Linux distributions; on Windows use [WSL](https://learn.microsoft.com/en-us/windows/wsl/) or run the commands in the Makefile directly)
 
 ## Step 1: Clone and install
+
+This quick start runs from a clone of the core repository, which is best for evaluating
+the service or developing against it. To run an instance from the released PyPI package
+instead — in its own repository, without cloning this one — follow the
+[instance guide](instance_guide.md).
 
 ```bash
 git clone https://github.com/dhis2/open-climate-service.git
