@@ -2031,6 +2031,7 @@ dependencies = [
 
 [package.optional-dependencies]
 server = [
+    { name = "dask-geopandas" },
     { name = "dhis2eo" },
     { name = "fastapi" },
     { name = "geojson-pydantic" },
@@ -2038,18 +2039,24 @@ server = [
     { name = "icechunk" },
     { name = "jinja2" },
     { name = "metpy" },
+    { name = "odc-geo" },
+    { name = "odc-stac" },
     { name = "openeo-pg-parser-networkx" },
-    { name = "openeo-processes-dask-slim", extra = ["implementations"] },
+    { name = "openeo-processes-dask" },
+    { name = "planetary-computer" },
     { name = "portalocker" },
+    { name = "pystac-client" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
     { name = "rioxarray" },
+    { name = "stac-validator" },
     { name = "starlette" },
     { name = "topozarr" },
     { name = "uvicorn" },
     { name = "xarray" },
     { name = "xclim" },
     { name = "xstac" },
+    { name = "xvec" },
     { name = "zarr" },
 ]
 xarray = [
@@ -2074,6 +2081,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", marker = "extra == 'xarray'", specifier = ">=3.10" },
+    { name = "dask-geopandas", marker = "extra == 'server'", specifier = ">=0.4" },
     { name = "dhis2eo", marker = "extra == 'server'", specifier = ">=1.2.1" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.100.0" },
     { name = "fsspec", marker = "extra == 'xarray'", specifier = ">=2024.6.0" },
@@ -2083,13 +2091,18 @@ requires-dist = [
     { name = "icechunk", marker = "extra == 'server'", specifier = ">=2.0,<3" },
     { name = "jinja2", marker = "extra == 'server'", specifier = ">=3.1" },
     { name = "metpy", marker = "extra == 'server'", specifier = ">=1.7,<2" },
+    { name = "odc-geo", marker = "extra == 'server'", specifier = ">=0.4.1" },
+    { name = "odc-stac", marker = "extra == 'server'", specifier = ">=0.3.9" },
     { name = "openeo-pg-parser-networkx", marker = "extra == 'server'", specifier = ">=2026.3.3" },
-    { name = "openeo-processes-dask-slim", extras = ["implementations"], marker = "extra == 'server'", git = "https://github.com/dhis2/openeo-processes-dask-slim?branch=main" },
+    { name = "openeo-processes-dask", marker = "extra == 'server'", specifier = ">=2026.6.3" },
+    { name = "planetary-computer", marker = "extra == 'server'", specifier = ">=0.5.1" },
     { name = "portalocker", marker = "extra == 'server'", specifier = ">=3.2.0" },
     { name = "pystac", specifier = ">=1.10,<2" },
+    { name = "pystac-client", marker = "extra == 'server'", specifier = ">=0.6.1" },
     { name = "python-dotenv", marker = "extra == 'server'", specifier = ">=1.0.1" },
     { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.29" },
     { name = "rioxarray", marker = "extra == 'server'", specifier = ">=0.17" },
+    { name = "stac-validator", marker = "extra == 'server'", specifier = ">=3.3.1" },
     { name = "starlette", marker = "extra == 'server'", specifier = ">=0.27.0" },
     { name = "topozarr", marker = "extra == 'server'", specifier = ">=0.0.91,<0.1" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.41.0" },
@@ -2097,6 +2110,7 @@ requires-dist = [
     { name = "xarray", marker = "extra == 'xarray'", specifier = ">=2025.12.0" },
     { name = "xclim", marker = "extra == 'server'", specifier = ">=0.61.1" },
     { name = "xstac", marker = "extra == 'server'", specifier = ">=1.0,<2" },
+    { name = "xvec", marker = "extra == 'server'", specifier = ">=0.3" },
     { name = "zarr", marker = "extra == 'server'", specifier = ">=3.1.6,<4" },
     { name = "zarr", marker = "extra == 'xarray'", specifier = ">=3.1.6,<4" },
 ]
@@ -2156,9 +2170,9 @@ wheels = [
 ]
 
 [[package]]
-name = "openeo-processes-dask-slim"
-version = "2026.4.4"
-source = { git = "https://github.com/dhis2/openeo-processes-dask-slim?branch=main#2e3a9aed79e621f7d2f203b4c363eb42036a506e" }
+name = "openeo-processes-dask"
+version = "2026.6.3"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "geoparquet" },
     { name = "numpy" },
@@ -2168,21 +2182,9 @@ dependencies = [
     { name = "scipy" },
     { name = "zarr" },
 ]
-
-[package.optional-dependencies]
-implementations = [
-    { name = "dask" },
-    { name = "dask-geopandas" },
-    { name = "geopandas" },
-    { name = "joblib" },
-    { name = "odc-geo" },
-    { name = "odc-stac" },
-    { name = "openeo-pg-parser-networkx" },
-    { name = "planetary-computer" },
-    { name = "pystac-client" },
-    { name = "stac-validator" },
-    { name = "xarray" },
-    { name = "xvec" },
+sdist = { url = "https://files.pythonhosted.org/packages/e2/1b/d1c61bc91cef67cd97ecf66e68ad6e45adf2c1481f35770a6f510d6efbe8/openeo_processes_dask-2026.6.3.tar.gz", hash = "sha256:d5d29ab4c6c96f5f158554c85bbdf529d53592e6c5395cc2c4ac2165cb0e4972", size = 164000, upload-time = "2026-06-12T07:41:46.111Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ed/b4/20769799e50a5cc61f0f93517cae7a89274220ba99395b0d26027fe7a184/openeo_processes_dask-2026.6.3-py3-none-any.whl", hash = "sha256:f80e9b3b28ba1744c85e3d95ee0de777fa14f9dc23722cbae973a3e8d2ba8426", size = 291294, upload-time = "2026-06-12T07:41:47.577Z" },
 ]
 
 [[package]]

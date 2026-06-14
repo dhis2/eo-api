@@ -29,14 +29,14 @@ _registry: Any = None  # lazy singleton
 class _DatasetOpenEOAccessor:  # pyright: ignore[reportUnusedClass]
     """Mirrors the DataArray openeo accessor for xr.Dataset.
 
-    openeo-processes-dask-slim only registers the accessor for DataArray.
+    openeo-processes-dask only registers the accessor for DataArray.
     Several standard processes (e.g. rename_labels) call data.openeo.temporal_dims
     on the result of aggregate_spatial which returns a Dataset, so we register a
     minimal compatible accessor here.
     """
 
     def __init__(self, ds: xr.Dataset) -> None:
-        from openeo_processes_dask_slim.process_implementations.cubes._xr_interop import (
+        from openeo_processes_dask.process_implementations.cubes._xr_interop import (
             BANDS_GUESSES,
             TEMPORAL_GUESSES,
             X_GUESSES,
@@ -128,10 +128,10 @@ def _build_process_registry() -> Any:
         return _registry
 
     from openeo_pg_parser_networkx.process_registry import Process, ProcessRegistry
-    from openeo_processes_dask_slim.process_implementations.core import process as wrap_fn
+    from openeo_processes_dask.process_implementations.core import process as wrap_fn
 
-    impls_module = importlib.import_module("openeo_processes_dask_slim.process_implementations")
-    specs_module = importlib.import_module("openeo_processes_dask_slim.specs")
+    impls_module = importlib.import_module("openeo_processes_dask.process_implementations")
+    specs_module = importlib.import_module("openeo_processes_dask.specs")
 
     registry = ProcessRegistry(wrap_funcs=[wrap_fn])
 
