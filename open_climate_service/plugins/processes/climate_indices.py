@@ -77,6 +77,14 @@ def spi(
         cal_start=cast(Any, cal_start),
         cal_end=cast(Any, cal_end),
     )
+    # xclim attaches gamma-fit diagnostics (prob_of_zero, number_of_zeros,
+    # number_of_notnull) as non-dimension coordinates. They are fit internals, not
+    # publishable layers — drop them so the store and STAC cube:variables expose only
+    # the SPI field (georeferencing coords like spatial_ref are dimension/known coords
+    # and are left untouched).
+    diagnostics = [c for c in ("prob_of_zero", "number_of_zeros", "number_of_notnull") if c in result.coords]
+    if diagnostics:
+        result = result.drop_vars(diagnostics)
     # xclim returns float64; downcast to float32. SPI is a small standardized index
     # (~±3) so float32 is ample precision, and it keeps the published store renderable
     # by WebGL map clients (carbonplan ZarrLayer uploads to float32 textures).

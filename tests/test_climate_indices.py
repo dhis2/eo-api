@@ -73,6 +73,17 @@ def test_spi1_output_length_matches_monthly_resampling(daily_precip: xr.DataArra
     assert result.sizes["time"] == 60
 
 
+def test_spi_drops_xclim_fit_diagnostic_coords(daily_precip: xr.DataArray) -> None:
+    """xclim attaches gamma-fit diagnostics as non-dim coords; we drop them so the
+    published store / STAC cube:variables expose only the SPI field, while keeping
+    georeferencing coords like spatial_ref."""
+    cube = daily_precip.assign_coords(spatial_ref=0)
+    result = spi(cube, window=3)
+    assert not {"prob_of_zero", "number_of_zeros", "number_of_notnull"} & set(result.coords)
+    assert "spatial_ref" in result.coords
+    assert result.dtype == "float32"
+
+
 def test_spi_accepts_ocs_t_dimension_and_returns_t(daily_precip: xr.DataArray) -> None:
     """OCS stores name the temporal dim 't'; xclim needs 'time'. The wrapper renames
     on-the-fly and restores 't' on the output, so graphs need no rename_dimension."""
