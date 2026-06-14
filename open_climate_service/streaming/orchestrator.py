@@ -129,6 +129,10 @@ async def run_streaming_ingest(
     expected_spatial_shape: tuple[int, int] | None = None
     # CF attributes (units / standard_name / cell_methods) declared on the template,
     # stamped onto each written period so the store is CF-compliant on disk (#280).
+    # The template is authoritative for the fields it declares, so we overwrite any
+    # generic or placeholder value the source/transform left behind (e.g. GRIB's
+    # standard_name="unknown", or a unit conversion's dimensionally-generic "mm" for
+    # what the template declares as a rate "mm/d"). Fields the template omits are kept.
     cf_attrs = cf_attrs_from_template(dataset)
 
     async def _fetch(period_id: str) -> xr.Dataset:
@@ -150,7 +154,7 @@ async def run_streaming_ingest(
             period_id, task = in_flight.popleft()
             ds = await task
             _strip_cf_encoding(ds, period_type, time_dim=spec.time_dim)
-            apply_cf_metadata(ds, cf_attrs)
+            apply_cf_metadata(ds, cf_attrs, overwrite=True)
             try:
                 spatial_shape = (int(ds.sizes[spec.y_dim]), int(ds.sizes[spec.x_dim]))
             except KeyError as exc:

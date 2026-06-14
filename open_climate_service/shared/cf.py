@@ -59,9 +59,13 @@ def apply_cf_metadata(
 ) -> "xr.Dataset | xr.DataArray":
     """Set CF attributes on the target variable(s) in place and return ``obj``.
 
-    Existing attributes are preserved unless ``overwrite=True`` (so metadata already on
-    the data — e.g. from the source — wins over the template). For a ``Dataset``, applies
-    to ``variable`` when given and present, otherwise to all data variables.
+    With ``overwrite=False`` existing attributes are preserved (the data wins). Ingest and
+    managed-publish stamp with ``overwrite=True`` because the dataset template is the
+    authoritative source for the CF fields it declares: an explicit template value replaces
+    any generic or placeholder value a source/transform left on the variable (e.g. GRIB's
+    ``standard_name="unknown"`` or a unit conversion's dimensionally-generic ``"mm"`` where
+    the template declares the rate ``"mm/d"``). Fields the template omits are untouched.
+    For a ``Dataset``, applies to ``variable`` when given and present, else all data vars.
     """
     import xarray as xr
 

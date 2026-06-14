@@ -158,8 +158,22 @@ def test_orchestrator_uses_store_state_as_resume_truth(monkeypatch: pytest.Monke
     assert cursor_saves[-1] == {"last_committed": "2026-01-03"}
 
 
+class _PlaceholderAttrsPlugin(_FakePlugin):
+    """Emits the kind of generic/placeholder CF attrs GRIB & unit-conversions leave behind."""
+
+    async def fetch_period(self, period_id: str, bbox: list[float], **params: Any) -> xr.Dataset:
+        ds = await super().fetch_period(period_id, bbox, **params)
+        ds["precip"].attrs.update({"units": "mm", "standard_name": "unknown"})
+        return ds
+
+
 def test_orchestrator_stamps_cf_attrs_from_template(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """CF attributes declared on the template are persisted onto the stored variable (#280)."""
+    """The template is authoritative: its CF fields overwrite placeholder source attrs (#280).
+
+    The source variable arrives with a dimensionally-generic ``units='mm'`` and a placeholder
+    ``standard_name='unknown'``; the template declares the rate ``mm/d`` and the real
+    standard name, which must win on disk so xclim-style unit checks pass.
+    """
     store_path = tmp_path / "streaming-store.zarr"
     repo = _FakeRepo(str(store_path))
 
@@ -172,12 +186,12 @@ def test_orchestrator_stamps_cf_attrs_from_template(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(streaming_orchestrator, "is_store_empty", lambda path: not path.exists())
 
     run_streaming_ingest_sync(
-        plugin=_FakePlugin(),
+        plugin=_PlaceholderAttrsPlugin(),
         params={},
         dataset={
-            "units": "mm",
-            "standard_name": "lwe_thickness_of_precipitation_amount",
-            "cell_methods": "time: sum",
+            "units": "mm/d",
+            "standard_name": "lwe_precipitation_rate",
+            "cell_methods": "time: mean",
         },
         bbox=[0.0, 0.0, 1.0, 1.0],
         start="2026-01-01",
@@ -189,9 +203,9 @@ def test_orchestrator_stamps_cf_attrs_from_template(monkeypatch: pytest.MonkeyPa
     written = xr.open_zarr(store_path, consolidated=None)
     try:
         attrs = written["precip"].attrs
-        assert attrs.get("units") == "mm"
-        assert attrs.get("standard_name") == "lwe_thickness_of_precipitation_amount"
-        assert attrs.get("cell_methods") == "time: sum"
+        assert attrs.get("units") == "mm/d"  # template rate overrides source 'mm'
+        assert attrs.get("standard_name") == "lwe_precipitation_rate"  # overrides 'unknown'
+        assert attrs.get("cell_methods") == "time: mean"
     finally:
         written.close()
 
