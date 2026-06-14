@@ -12,6 +12,25 @@ logger = logging.getLogger(__name__)
 
 _ISO_DURATION_RE = re.compile(r"^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$")
 
+_PERIOD_TYPE_ISO_STEP = {
+    "hourly": "PT1H",
+    "daily": "P1D",
+    "monthly": "P1M",
+    "yearly": "P1Y",
+}
+
+
+def period_type_to_iso_step(period_type: Any) -> str | None:
+    """Map a dataset ``period_type`` to its ISO 8601 step, or None if not a regular cadence.
+
+    Used as a fallback for the temporal cube dimension's ``step`` when a template does
+    not declare ``extents.temporal.resolution`` (e.g. openEO ``save_result`` outputs).
+    Without a step the map viewer cannot build a time slider.
+    """
+    if not isinstance(period_type, str):
+        return None
+    return _PERIOD_TYPE_ISO_STEP.get(period_type)
+
 
 def resolve_iso_period_step(dataset: dict[str, Any]) -> str | None:
     """Return the ISO 8601 duration step from ``extents.temporal.resolution``.

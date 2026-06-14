@@ -4,7 +4,23 @@ from open_climate_service.shared.time import (
     datetime_to_period_string,
     normalize_period_string,
     parse_period_string_to_datetime,
+    period_type_to_iso_step,
 )
+
+
+@pytest.mark.parametrize(
+    ("period_type", "expected"),
+    [
+        ("hourly", "PT1H"),
+        ("daily", "P1D"),
+        ("monthly", "P1M"),
+        ("yearly", "P1Y"),
+        ("climatology", None),
+        (None, None),
+    ],
+)
+def test_period_type_to_iso_step(period_type: object, expected: str | None) -> None:
+    assert period_type_to_iso_step(period_type) == expected
 
 
 def test_normalize_period_string_raises_targeted_monthly_error() -> None:
