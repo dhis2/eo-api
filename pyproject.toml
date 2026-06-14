@@ -10,7 +10,10 @@ module-name = "open_climate_service"
 override-dependencies = [
     # openeo-pg-parser-networkx requires geojson-pydantic<2.0.0; our project uses >=2.1.0 which is compatible at runtime
     "geojson-pydantic>=2.1.0",
-    # openeo-processes-dask-slim has stale constraints; all safe to override (library doesn't use these directly)
+    # openeo-processes-dask pins zarr<=2.18.7 as an unconditional core dep
+    # (Open-EO/openeo-processes-dask#376). The cap is vestigial — zarr is only reached
+    # through xarray/odc — so we override it to run on a zarr v3 / icechunk backend.
+    # The remaining overrides relax other stale upstream lower bounds; safe at runtime.
     "zarr>=3.1.6",
     "pyarrow>=19.0",
     "xarray>=2025.12.0",
@@ -22,12 +25,6 @@ override-dependencies = [
     "rioxarray>=0.17",
     "pystac>=1.10",
 ]
-
-[tool.uv.sources]
-# The dhis2 fork relaxes the upstream <3.13 requires-python cap and drops the
-# rqadeforestation dependency (no working ARM64/macOS native binary). Dev and CI
-# resolve to it; the published wheel still depends on the plain PyPI package.
-openeo-processes-dask-slim = { git = "https://github.com/dhis2/openeo-processes-dask-slim", branch = "main" }
 
 [project]
 name = "open-climate-service"
@@ -82,7 +79,22 @@ server = [
     "portalocker>=3.2.0",
     "dhis2eo>=1.2.1",
     "openeo-pg-parser-networkx>=2026.3.3",
-    "openeo-processes-dask-slim[implementations]",
+    # We depend on the base package and hand-pick the implementation deps rather than
+    # using the [implementations] extra. The extra pulls the `gdal` Python bindings,
+    # which are never imported by the library yet fail to build unless the system
+    # libgdal exactly matches (the macOS/ARM64 dependency hell the old fork avoided).
+    # This list mirrors the [implementations] extra minus gdal and the try/except-guarded
+    # ml (xgboost) and experimental (rqadeforestation) process groups, which we don't use.
+    # If a future release adds a new core import, the registry will fail fast at startup —
+    # add the dep here. See Open-EO/openeo-processes-dask CI cap on gdal<3.13.1.
+    "openeo-processes-dask>=2026.6.3",
+    "dask-geopandas>=0.4",
+    "odc-geo>=0.4.1",
+    "odc-stac>=0.3.9",
+    "planetary-computer>=0.5.1",
+    "pystac-client>=0.6.1",
+    "stac-validator>=3.3.1",
+    "xvec>=0.3",
     "python-multipart>=0.0.29",
     "xclim>=0.61.1",
 ]
@@ -138,7 +150,7 @@ module = "tests.*"
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-module = ["rasterio.*", "pygeofilter.*", "requests.*", "geopandas.*", "earthkit.*", "metpy.*", "matplotlib.*", "yaml", "xproj", "topozarr.*", "geozarr_toolkit", "xstac", "openeo_pg_parser_networkx", "openeo_pg_parser_networkx.*", "openeo_processes_dask_slim", "openeo_processes_dask_slim.*", "dask_geopandas", "dask_geopandas.*", "xclim", "xclim.*"]
+module = ["rasterio.*", "pygeofilter.*", "requests.*", "geopandas.*", "earthkit.*", "metpy.*", "matplotlib.*", "yaml", "xproj", "topozarr.*", "geozarr_toolkit", "xstac", "openeo_pg_parser_networkx", "openeo_pg_parser_networkx.*", "openeo_processes_dask", "openeo_processes_dask.*", "dask_geopandas", "dask_geopandas.*", "xclim", "xclim.*"]
 ignore_missing_imports = true
 
 [tool.pyright]
