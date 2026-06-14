@@ -196,23 +196,47 @@ See [Extensibility](extensibility.md) for the three plugin types, and [Adding cu
 
 ---
 
-## Keeping open-climate-service up to date
+## Upgrading and troubleshooting
 
-To pull the latest changes from the `main` branch:
+### Upgrading
+
+To move to a newer release, bump the pin in `pyproject.toml` (e.g. `open-climate-service[server]==0.2.0`), then:
 
 ```bash
 uv lock --upgrade-package open-climate-service
 uv sync
 ```
 
-Commit the updated `uv.lock`. Everyone working with this repository will get the same updated version after running `uv sync`.
+Commit the updated `uv.lock` so everyone gets the same versions.
 
-To pin to a specific commit for a more controlled upgrade:
+> **`uv sync` alone does not upgrade.** It only makes the environment match the lockfile. To actually move to a newer version you must re-lock first (`uv lock --upgrade-package open-climate-service`) — this is true both for a pinned release and for a git source.
+
+If you track the latest unreleased code via a `[tool.uv.sources]` git entry, `uv lock --upgrade-package open-climate-service` re-resolves to the current branch head. To pin to a specific commit instead:
 
 ```toml
 [tool.uv.sources]
 open-climate-service = { git = "https://github.com/dhis2/open-climate-service.git", rev = "abc1234" }
 ```
+
+Pinning to a released version (`==X.Y.Z`) is recommended over tracking `main`: a release is reproducible, whereas `main`'s dependency tree shifts over time and can change under you between syncs.
+
+### Troubleshooting
+
+- **Always run inside the synced environment** — use `make run` or `uv run uvicorn …`, never a bare `uvicorn`/`python`. If a stray virtual environment is activated (`echo $VIRTUAL_ENV`), deactivate it; uv warns when `VIRTUAL_ENV` doesn't match the project's `.venv`.
+
+- **Never `pip install` into the venv.** `uv sync` makes the environment *exactly* match the lockfile and removes anything else — so hand-installed packages disappear on the next sync, and a missing package "comes back" after every upgrade. If something is genuinely needed, add it to `[project] dependencies` (or the right extra/group) and re-lock.
+
+- **`ModuleNotFoundError` for `xvec`, `odc`, `dask_geopandas`, `planetary_computer`, `pystac_client`, `stac_validator`, … when running a job** means the `[server]` extra is not fully installed. `openeo-processes-dask` eagerly imports its whole implementation stack, so all of these must be present. Don't add them one by one — the `[server]` extra is the complete, maintained set. Ensure your dependency is `open-climate-service[server]` (with the extra), then:
+  ```bash
+  uv lock --upgrade-package open-climate-service
+  uv sync
+  ```
+  Verify the stack is complete:
+  ```bash
+  uv run python -c "import xvec, odc.geo, dask_geopandas, planetary_computer, pystac_client, stac_validator; print('ok')"
+  ```
+
+- **`pip install open-climate-service[server]` does not work** — the `[server]` extra needs dependency overrides (for upstream version caps) that `uv` applies but `pip` cannot. Install the server stack with **uv** (this guide) or **Docker**. The base client and `[xarray]` extras install fine with `pip`.
 
 ---
 
