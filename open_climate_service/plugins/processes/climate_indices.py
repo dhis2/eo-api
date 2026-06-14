@@ -57,15 +57,23 @@ def spi(
     fitted to the calibration period. Values below -1 indicate drought conditions;
     values above +1 indicate wet conditions.
     """
-    # Delegate to xclim unchanged — the custom process exists only to give SPI a
-    # richer description. call_with_ocs_time_dim maps our ``t`` dimension to the
-    # ``time`` dimension xclim requires (and back), the one behaviour every xclim
-    # process needs. DateStr is NewType(str) in xclim — cast to satisfy pyright.
+    # Delegate to xclim — the custom process exists to give SPI a richer description,
+    # and to pin a robust fitting configuration. call_with_ocs_time_dim maps our ``t``
+    # dimension to the ``time`` dimension xclim requires (and back).
+    #
+    # We fit a two-parameter gamma (location fixed at 0 via fitkwargs) with the APP
+    # (L-moments) method. This is the standard SPI setup and, unlike xclim's default
+    # maximum-likelihood fit, does not raise FitError on real precipitation that has a
+    # pronounced dry season (e.g. near-zero winter months), where ML optimization
+    # diverges. DateStr is NewType(str) in xclim — cast to satisfy pyright.
     return call_with_ocs_time_dim(  # type: ignore[no-any-return]
         xclim.indices.standardized_precipitation_index,
         pr,
         freq=freq,
         window=window,
+        dist="gamma",
+        method="APP",
+        fitkwargs={"floc": 0},
         cal_start=cast(Any, cal_start),
         cal_end=cast(Any, cal_end),
     )
