@@ -391,11 +391,18 @@ def _build_cube_variables(ds: xr.Dataset) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for name in ds.data_vars:
         var = ds[name]
-        result[str(name)] = {
+        entry: dict[str, Any] = {
             "type": "data",
             "dimensions": [str(d) for d in var.dims],
             "unit": var.attrs.get("units"),
         }
+        # Surface the CF semantics we stamp onto the store so catalog clients can
+        # identify the quantity, not just its unit (#283).
+        for cf_key in ("standard_name", "cell_methods"):
+            value = var.attrs.get(cf_key)
+            if isinstance(value, str):
+                entry[cf_key] = value
+        result[str(name)] = entry
     return result
 
 
@@ -452,6 +459,13 @@ def _sanitize_variable_attrs(collection: dict[str, Any]) -> None:
         if isinstance(units, str):
             kept_attrs["units"] = units
             variable["unit"] = units
+        # Surface the CF semantics we stamp onto the store as top-level cube:variable
+        # fields (and keep them in attrs) so catalog clients see the quantity (#283).
+        for cf_key in ("standard_name", "cell_methods"):
+            value = attrs.get(cf_key)
+            if isinstance(value, str):
+                kept_attrs[cf_key] = value
+                variable[cf_key] = value
         variable["attrs"] = kept_attrs
 
 

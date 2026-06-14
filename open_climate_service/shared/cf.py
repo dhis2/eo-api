@@ -1,8 +1,8 @@
 """CF Conventions metadata helpers (issue #280).
 
-Stamp CF attributes (``units``, ``standard_name``, ``cell_methods``) onto stored and
-loaded variables from the dataset template, so CF-aware tools — xclim's climate indices,
-cf-xarray, QGIS, earthkit — work against our GeoZarr stores without per-process wrappers.
+Stamp CF attributes (``units``, ``standard_name``, ``cell_methods``) onto stored variables
+from the dataset template, so CF-aware tools — xclim's climate indices, cf-xarray, QGIS,
+earthkit — work against our GeoZarr stores without per-process wrappers.
 
 The single source of truth is the dataset template. Attributes are stamped only on the
 write paths (streaming ingest and managed publish) so the store is CF-compliant on disk;

@@ -197,6 +197,8 @@ def test_collection_uses_xstac_and_adds_expected_fields(client: TestClient, monk
                     "attrs": {
                         "long_name": "Precipitation",
                         "units": "mm/day",
+                        "standard_name": "lwe_precipitation_rate",
+                        "cell_methods": "time: mean",
                         "TIFFTAG_SOFTWARE": "IDL 9.0.0",
                     },
                 },
@@ -225,9 +227,14 @@ def test_collection_uses_xstac_and_adds_expected_fields(client: TestClient, monk
     assert payload["cube:dimensions"]["t"]["extent"] == ["2026-01-01T00:00:00Z", "2026-01-10T00:00:00Z"]
     assert payload["cube:dimensions"]["t"]["step"] == "P1D"
     assert payload["cube:variables"]["precip"]["unit"] == "mm/day"
+    # CF semantics surfaced as top-level cube:variable fields (#283)
+    assert payload["cube:variables"]["precip"]["standard_name"] == "lwe_precipitation_rate"
+    assert payload["cube:variables"]["precip"]["cell_methods"] == "time: mean"
     assert payload["cube:variables"]["precip"]["attrs"] == {
         "long_name": "Precipitation",
         "units": "mm/day",
+        "standard_name": "lwe_precipitation_rate",
+        "cell_methods": "time: mean",
     }
     assert "https://stac-extensions.github.io/projection/v2.0.0/schema.json" in payload["stac_extensions"]
 

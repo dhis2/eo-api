@@ -36,9 +36,18 @@ def call_with_ocs_time_dim(func: Any, *args: Any, **kwargs: Any) -> Any:
     args = tuple(_to_time(a) for a in args)
     kwargs = {key: _to_time(value) for key, value in kwargs.items()}
     result = func(*args, **kwargs)
-    if renamed and isinstance(result, (xr.DataArray, xr.Dataset)) and "time" in result.dims and "t" not in result.dims:
-        result = result.rename({"time": "t"})
-    return result
+
+    def _to_t(value: Any) -> Any:
+        if isinstance(value, (xr.DataArray, xr.Dataset)) and "time" in value.dims and "t" not in value.dims:
+            return value.rename({"time": "t"})
+        return value
+
+    if not renamed:
+        return result
+    # Restore the OCS `t` name on the output(s). Some indicators return a tuple of arrays.
+    if isinstance(result, tuple):
+        return tuple(_to_t(item) for item in result)
+    return _to_t(result)
 
 
 def scan() -> list[Any]:
