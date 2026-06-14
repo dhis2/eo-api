@@ -12,6 +12,7 @@ import xclim.indicators.atmos as xclim_atmos
 import xclim.indices
 from xclim.core.indicator import InputKind
 
+from open_climate_service.openeo.xclim_processes import call_with_ocs_time_dim
 from open_climate_service.process import process
 
 _VARIABLE_SCHEMA: dict[str, Any] = {"type": "object", "subtype": "datacube"}
@@ -56,8 +57,12 @@ def spi(
     fitted to the calibration period. Values below -1 indicate drought conditions;
     values above +1 indicate wet conditions.
     """
-    # DateStr is NewType(str) in xclim — cast to satisfy pyright without importing private types
-    return xclim.indices.standardized_precipitation_index(  # type: ignore[no-any-return]
+    # Delegate to xclim unchanged — the custom process exists only to give SPI a
+    # richer description. call_with_ocs_time_dim maps our ``t`` dimension to the
+    # ``time`` dimension xclim requires (and back), the one behaviour every xclim
+    # process needs. DateStr is NewType(str) in xclim — cast to satisfy pyright.
+    return call_with_ocs_time_dim(  # type: ignore[no-any-return]
+        xclim.indices.standardized_precipitation_index,
         pr,
         freq=freq,
         window=window,

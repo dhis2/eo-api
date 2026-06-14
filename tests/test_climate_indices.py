@@ -73,6 +73,16 @@ def test_spi1_output_length_matches_monthly_resampling(daily_precip: xr.DataArra
     assert result.sizes["time"] == 60
 
 
+def test_spi_accepts_ocs_t_dimension_and_returns_t(daily_precip: xr.DataArray) -> None:
+    """OCS stores name the temporal dim 't'; xclim needs 'time'. The wrapper renames
+    on-the-fly and restores 't' on the output, so graphs need no rename_dimension."""
+    cube_t = daily_precip.rename({"time": "t"})
+    result = spi(cube_t, window=1)
+    assert isinstance(result, xr.DataArray)
+    assert "t" in result.dims and "time" not in result.dims
+    assert result.sizes["t"] == 60
+
+
 def test_spi3_produces_different_values_than_spi1(daily_precip: xr.DataArray) -> None:
     r1 = spi(daily_precip, window=1)
     r3 = spi(daily_precip, window=3)
