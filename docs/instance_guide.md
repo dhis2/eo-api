@@ -61,17 +61,32 @@ version = "0.1.0"
 requires-python = ">=3.12"
 description = "Open Climate Service instance for [context]"
 dependencies = [
-    "open-climate-service @ git+https://github.com/dhis2/open-climate-service.git",
+    "open-climate-service[server]==0.1.0",
 ]
 
 [tool.uv]
 package = false
 
-[tool.uv.sources]
-open-climate-service = { git = "https://github.com/dhis2/open-climate-service.git", branch = "main" }
+# Required for the [server] extra to resolve: these relax upstream transitive pins
+# that uv applies but pip cannot — openeo-pg-parser-networkx pins geojson-pydantic<2
+# (we need >=2.1.0), and openeo-processes-dask pins an older zarr
+# (Open-EO/openeo-processes-dask#376). Drop entries as upstream releases catch up.
+override-dependencies = [
+    "geojson-pydantic>=2.1.0",
+    "zarr>=3.1.6",
+    "pyarrow>=19.0",
+    "xarray>=2025.12.0",
+    "numpy>=2.2",
+    "dask>=2024.1.0",
+    "dask-geopandas>=0.4",
+    "geopandas>=1.1",
+    "xvec>=0.3",
+    "rioxarray>=0.17",
+    "pystac>=1.10",
+]
 ```
 
-The `package = false` setting tells uv that this repository is not itself a Python package — it only declares dependencies. The `[tool.uv.sources]` block pins open-climate-service to the `main` branch on GitHub. To pin to a specific release tag or commit instead, use `rev` (e.g. `rev = "<git tag or commit SHA>"`). Installing from git gives you the latest code; once a release is available on PyPI you can instead depend on `open-climate-service` from PyPI and drop the `[tool.uv.sources]` entry.
+The `package = false` setting tells uv that this repository is not itself a Python package — it only declares dependencies. It depends on the released `open-climate-service[server]` from PyPI, pinned here to `0.1.0`; bump the version to upgrade. The `override-dependencies` block is required for `uv` to resolve the `[server]` extra (see the comment above) — this is also why `pip install` is not a supported install path for `[server]`. To track the latest unreleased code instead of a release, add a `[tool.uv.sources]` entry pinning open-climate-service to git (`open-climate-service = { git = "https://github.com/dhis2/open-climate-service.git", branch = "main" }`) and change the dependency to `open-climate-service[server]`.
 
 Install dependencies:
 
