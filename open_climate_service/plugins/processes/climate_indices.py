@@ -66,7 +66,7 @@ def spi(
     # maximum-likelihood fit, does not raise FitError on real precipitation that has a
     # pronounced dry season (e.g. near-zero winter months), where ML optimization
     # diverges. DateStr is NewType(str) in xclim — cast to satisfy pyright.
-    return call_with_ocs_time_dim(  # type: ignore[no-any-return]
+    result = call_with_ocs_time_dim(
         xclim.indices.standardized_precipitation_index,
         pr,
         freq=freq,
@@ -77,3 +77,7 @@ def spi(
         cal_start=cast(Any, cal_start),
         cal_end=cast(Any, cal_end),
     )
+    # xclim returns float64; downcast to float32. SPI is a small standardized index
+    # (~±3) so float32 is ample precision, and it keeps the published store renderable
+    # by WebGL map clients (carbonplan ZarrLayer uploads to float32 textures).
+    return cast(xr.DataArray, result.astype("float32"))
