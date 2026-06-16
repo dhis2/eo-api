@@ -32,8 +32,8 @@ make run
 Validate that the service is running:
 
 ```bash
-curl -s "$OCS_BASE_URL/extent" | jq
-curl -s "$OCS_BASE_URL/collections" | jq -r '.collections[].id'
+curl -s "http://127.0.0.1:8000/extent" | jq
+curl -s "http://127.0.0.1:8000/collections" | jq -r '.collections[].id'
 ```
 
 ## Shared defaults
