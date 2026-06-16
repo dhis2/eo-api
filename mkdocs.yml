@@ -65,6 +65,10 @@ validation:
 nav:
   - Home: index.md
   - Quick start: setup_guide.md
+  - DAC 2026:
+      - Overview: dac2026/README.md
+      - Reference: dac2026/dac2026-reference.md
+      - Example payloads: dac2026/example-payloads.md
   - Concepts:
       - Architecture: architecture.md
       - Zarr and GeoZarr: zarr_and_geozarr.md

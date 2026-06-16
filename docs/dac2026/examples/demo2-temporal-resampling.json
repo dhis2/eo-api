@@ -1,0 +1,48 @@
+{
+  "process": {
+    "process_graph": {
+      "load": {
+        "process_id": "load_collection",
+        "arguments": {
+          "id": "chirps3_precipitation_daily",
+          "temporal_extent": [
+            "2025-01-01",
+            "2025-02-28"
+          ]
+        }
+      },
+      "monthly": {
+        "process_id": "aggregate_temporal_period",
+        "arguments": {
+          "data": {
+            "from_node": "load"
+          },
+          "period": "month",
+          "reducer": {
+            "process_graph": {
+              "sum": {
+                "process_id": "sum",
+                "arguments": {
+                  "data": {
+                    "from_parameter": "data"
+                  }
+                },
+                "result": true
+              }
+            }
+          }
+        }
+      },
+      "save": {
+        "process_id": "save_result",
+        "arguments": {
+          "data": {
+            "from_node": "monthly"
+          },
+          "format": "CSV"
+        },
+        "result": true
+      }
+    }
+  }
+}
