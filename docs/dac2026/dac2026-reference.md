@@ -9,16 +9,6 @@ Assumptions:
   `docs/dac2026/examples/organisationUnits_sle_level2.json`
 - the example time window is `2025-01-01` to `2025-02-28`
 
-## Shared defaults
-
-```bash
-export OCS_BASE_URL="http://127.0.0.1:8000"
-export SLE_GEOJSON="docs/dac2026/examples/organisationUnits_sle_level2.json"
-export START_DATE="2025-01-01"
-export END_DATE="2025-02-28"
-export DHIS2_DE_UID="DE_123"
-```
-
 ## Setup
 
 Clone the workshop branch and start the local instance:
@@ -28,6 +18,7 @@ git clone https://github.com/dhis2/open-climate-service.git
 cd open-climate-service
 git checkout dac2026
 cp climate-service.yaml.example climate-service.yaml
+cp .env.example .env
 ```
 
 Then update `climate-service.yaml` with the country extent you want to use for
@@ -43,6 +34,16 @@ Validate that the service is running:
 ```bash
 curl -s "$OCS_BASE_URL/extent" | jq
 curl -s "$OCS_BASE_URL/collections" | jq -r '.collections[].id'
+```
+
+## Shared defaults
+
+```bash
+export OCS_BASE_URL="http://127.0.0.1:8000"
+export SLE_GEOJSON="docs/dac2026/examples/organisationUnits_sle_level2.json"
+export START_DATE="2025-01-01"
+export END_DATE="2025-02-28"
+export DHIS2_DE_UID="DE_123"
 ```
 
 ## Country bbox
