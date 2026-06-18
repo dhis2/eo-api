@@ -39,7 +39,7 @@ See **[ERA5-Land datasets](era5_land_datasets.md)** for the full reference, incl
 
 | Property | Value |
 | --- | --- |
-| **Dataset ID** | `worldpop_population_yearly` |
+| **Dataset ID** | `worldpop_population_global2_R2025A_100m` |
 | **Variable** | `pop_total` |
 | **Units** | people |
 | **Period** | Yearly |
@@ -54,6 +54,24 @@ WorldPop Global2 provides gridded population estimates and projections at 100 m 
 **Sync behaviour** — population data is released year by year, not as a continuous stream. The API uses a `release`-kind sync that checks each calendar year separately. Future years (projections) are also requestable, since the underlying data covers through 2030.
 
 **Transforms** — none applied; values are stored as received (population counts per pixel).
+
+---
+
+## WorldPop Global2 — population by age and sex (yearly)
+
+| Property | Value |
+| --- | --- |
+| **Dataset ID** | `worldpop_agesex_global2_R2025A_100m` |
+| **Variables** | `population_female`, `population_male` (each over an `age_group` dimension) |
+| **Units** | people |
+| **Period** | Yearly |
+| **Spatial coverage** | Per-country (set `extent.country_code`) |
+| **Spatial resolution** | ~100 m |
+| **Record start** | 2015 |
+| **Record end** | 2030 |
+| **Source** | [WorldPop Global2 age & sex structures](https://hub.worldpop.org/project/categories?id=8) |
+
+Population disaggregated by sex and 5-year age band. WorldPop publishes one GeoTIFF per (sex, age band); the plugin combines them into a single store with two variables — `population_female` and `population_male` — each carrying an ordinal `age_group` dimension (the lower bound of the band: 0, 1, 5, 10, … 90). Each band is read lazily so memory stays bounded despite the ~40 source rasters per country-year.
 
 ---
 

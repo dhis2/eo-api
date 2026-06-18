@@ -28,7 +28,7 @@ The Open Climate Service is envisioned as the shared data infrastructure layer f
 
 ### 2.1 Relationship to existing DHIS2 climate work
 
-The Open Climate Service supplements and extends the existing DHIS2 climate data integration work documented at dhis2.org/climate/climate-data/. It builds on the same broader ecosystem — especially `dhis2eo` and related DHIS2 climate tooling. The platform wraps climate and earth observation workflows in a standardised API so that data access, processing, and publication can be configured and run without writing code.
+The Open Climate Service supplements and extends the existing DHIS2 climate data integration work documented at dhis2.org/climate/climate-data/. It builds on the same broader DHIS2 climate ecosystem. The platform wraps climate and earth observation workflows in a standardised API so that data access, processing, and publication can be configured and run without writing code.
 
 ### 2.2 Scope of this document
 
@@ -153,7 +153,7 @@ The dataset ID schema encodes the source, variable, period type, and spatial ext
 
 - `chirps3_precipitation_daily_sle`
 - `era5_temperature_daily_sle`
-- `worldpop_population_yearly_sle`
+- `worldpop_population_global2_R2025A_100m_sle`
 
 Sub-national extents use the same schema (e.g. `chirps3_precipitation_daily_bo` for the Bo district of Sierra Leone), allowing larger countries to configure a district-level extent to limit initial download volume.
 
@@ -223,7 +223,6 @@ Long-running jobs (ingestion, sync, aggregation) are executed asynchronously. Th
 | fsspec                        | Unified filesystem abstraction for storage backends (local, S3-compatible, Azure Blob, GCS, Ceph/RGW). Backend is environment-variable configuration only.                               |
 | zarr-layer (MapLibre)         | TypeScript library for rendering Zarr directly as a native MapLibre Custom Layer in the browser. GPU reprojection from the stored CRS to Spherical Mercator; uses multiscale levels per zoom. |
 | Docker                        | Containerised deployment. Supports local, cloud-hosted, and country sovereign deployments.                                                                                               |
-| dhis2eo                      | Core climate/EO extraction library used by the Open Climate Service for upstream dataset access and processing integration.                                                                        |
 | dhis2-python-client          | Planned DHIS2 Web API integration library for future data value push and related DHIS2 write workflows.                                                                                  |
 | STAC                          | Complementary discovery and metadata catalogue layer. Each dataset exposed as a STAC Item with temporal, spatial, and access metadata.                                                   |
 
@@ -262,6 +261,5 @@ The storage backend is configured entirely via environment variables — no code
 | Open Climate Service GitHub      | https://github.com/dhis2/open-climate-service         |
 | DHIS2 climate data      | https://dhis2.org/climate/climate-data/      |
 | CHAP Modelling Platform | https://chap.dhis2.org/                      |
-| dhis2eo                 | https://github.com/dhis2/dhis2eo             |
 | dhis2-python-client     | https://github.com/dhis2/dhis2-python-client |
 | GeoZarr roadmap         | https://geozarr.org/roadmap.html             |
