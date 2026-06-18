@@ -226,42 +226,48 @@ async def run_streaming_ingest(
 
             period_id, task = in_flight.popleft()
             ds = await task
-            # Infer the grid from the first fetched period, before _strip_cf_encoding
-            # so the nodata sentinel survives into the spec.
-            if spec is None:
-                spec = _grid_spec_from_dataset(
-                    ds, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim, fallback_crs=fallback_crs
-                )
-            _strip_cf_encoding(ds, period_type, time_dim=spec.time_dim)
-            apply_cf_metadata(ds, cf_attrs, overwrite=True)
+            # Always release the fetched dataset's backing handles (open_rasterio /
+            # open_dataset / remote HTTP) once it is written, so long backfills don't
+            # leak file descriptors one period at a time.
             try:
-                spatial_shape = (int(ds.sizes[spec.y_dim]), int(ds.sizes[spec.x_dim]))
-            except KeyError as exc:
-                raise RuntimeError(
-                    f"Fetched dataset for {period_id} is missing expected spatial dimensions "
-                    f"'{spec.y_dim}' and '{spec.x_dim}'"
-                ) from exc
-            if expected_spatial_shape is None:
-                expected_spatial_shape = spatial_shape
-                if spec.shape != spatial_shape:
-                    spec = replace(spec, shape=spatial_shape)
-            elif spatial_shape != expected_spatial_shape:
-                raise RuntimeError(
-                    f"Fetched dataset for {period_id} has spatial shape {spatial_shape}, "
-                    f"expected {expected_spatial_shape}"
-                )
+                # Infer the grid from the first fetched period, before _strip_cf_encoding
+                # so the nodata sentinel survives into the spec.
+                if spec is None:
+                    spec = _grid_spec_from_dataset(
+                        ds, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim, fallback_crs=fallback_crs
+                    )
+                _strip_cf_encoding(ds, period_type, time_dim=spec.time_dim)
+                apply_cf_metadata(ds, cf_attrs, overwrite=True)
+                try:
+                    spatial_shape = (int(ds.sizes[spec.y_dim]), int(ds.sizes[spec.x_dim]))
+                except KeyError as exc:
+                    raise RuntimeError(
+                        f"Fetched dataset for {period_id} is missing expected spatial dimensions "
+                        f"'{spec.y_dim}' and '{spec.x_dim}'"
+                    ) from exc
+                if expected_spatial_shape is None:
+                    expected_spatial_shape = spatial_shape
+                    if spec.shape != spatial_shape:
+                        spec = replace(spec, shape=spatial_shape)
+                elif spatial_shape != expected_spatial_shape:
+                    raise RuntimeError(
+                        f"Fetched dataset for {period_id} has spatial shape {spatial_shape}, "
+                        f"expected {expected_spatial_shape}"
+                    )
 
-            session = repo.writable_session("main")
-            if is_first_write:
-                ds.to_zarr(session.store, mode="w", zarr_format=3)
-                is_first_write = False
-            else:
-                ds.to_zarr(session.store, append_dim=spec.time_dim, zarr_format=3)
-            # Root attrs are rewritten on every commit so later append sessions
-            # preserve GeoZarr metadata even if the underlying store layer only
-            # touches array content for the new period.
-            write_geozarr_attrs(session.store, spec=spec, bbox=bbox)
-            session.commit(f"ingest: {period_id}")
+                session = repo.writable_session("main")
+                if is_first_write:
+                    ds.to_zarr(session.store, mode="w", zarr_format=3)
+                    is_first_write = False
+                else:
+                    ds.to_zarr(session.store, append_dim=spec.time_dim, zarr_format=3)
+                # Root attrs are rewritten on every commit so later append sessions
+                # preserve GeoZarr metadata even if the underlying store layer only
+                # touches array content for the new period.
+                write_geozarr_attrs(session.store, spec=spec, bbox=bbox)
+                session.commit(f"ingest: {period_id}")
+            finally:
+                ds.close()
 
             written += 1
             if save_cursor and (written % commit_batch_size == 0 or written == len(pending)):

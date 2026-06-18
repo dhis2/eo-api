@@ -179,6 +179,52 @@ def test_orchestrator_uses_store_state_as_resume_truth(monkeypatch: pytest.Monke
     assert cursor_saves[-1] == {"last_committed": "2026-01-03"}
 
 
+class _TaggedPlugin(_FakePlugin):
+    """Tags each fetched dataset so the test can count when the orchestrator closes it."""
+
+    async def fetch_period(self, period_id: str, bbox: list[float], **params: Any) -> xr.Dataset:
+        ds = await super().fetch_period(period_id, bbox, **params)
+        ds.attrs["_test_tag"] = "plugin"
+        return ds
+
+
+def test_orchestrator_closes_each_fetched_dataset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Each period's dataset must be closed after it is written, so long backfills
+    don't leak the open_rasterio / open_dataset handles backing it."""
+    store_path = tmp_path / "close-store.zarr"
+    repo = _FakeRepo(str(store_path))
+    monkeypatch.setattr(streaming_orchestrator, "open_or_create_repo", lambda path: repo)
+    monkeypatch.setattr(
+        streaming_orchestrator,
+        "read_committed_period_ids",
+        lambda path, period_type, time_dim="t": _read_committed_periods_from_zarr(path, period_type, time_dim=time_dim),
+    )
+    monkeypatch.setattr(streaming_orchestrator, "is_store_empty", lambda path: not path.exists())
+
+    real_close = xr.Dataset.close
+    plugin_closes = {"n": 0}
+
+    def counting_close(self: xr.Dataset) -> None:
+        if self.attrs.get("_test_tag") == "plugin":
+            plugin_closes["n"] += 1
+        real_close(self)
+
+    monkeypatch.setattr(xr.Dataset, "close", counting_close)
+
+    result = run_streaming_ingest_sync(
+        plugin=_TaggedPlugin(),
+        params={},
+        bbox=[0.0, 0.0, 1.0, 1.0],
+        start="2026-01-01",
+        end="2026-01-03",
+        store_path=store_path,
+        period_type="daily",
+    )
+
+    assert result.periods_written == 3
+    assert plugin_closes["n"] == 3  # exactly one close per written period
+
+
 def test_orchestrator_infers_grid_when_plugin_has_no_probe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A plugin with no probe() and no concurrency attrs still ingests: the grid,
     CRS, and dtype are inferred from the first fetched period and the defaults apply."""
