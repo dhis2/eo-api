@@ -297,8 +297,8 @@ def _create_streaming_artifact(
     """Create or update one plugin-backed Icechunk artifact.
 
     The same helper is used for both initial ingest and store-based sync. The
-    streaming orchestrator probes the plugin for the full requested range, then
-    appends only periods that are not already committed in the target
+    streaming orchestrator enumerates the plugin's periods for the full requested
+    range, then appends only periods that are not already committed in the target
     Icechunk-backed store.
     """
     if bbox is None:
@@ -463,8 +463,8 @@ def _load_streaming_plugin(plugin_path: str, *, params: dict[str, object]) -> In
 
     Template-defined `ingestion.params` are treated as plugin
     configuration and passed to the constructor here. The same params are also
-    forwarded later to `probe(...)` and `fetch_period(...)` so plugins may keep
-    configuration in constructor state, per-call kwargs, or both.
+    forwarded later to `fetch_period(...)` so plugins may keep configuration in
+    constructor state, per-call kwargs, or both.
     """
     from open_climate_service.shared.plugin_loader import instantiate_plugin
 

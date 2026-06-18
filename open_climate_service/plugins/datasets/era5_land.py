@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import calendar
-import math
 import os
 import tempfile
 from datetime import date, datetime, timedelta
@@ -17,11 +16,13 @@ import numpy as np
 import xarray as xr
 from ecmwf.datastores import Client as _CdsClient
 
-from open_climate_service.shared.time import datetime_to_period_string, parse_period_string_to_datetime
-from open_climate_service.streaming.protocol import GridSpec
+from open_climate_service.shared.time import (
+    daily_period_ids,
+    datetime_to_period_string,
+    parse_period_string_to_datetime,
+)
+from open_climate_service.streaming import BaseDatasetPlugin
 from open_climate_service.transforms.unit_conversion import kelvin_to_celsius, metres_to_mm
-
-_ERA5_LAND_RES_DEG = 0.1
 
 # CDS API long-name variables for reanalysis-era5-land-monthly-means
 _CDS_VARIABLE_NAMES: dict[str, str] = {
@@ -29,28 +30,11 @@ _CDS_VARIABLE_NAMES: dict[str, str] = {
     "tp": "total_precipitation",
 }
 
-
-def _iter_days(start_dt: date, end_dt: date) -> list[str]:
-    """Enumerate ISO date strings from start_dt to end_dt inclusive."""
-    result: list[str] = []
-    current = start_dt
-    while current <= end_dt:
-        result.append(current.isoformat())
-        current += timedelta(days=1)
-    return result
+# The grid (0.1° resolution, EPSG:4326, float32) is inferred by the orchestrator
+# from the first fetched period.
 
 
-def _era5land_probe(bbox: list[float]) -> GridSpec:
-    """Return a GridSpec for the given bbox at ERA5-Land 0.1° resolution."""
-    xmin, ymin, xmax, ymax = map(float, bbox)
-    nx = max(1, math.ceil((xmax - xmin) / _ERA5_LAND_RES_DEG))
-    ny = max(1, math.ceil((ymax - ymin) / _ERA5_LAND_RES_DEG))
-    return GridSpec(
-        shape=(ny, nx), crs=4326, dtype=np.dtype("float32"), nodata=None, time_dim="t", x_dim="x", y_dim="y"
-    )
-
-
-class ERA5LandCDSHourlyPlugin:
+class ERA5LandCDSHourlyPlugin(BaseDatasetPlugin):
     """Streaming plugin for hourly ERA5-Land variables from the Copernicus CDS.
 
     Fetches one full calendar month per CDS API call and caches the result so
@@ -73,9 +57,6 @@ class ERA5LandCDSHourlyPlugin:
         self._cached_bbox: tuple[float, float, float, float] | None = None
         self._cached_ds: xr.Dataset | None = None
 
-    async def probe(self, bbox: list[float], **_: Any) -> GridSpec:
-        return _era5land_probe(bbox)
-
     async def periods(self, start: str, end: str) -> list[str]:
         cutoff = await asyncio.to_thread(_hourly_availability_cutoff)
         current = parse_period_string_to_datetime(start)
@@ -88,10 +69,7 @@ class ERA5LandCDSHourlyPlugin:
             current += timedelta(hours=1)
         return result
 
-    async def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
-        return await asyncio.to_thread(self._fetch_sync, period_id, bbox)
-
-    def _fetch_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
+    def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
         dt = parse_period_string_to_datetime(period_id)
         bbox_tuple = cast(tuple[float, float, float, float], tuple(map(float, bbox)))
         with self._cache_lock:
@@ -146,7 +124,7 @@ class ERA5LandPrecipitationPlugin(ERA5LandCDSHourlyPlugin):
         return metres_to_mm(ds, {"variable": self.variable})
 
 
-class ERA5LandDailyTemperaturePlugin:
+class ERA5LandDailyTemperaturePlugin(BaseDatasetPlugin):
     """Streaming plugin for daily ERA5-Land 2m temperature from the Copernicus CDS.
 
     Uses the ``derived-era5-land-daily-statistics`` dataset. Fetches one full
@@ -165,21 +143,11 @@ class ERA5LandDailyTemperaturePlugin:
         self._cached_bbox: tuple[float, float, float, float] | None = None
         self._cached_ds: xr.Dataset | None = None
 
-    async def probe(self, bbox: list[float], **_: Any) -> GridSpec:
-        return _era5land_probe(bbox)
-
     async def periods(self, start: str, end: str) -> list[str]:
         cutoff = await asyncio.to_thread(_daily_availability_cutoff)
-        start_dt = date.fromisoformat(start[:10])
-        end_dt = min(date.fromisoformat(end[:10]), cutoff)
-        if start_dt > end_dt:
-            return []
-        return _iter_days(start_dt, end_dt)
+        return daily_period_ids(start, end, cutoff=cutoff)
 
-    async def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
-        return await asyncio.to_thread(self._fetch_sync, period_id, bbox)
-
-    def _fetch_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
+    def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
         day = date.fromisoformat(period_id)
         bbox_tuple = cast(tuple[float, float, float, float], tuple(map(float, bbox)))
 
@@ -224,7 +192,7 @@ class ERA5LandDailyTemperaturePlugin:
         return kelvin_to_celsius(ds, {"variable": "t2m"})
 
 
-class ERA5LandMonthlyPlugin:
+class ERA5LandMonthlyPlugin(BaseDatasetPlugin):
     """Streaming plugin for monthly ERA5-Land means from the Copernicus CDS.
 
     Fetches one calendar month at a time from the ``reanalysis-era5-land-monthly-means``
@@ -242,9 +210,6 @@ class ERA5LandMonthlyPlugin:
             )
         self.variable = variable
 
-    async def probe(self, bbox: list[float], **_: Any) -> GridSpec:
-        return _era5land_probe(bbox)
-
     async def periods(self, start: str, end: str) -> list[str]:
         cutoff = await asyncio.to_thread(_monthly_availability_cutoff)
         start_dt = _parse_monthly(start)
@@ -260,10 +225,7 @@ class ERA5LandMonthlyPlugin:
             current = datetime(year, month, 1)
         return result
 
-    async def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
-        return await asyncio.to_thread(self._fetch_sync, period_id, bbox)
-
-    def _fetch_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
+    def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
         year, month = int(period_id[:4]), int(period_id[5:7])
         xmin, ymin, xmax, ymax = map(float, bbox)
 
@@ -308,8 +270,8 @@ class ERA5LandMonthlyPrecipitationPlugin(ERA5LandMonthlyPlugin):
     def __init__(self, **_: Any) -> None:
         super().__init__(variable="tp")
 
-    def _fetch_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
-        ds = super()._fetch_sync(period_id, bbox)
+    def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
+        ds = super().fetch_period(period_id, bbox)
         return metres_to_mm(ds, {"variable": self.variable})
 
 
@@ -423,8 +385,8 @@ def _edh_open_zarr(url: str, *, consolidated: bool | None = None) -> xr.Dataset:
     )
 
 
-class _ERA5LandEDHBase:
-    """Shared cache and probe logic for EDH Zarr plugins."""
+class _ERA5LandEDHBase(BaseDatasetPlugin):
+    """Shared cache and region logic for EDH Zarr plugins."""
 
     _edh_url: str  # set by subclass
     _edh_consolidated: bool | None = None  # True for Zarr v2 stores
@@ -439,19 +401,6 @@ class _ERA5LandEDHBase:
         self._cache_lock = Lock()
         self._cached_bbox: tuple[float, float, float, float] | None = None
         self._cached_region: xr.Dataset | None = None
-
-    async def probe(self, bbox: list[float], **_: Any) -> GridSpec:
-        region = await asyncio.to_thread(self._region_for_bbox, bbox)
-        data = region[self.variable]
-        return GridSpec(
-            shape=(int(data.sizes["latitude"]), int(data.sizes["longitude"])),
-            crs=4326,
-            dtype=np.dtype(data.dtype),
-            nodata=None,
-            time_dim="t",
-            x_dim="x",
-            y_dim="y",
-        )
 
     def _region_for_bbox(self, bbox: list[float]) -> xr.Dataset:
         bbox_tuple = cast(tuple[float, float, float, float], tuple(map(float, bbox)))
@@ -524,16 +473,9 @@ class ERA5LandEDHDailyPlugin(_ERA5LandEDHBase):
 
     async def periods(self, start: str, end: str) -> list[str]:
         latest = await asyncio.to_thread(self._latest_available)
-        start_dt = date.fromisoformat(start[:10])
-        end_dt = min(date.fromisoformat(end[:10]), date.fromisoformat(latest[:10]))
-        if start_dt > end_dt:
-            return []
-        return _iter_days(start_dt, end_dt)
+        return daily_period_ids(start, end, cutoff=latest)
 
-    async def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
-        return await asyncio.to_thread(self._fetch_sync, period_id, bbox)
-
-    def _fetch_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
+    def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
         region = self._region_for_bbox(bbox)
         timestamp = np.datetime64(period_id, "D").astype("datetime64[ns]")
         ds = region.sel(valid_time=slice(timestamp, timestamp))[[self.variable]].load()
@@ -561,17 +503,13 @@ class ERA5LandTempDailyPlugin(ERA5LandEDHDailyPlugin):
             # tp: EDH only
             return await super().periods(start, end)
         cds_cutoff = await asyncio.to_thread(_daily_availability_cutoff)
-        start_dt = date.fromisoformat(start[:10])
-        end_dt = min(date.fromisoformat(end[:10]), cds_cutoff)
-        if start_dt > end_dt:
-            return []
-        return _iter_days(start_dt, end_dt)
+        return daily_period_ids(start, end, cutoff=cds_cutoff)
 
-    async def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
-        edh_latest = await asyncio.to_thread(self._latest_available)
+    def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
+        edh_latest = self._latest_available()
         if self._cds_plugin is None or period_id <= edh_latest:
-            return await super().fetch_period(period_id, bbox)
-        return await self._cds_plugin.fetch_period(period_id, bbox)
+            return super().fetch_period(period_id, bbox)
+        return self._cds_plugin.fetch_period(period_id, bbox)
 
 
 class ERA5LandEDHPrecipitationDailyPlugin(_ERA5LandEDHBase):
@@ -600,14 +538,10 @@ class ERA5LandEDHPrecipitationDailyPlugin(_ERA5LandEDHBase):
 
     async def periods(self, start: str, end: str) -> list[str]:
         latest_str = await asyncio.to_thread(self._latest_available)
-        start_dt = date.fromisoformat(start[:10])
-        end_dt = min(date.fromisoformat(end[:10]), date.fromisoformat(latest_str[:10]))
-        if start_dt > end_dt:
-            return []
-        return _iter_days(start_dt, end_dt)
+        return daily_period_ids(start, end, cutoff=latest_str)
 
-    async def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
-        return await asyncio.to_thread(self._fetch_daily_sync, period_id, bbox)
+    def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
+        return self._fetch_daily_sync(period_id, bbox)
 
     def _fetch_daily_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
         from open_climate_service import config as api_config
@@ -671,15 +605,13 @@ class ERA5LandPrecipDailyPlugin(ERA5LandEDHPrecipitationDailyPlugin):
         # UTC hour is already published (e.g. UTC+3 needs data until 20:00 UTC).
         cutoff_local_dt = cds_cutoff - utc_offset if hasattr(cds_cutoff, "__sub__") else cds_cutoff
         cutoff_local = cutoff_local_dt.date() if hasattr(cutoff_local_dt, "date") else cutoff_local_dt
-        start_dt = date.fromisoformat(start[:10])
-        end_dt = min(date.fromisoformat(end[:10]), cutoff_local)
-        return _iter_days(start_dt, end_dt) if start_dt <= end_dt else []
+        return daily_period_ids(start, end, cutoff=cutoff_local)
 
-    async def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
-        edh_latest = await asyncio.to_thread(self._latest_available)
+    def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
+        edh_latest = self._latest_available()
         if period_id <= edh_latest[:10]:
-            return await asyncio.to_thread(self._fetch_daily_sync, period_id, bbox)
-        return await asyncio.to_thread(self._fetch_cds_daily_sync, period_id, bbox)
+            return self._fetch_daily_sync(period_id, bbox)
+        return self._fetch_cds_daily_sync(period_id, bbox)
 
     def _fetch_cds_daily_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
         from open_climate_service import config as api_config
@@ -742,15 +674,13 @@ class ERA5LandTempDailyFromHourlyPlugin(_ERA5LandEDHBase):
         # UTC hour is already published (e.g. UTC+3 needs data until 20:00 UTC).
         cutoff_local_dt = cds_cutoff - utc_offset if hasattr(cds_cutoff, "__sub__") else cds_cutoff
         cutoff_local = cutoff_local_dt.date() if hasattr(cutoff_local_dt, "date") else cutoff_local_dt
-        start_dt = date.fromisoformat(start[:10])
-        end_dt = min(date.fromisoformat(end[:10]), cutoff_local)
-        return _iter_days(start_dt, end_dt) if start_dt <= end_dt else []
+        return daily_period_ids(start, end, cutoff=cutoff_local)
 
-    async def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
-        edh_latest = await asyncio.to_thread(self._latest_available)
+    def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
+        edh_latest = self._latest_available()
         if period_id <= edh_latest[:10]:
-            return await asyncio.to_thread(self._fetch_daily_sync, period_id, bbox)
-        return await asyncio.to_thread(self._fetch_cds_daily_sync, period_id, bbox)
+            return self._fetch_daily_sync(period_id, bbox)
+        return self._fetch_cds_daily_sync(period_id, bbox)
 
     def _fetch_daily_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
         from open_climate_service import config as api_config

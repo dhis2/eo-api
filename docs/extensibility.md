@@ -28,9 +28,9 @@ plugins_dir: ./plugins/
 
 All `*.yaml` files in `plugins_dir/datasets/` are merged with the built-ins. A custom template with the same `id` as a built-in overrides it — useful for adjusting display ranges or availability settings on an existing dataset.
 
-A Python plugin class is declared alongside the YAML using the `ingestion.plugin` dotted path. Any data transformations (unit conversion, etc.) are applied inside `fetch_period` before the `xr.Dataset` is returned.
+A Python plugin class is declared alongside the YAML using the `ingestion.plugin` dotted path. Plugins subclass `BaseDatasetPlugin` and implement just `periods()` and `fetch_period()` — the base class provides the concurrency defaults and canonical dimension names. `fetch_period` is a regular (blocking) method run in a worker thread, or an `async def` for natively-async sources. Any data transformations (unit conversion, dimension renaming, nodata masking, bbox clipping) are applied inside the fetch before the `xr.Dataset` is returned, typically via the `normalize_period` helper. The grid (shape, dtype, nodata, CRS) is inferred from the first fetched period; a projected-grid source declares its CRS via the `crs` class attribute.
 
-See [Adding custom datasets](adding_custom_datasets.md) for the full template field reference, streaming plugin contract and transform function signature.
+See [Adding custom datasets](adding_custom_datasets.md) for the full template field reference, the streaming plugin contract, and the available helpers.
 
 ---
 

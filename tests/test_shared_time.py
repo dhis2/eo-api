@@ -1,11 +1,42 @@
+from datetime import date
+
 import pytest
 
 from open_climate_service.shared.time import (
+    daily_period_ids,
     datetime_to_period_string,
     normalize_period_string,
     parse_period_string_to_datetime,
     period_type_to_iso_step,
 )
+
+
+def test_daily_period_ids_enumerates_inclusive_range_from_strings() -> None:
+    assert daily_period_ids("2026-01-30", "2026-02-02") == [
+        "2026-01-30",
+        "2026-01-31",
+        "2026-02-01",
+        "2026-02-02",
+    ]
+
+
+def test_daily_period_ids_accepts_date_objects_and_single_day() -> None:
+    assert daily_period_ids(date(2026, 3, 1), date(2026, 3, 1)) == ["2026-03-01"]
+
+
+def test_daily_period_ids_returns_empty_when_start_after_end() -> None:
+    assert daily_period_ids("2026-05-10", "2026-05-01") == []
+
+
+def test_daily_period_ids_caps_end_to_cutoff() -> None:
+    # cutoff (a source's latest available day) caps end; accepts a date or string
+    assert daily_period_ids("2026-01-01", "2026-01-31", cutoff=date(2026, 1, 3)) == [
+        "2026-01-01",
+        "2026-01-02",
+        "2026-01-03",
+    ]
+    # a cutoff later than end leaves the range unchanged
+    assert daily_period_ids("2026-01-01", "2026-01-02", cutoff="2026-06-01") == ["2026-01-01", "2026-01-02"]
 
 
 @pytest.mark.parametrize(

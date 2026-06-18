@@ -24,7 +24,7 @@ Templates are config, not code. If a template needs custom logic, the logic goes
 
 ### Streaming ingest
 
-Datasets are ingested via a per-period streaming contract. The plugin probes the source grid, enumerates periods, and fetches one period at a time as an `xarray.Dataset`. The framework handles resume, concurrency, store commits, artifact persistence, and publication.
+Datasets are ingested via a per-period streaming contract. The plugin enumerates periods and fetches one period at a time as an `xarray.Dataset`; the store grid is inferred from the first fetched period. The framework handles resume, concurrency, store commits, artifact persistence, and publication.
 
 The streaming engine lives in `open_climate_service.streaming`, while `open_climate_service.ingestions` is the application-facing layer that owns routes, artifact records, and publication state.
 
@@ -64,9 +64,8 @@ Template (YAML)
     │  POST /ingestions  (or  POST /sync)
     ▼
 Ingestion
-    │    probe source grid
     │    enumerate periods
-    │    fetch missing periods
+    │    fetch missing periods (grid inferred from the first)
     │    append each period directly to Icechunk-backed Zarr v3
     │
     │  compute coverage (spatial + temporal extent of actual data)
@@ -150,17 +149,17 @@ The platform has three plugin types. Each has a narrow contract — the framewor
 ### Streaming plugin
 
 ```python
-class MyStreamingPlugin:
-    max_concurrency = 4
-    commit_batch_size = 30
+from open_climate_service.streaming import BaseDatasetPlugin
 
-    async def probe(self, bbox: list[float], **params) -> GridSpec:
-        ...
 
+class MyStreamingPlugin(BaseDatasetPlugin):
     async def periods(self, start: str, end: str) -> list[str]:
         ...
 
-    async def fetch_period(self, period_id: str, bbox: list[float], **params) -> xr.Dataset:
+    def fetch_period(self, period_id: str, bbox: list[float], **params) -> xr.Dataset:
+        # A plain (blocking) method run in a worker thread, or `async def` for a
+        # natively-async source. The grid is inferred from the first fetched period;
+        # a projected source sets a `crs` class attribute.
         ...
 ```
 
@@ -171,15 +170,15 @@ Multiple YAML templates can reference the same plugin class and differentiate vi
 ```yaml
 # era5land_temperature_hourly.yaml
 ingestion:
-  plugin: dhis2eo.streaming.era5_land.ERA5LandPlugin
+  plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandCDSHourlyPlugin
   params:
-    variable: 2m_temperature
+    variable: t2m
 
 # era5land_precipitation_hourly.yaml
 ingestion:
-  plugin: dhis2eo.streaming.era5_land.ERA5LandPlugin
+  plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandCDSHourlyPlugin
   params:
-    variable: total_precipitation
+    variable: tp
 ```
 
 ### Named openEO process (`@process`)
