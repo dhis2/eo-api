@@ -54,6 +54,12 @@ directly to the Icechunk-backed Zarr store, so the function should not write to 
 a natively-async source (e.g. lazy Zarr access), declare it `async def fetch_period(...)`
 instead — the orchestrator awaits it directly.
 
+The framework **closes the dataset you return** after writing it (releasing the
+`open_rasterio` / `open_dataset` handles), so return a self-contained dataset — not a lazy
+view that shares a backing handle with a long-lived cache. A plugin that caches a fetched
+month/region should `.load()` it into memory so the per-period slices it returns are
+independent.
+
 `**params` receives the `params` dict from the YAML template, so the same class can serve
 multiple variables.
 

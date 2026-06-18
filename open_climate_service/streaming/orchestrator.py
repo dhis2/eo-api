@@ -20,7 +20,7 @@ import inspect
 import logging
 from collections import deque
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -247,8 +247,6 @@ async def run_streaming_ingest(
                     ) from exc
                 if expected_spatial_shape is None:
                     expected_spatial_shape = spatial_shape
-                    if spec.shape != spatial_shape:
-                        spec = replace(spec, shape=spatial_shape)
                 elif spatial_shape != expected_spatial_shape:
                     raise RuntimeError(
                         f"Fetched dataset for {period_id} has spatial shape {spatial_shape}, "

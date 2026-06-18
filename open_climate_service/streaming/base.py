@@ -36,9 +36,10 @@ class BaseDatasetPlugin:
       first fetched period and the data itself carries no CRS — how a projected
       source (e.g. UTM) declares its projection.
 
-    Template-defined `ingestion.params` are passed to the constructor; the default
-    `__init__` stores them on `self.params`. Subclasses that need named
-    configuration should define their own `__init__`.
+    Template-defined `ingestion.params` are passed to the constructor. The default
+    `__init__` stores them on `self.params`; a subclass that defines its own
+    `__init__` (to accept named configuration) manages params itself — `self.params`
+    is only populated by the default `__init__`.
     """
 
     max_concurrency: int = 1
@@ -61,5 +62,13 @@ class BaseDatasetPlugin:
         Implement as a regular method for blocking I/O (the framework runs it in a
         worker thread) or as ``async def`` for natively-async sources — the return
         type covers both forms.
+
+        Ownership: the framework **closes the returned dataset** (synchronously)
+        after it has been written, releasing the ``open_rasterio`` / ``open_dataset``
+        handles backing it. Return a self-contained dataset — not a lazy view that
+        shares a backing handle with a long-lived cache, or that cache's handle would
+        be closed mid-ingest. (Plugins that cache a fetched month/region should
+        ``.load()`` it into memory so the per-period slices they return are
+        self-contained.)
         """
         raise NotImplementedError("Dataset plugins must implement fetch_period()")
