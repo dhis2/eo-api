@@ -252,3 +252,33 @@ def test_coverage_from_dataset_leaves_spatial_wgs84_none_for_wgs84() -> None:
     result = _coverage_from_dataset(ds=ds, period_type="daily", native_crs="EPSG:4326")
 
     assert result["coverage"]["spatial_wgs84"] is None
+
+
+def test_write_to_icechunk_store_preserves_native_crs_ignoring_instance_crs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Data is stored in its native CRS; the instance config CRS is never used.
+
+    Regression for ERA5-Land (native WGS84) being mislabeled with the instance
+    UTM CRS, which put degree coordinates off-map when rendered as metres.
+    """
+    from open_climate_service import config as api_config
+
+    # Force a non-WGS84 instance CRS — the writer must ignore it entirely.
+    monkeypatch.setattr(api_config, "get_crs", lambda: "EPSG:32633")
+
+    # WGS84 dataset carrying its native CRS as the streaming store writes it.
+    y = np.linspace(57.0, 72.5, 8)
+    x = np.linspace(3.0, 32.0, 10)
+    data = np.random.default_rng(0).random((1, len(y), len(x)), dtype="float32")
+    ds = xr.Dataset(
+        {"t2m": (("t", "y", "x"), data)},
+        coords={"t": [np.datetime64("2024-01-01")], "y": y, "x": x},
+    )
+    ds.attrs["proj:code"] = "EPSG:4326"
+
+    store = tmp_path / "native_crs.icechunk"
+    downloader.write_to_icechunk_store(ds, store, commit_message="test")
+
+    out = open_icechunk_dataset(str(store))
+    assert out.attrs.get("proj:code") == "EPSG:4326"

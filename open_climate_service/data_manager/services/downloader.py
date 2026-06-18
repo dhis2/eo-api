@@ -12,6 +12,7 @@ from geozarr_toolkit import MultiscalesConventionMetadata, create_geozarr_attrs
 from topozarr.coarsen import create_pyramid
 
 from open_climate_service import config as api_config
+from open_climate_service.shared.crs import dataset_crs
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,11 @@ def write_to_icechunk_store(
     import rioxarray as _rxr  # noqa: F401  # pyright: ignore[reportUnusedImport]  # activates .rio accessor
 
     if crs is None:
-        crs = api_config.get_crs()
+        # Data is stored in its native CRS — the one the source delivered it in,
+        # recovered from the dataset itself. Never the instance config CRS:
+        # stamping e.g. EPSG:32633 onto WGS84 ERA5-Land coordinates puts the
+        # store off-map.
+        crs = dataset_crs(ds)
 
     dims = [x_dim, y_dim]
     xmin = float(ds[x_dim].min())
