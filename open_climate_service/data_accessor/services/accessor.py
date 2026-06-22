@@ -68,9 +68,7 @@ def get_data_coverage(dataset: dict[str, Any]) -> dict[str, Any]:
     """Return temporal and spatial coverage metadata for downloaded data."""
     ds = get_data(dataset)
     try:
-        return _coverage_from_dataset(
-            ds=ds, period_type=str(dataset["period_type"]), native_crs=dataset_crs(ds)
-        )
+        return _coverage_from_dataset(ds=ds, period_type=str(dataset["period_type"]), native_crs=dataset_crs(ds))
     finally:
         ds.close()
 
@@ -101,9 +99,7 @@ def get_data_coverage_for_paths(
         )
 
     try:
-        return _coverage_from_dataset(
-            ds=ds, period_type=str(dataset["period_type"]), native_crs=dataset_crs(ds)
-        )
+        return _coverage_from_dataset(ds=ds, period_type=str(dataset["period_type"]), native_crs=dataset_crs(ds))
     finally:
         ds.close()
 

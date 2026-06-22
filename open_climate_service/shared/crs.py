@@ -26,7 +26,7 @@ def dataset_crs(ds: "xr.Dataset", default: str = "EPSG:4326") -> str:
     if code:
         return str(code)
     try:
-        import rioxarray  # noqa: F401  # activates the .rio accessor
+        import rioxarray  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
         rio_crs = ds.rio.crs
         if rio_crs is not None:
