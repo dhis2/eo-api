@@ -143,6 +143,7 @@ def test_reduce_by_method_dispatches() -> None:
     assert reduce_by_method(data, "sum") == 12.0
     assert reduce_by_method(data, "min") == 0.0
     assert reduce_by_method(data, "max") == 6.0
+    assert reduce_by_method(data, "median") == 3.0
     assert np.isnan(reduce_by_method(np.array([]), "mean"))  # empty geometry → NaN, not a crash
     with pytest.raises(ValueError, match="Unknown reduce method"):
         reduce_by_method(data, "bogus")

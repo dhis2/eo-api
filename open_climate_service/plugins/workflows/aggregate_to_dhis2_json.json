@@ -25,7 +25,7 @@
     },
     {
       "name": "method",
-      "description": "Spatial aggregation method applied to the pixels within each org unit: mean (default), min, max, or sum.",
+      "description": "Spatial aggregation method applied to the pixels within each org unit: mean (default), min, max, sum, or median.",
       "schema": { "type": "string" },
       "default": "mean"
     },
