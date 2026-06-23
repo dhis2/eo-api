@@ -16,12 +16,14 @@ from open_climate_service import plugins_diagnostics as pd
 def capture(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
     # The "open_climate_service" logger has propagate=False, so attach caplog's
     # handler directly to capture its records.
+    original_level = pd.logger.level
     pd.logger.addHandler(caplog.handler)
     pd.logger.setLevel(logging.INFO)
     try:
         yield caplog
     finally:
         pd.logger.removeHandler(caplog.handler)
+        pd.logger.setLevel(original_level)
 
 
 def test_logs_when_plugins_dir_unset(monkeypatch: pytest.MonkeyPatch, capture: pytest.LogCaptureFixture) -> None:
@@ -60,4 +62,4 @@ def test_warns_when_plugins_dir_missing(
 
     pd.log_plugin_loading()
 
-    assert "does not exist" in capture.text
+    assert "does not exist or is not a directory" in capture.text

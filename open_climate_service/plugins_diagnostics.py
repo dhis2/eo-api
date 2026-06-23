@@ -41,11 +41,21 @@ def log_plugin_loading() -> None:
         )
         return
 
+    if not isinstance(plugins_dir, (str, Path)):
+        logger.warning(
+            "Instance plugins: plugins_dir has unexpected type %s — no instance plugins will load.",
+            type(plugins_dir).__name__,
+        )
+        return
+
     config_path = api_config.get_config_path()
     base = config_path.parent if config_path else Path()
     root = (base / str(plugins_dir)).resolve()
     if not root.is_dir():
-        logger.warning("Instance plugins: plugins_dir '%s' does not exist — no instance plugins will load.", root)
+        logger.warning(
+            "Instance plugins: plugins_dir '%s' does not exist or is not a directory — no instance plugins will load.",
+            root,
+        )
         return
 
     counts: list[str] = []
@@ -55,6 +65,9 @@ def log_plugin_loading() -> None:
             logger.warning("Instance plugins: '%s/' is missing under %s — those plugins will not load.", sub, root)
             counts.append(f"{sub}=0")
             continue
-        n = len([p for p in directory.glob(pattern) if not p.name.startswith("_")])
+        # Only skip _-prefixed files for Python process plugins; dataset YAML and
+        # workflow JSON loaders load all matching files without that convention.
+        skip_private = pattern.endswith(".py")
+        n = len([p for p in directory.glob(pattern) if not (skip_private and p.name.startswith("_"))])
         counts.append(f"{sub}={n}")
     logger.info("Instance plugins loaded from %s — %s.", root, ", ".join(counts))
