@@ -11,6 +11,8 @@ import xarray as xr
 from open_climate_service.streaming import BaseDatasetPlugin, normalize_period
 
 _WORLDPOP_NODATA = -99999.0
+_GLOBAL2_FIRST_YEAR = 2015
+_GLOBAL2_LAST_YEAR = 2030
 
 
 @dataclass(frozen=True)
@@ -43,8 +45,8 @@ class WorldPopYearlyPlugin(BaseDatasetPlugin):
         self.variant = _resolve_variant(product=product, variable=variable)
 
     async def periods(self, start: str, end: str) -> list[str]:
-        start_year = int(str(start)[:4])
-        end_year = int(str(end)[:4])
+        start_year = max(int(str(start)[:4]), _GLOBAL2_FIRST_YEAR)
+        end_year = min(int(str(end)[:4]), _GLOBAL2_LAST_YEAR)
         if start_year > end_year:
             return []
         return [str(year) for year in range(start_year, end_year + 1)]

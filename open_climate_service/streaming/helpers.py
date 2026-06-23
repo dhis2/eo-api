@@ -92,6 +92,8 @@ def normalize_period(
         ds = obj
         if source_variable and source_variable != variable and source_variable in ds:
             ds = ds.rename({source_variable: variable})
+        if variable in ds:
+            ds = ds[[variable]]
 
     if nodata is not None and variable in ds:
         ds[variable] = ds[variable].where(ds[variable] != nodata)
