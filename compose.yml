@@ -7,7 +7,11 @@ services:
     init: true
     restart: unless-stopped
     volumes:
-      - data:/tmp/data
+      # Operator-provided instance config (extent, data_dir). .env points
+      # CLIMATE_SERVICE_CONFIG at ./climate-service.yaml, i.e. /app inside the
+      # container. Create it first: cp climate-service.yaml.example climate-service.yaml
+      - ./climate-service.yaml:/app/climate-service.yaml:ro
+      - data:/app/data
 
 volumes:
   data:

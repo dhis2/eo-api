@@ -30,8 +30,15 @@ fix: ## Autofix ruff lint and format issues
 test: ## Run tests with pytest
 	uv run pytest tests/
 
-start: ## Start the Docker stack (builds images first)
-	docker compose up --build
+# Compose bind-mounts this into the container; a missing file would make Docker
+# create a directory at the mount point, so fail early with guidance instead.
+climate-service.yaml:
+	@echo "ERROR: climate-service.yaml is missing. Create it from the example:" >&2
+	@echo "  cp climate-service.yaml.example climate-service.yaml" >&2
+	@exit 1
 
-restart: ## Tear down, rebuild, and start the Docker stack from scratch
-	docker compose down -v && docker compose build --no-cache && docker compose up
+start: climate-service.yaml ## Start the Docker stack (builds images first)
+	docker compose up --build --remove-orphans
+
+restart: climate-service.yaml ## Tear down, rebuild, and start the Docker stack from scratch
+	docker compose down -v && docker compose build --no-cache && docker compose up --remove-orphans
