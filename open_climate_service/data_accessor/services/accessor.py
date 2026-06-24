@@ -12,6 +12,7 @@ from pyproj import Transformer
 
 from ...data_manager.services.downloader import get_cache_files, get_icechunk_path, get_zarr_path
 from ...data_manager.services.utils import get_time_dim, get_x_y_dims
+from ...shared.crs import dataset_crs
 from ...shared.time import numpy_datetime_to_period_string
 
 logger = logging.getLogger(__name__)
@@ -65,12 +66,9 @@ def get_data(
 
 def get_data_coverage(dataset: dict[str, Any]) -> dict[str, Any]:
     """Return temporal and spatial coverage metadata for downloaded data."""
-    from open_climate_service import config as api_config
-
-    native_crs = api_config.get_crs() or "EPSG:4326"
     ds = get_data(dataset)
     try:
-        return _coverage_from_dataset(ds=ds, period_type=str(dataset["period_type"]), native_crs=native_crs)
+        return _coverage_from_dataset(ds=ds, period_type=str(dataset["period_type"]), native_crs=dataset_crs(ds))
     finally:
         ds.close()
 
@@ -100,11 +98,8 @@ def get_data_coverage_for_paths(
             compat="override",
         )
 
-    from open_climate_service import config as api_config
-
-    native_crs = api_config.get_crs() or "EPSG:4326"
     try:
-        return _coverage_from_dataset(ds=ds, period_type=str(dataset["period_type"]), native_crs=native_crs)
+        return _coverage_from_dataset(ds=ds, period_type=str(dataset["period_type"]), native_crs=dataset_crs(ds))
     finally:
         ds.close()
 

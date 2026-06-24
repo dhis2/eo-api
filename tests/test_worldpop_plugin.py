@@ -30,7 +30,7 @@ def test_worldpop_plugin_fetch_period_uses_country_code(
 
     monkeypatch.setattr(plugin, "_fetch_year", fake_fetch_year)
 
-    dataset = asyncio.run(plugin.fetch_period("2022", [1.0, 2.0, 3.0, 4.0], country_code="SLE"))
+    dataset = plugin.fetch_period("2022", [1.0, 2.0, 3.0, 4.0], country_code="SLE")
 
     assert captured == {"year": 2022, "country_code": "SLE"}
     assert list(dataset.data_vars) == ["pop_total"]
@@ -40,7 +40,7 @@ def test_worldpop_plugin_requires_country_code() -> None:
     plugin = WorldPopYearlyPlugin()
 
     with pytest.raises(ValueError, match="country_code"):
-        asyncio.run(plugin.fetch_period("2022", [1.0, 2.0, 3.0, 4.0]))
+        plugin.fetch_period("2022", [1.0, 2.0, 3.0, 4.0])
 
 
 def test_worldpop_plugin_variant_resolver_supports_total_product() -> None:
@@ -69,7 +69,7 @@ def test_worldpop_plugin_fetch_period_can_rename_output_variable(
 
     monkeypatch.setattr(plugin, "_fetch_year", fake_fetch_year)
 
-    dataset = asyncio.run(plugin.fetch_period("2022", [1.0, 2.0, 3.0, 4.0], country_code="SLE"))
+    dataset = plugin.fetch_period("2022", [1.0, 2.0, 3.0, 4.0], country_code="SLE")
 
     assert list(dataset.data_vars) == ["population_total"]
     assert "x" in dataset.dims and "y" in dataset.dims
@@ -91,7 +91,7 @@ def test_worldpop_plugin_masks_nodata_sentinel_to_nan(
 
     monkeypatch.setattr(plugin, "_fetch_year", fake_fetch_year)
 
-    dataset = asyncio.run(plugin.fetch_period("2020", [0.0, 0.0, 4.0, 4.0], country_code="SLE"))
+    dataset = plugin.fetch_period("2020", [0.0, 0.0, 4.0, 4.0], country_code="SLE")
 
     values = dataset["pop_total"].values.flatten()
     assert np.isnan(values[1]), "sentinel -99999 must be masked to NaN"

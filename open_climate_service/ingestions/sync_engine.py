@@ -110,10 +110,10 @@ def plan_sync(
                 target_end=target_end,
                 target_end_source=target_end_source,
             )
-        # Probe the plugin for actually-available periods before committing to a sync.
+        # Enumerate the plugin's actually-available periods before committing to a sync.
         # The full list is stored on the SyncDetail so the orchestrator can reuse it
-        # without a second probe at execution time.
-        available_periods = _probe_available_periods(source_dataset, next_period_start, target_end)
+        # without re-querying at execution time.
+        available_periods = _query_available_periods(source_dataset, next_period_start, target_end)
         # available_periods is None  → no plugin, use target_end as-is
         # available_periods is []    → plugin exists but nothing available → NO_OP
         # available_periods is [...]  → clamp target_end to the last available period
@@ -135,7 +135,7 @@ def plan_sync(
         action = SyncAction.APPEND if _supports_append(source_dataset, latest_artifact) else SyncAction.REMATERIALIZE
         reason = "new_periods_available_for_append" if action == SyncAction.APPEND else "new_periods_available"
         # Only pass periods for APPEND — it covers [next_period_start, target_end].
-        # For REMATERIALIZE the orchestrator must probe the full [current_start, target_end]
+        # For REMATERIALIZE the orchestrator must enumerate the full [current_start, target_end]
         # range so we pass None and let it call plugin.periods() with the correct bounds.
         periods_for_orchestrator = available_periods if action == SyncAction.APPEND else None
         return SyncDetail(
@@ -161,7 +161,7 @@ def plan_sync(
 
     # Clamp target_end to what the plugin reports as actually available so we
     # never plan a rematerialization into future/unpublished releases.
-    available_periods = _probe_available_periods(source_dataset, current_end, target_end)
+    available_periods = _query_available_periods(source_dataset, current_end, target_end)
     if available_periods is not None:
         if not available_periods:
             return SyncDetail(
@@ -337,7 +337,7 @@ def _sync_plan_message(
     return f"Data exists through {current_end}. Sync will rematerialize the dataset through {target_end}."
 
 
-def _probe_available_periods(
+def _query_available_periods(
     source_dataset: dict[str, Any],
     start: str,
     target_end: str,
@@ -345,7 +345,7 @@ def _probe_available_periods(
     """Ask the plugin which periods are actually available.
 
     Returns the full period list (possibly empty) so the result can be reused
-    at execution time, avoiding a second probe in the orchestrator.
+    at execution time, avoiding a second query in the orchestrator.
 
     Returns None only when the dataset has no plugin (non-streaming) — the
     caller falls back to the requested target_end without clamping.

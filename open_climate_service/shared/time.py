@@ -2,7 +2,7 @@
 
 import logging
 import re
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 
 import numpy as np
@@ -136,6 +136,34 @@ def utc_now() -> datetime:
 def utc_today() -> date:
     """Return the current UTC calendar date."""
     return utc_now().date()
+
+
+def daily_period_ids(start: str | date, end: str | date, *, cutoff: str | date | None = None) -> list[str]:
+    """Return ISO ``YYYY-MM-DD`` strings for every day in ``[start, end]`` inclusive.
+
+    Accepts ISO date strings or ``date``/``datetime`` objects; returns an empty
+    list when ``start`` is after ``end``. ``cutoff`` (a source's latest available
+    day) caps ``end`` so daily plugins express their availability clamp in one call
+    rather than re-deriving it. Shared by the daily streaming plugins so they only
+    own the cutoff, not the day enumeration.
+    """
+
+    def _as_date(value: str | date) -> date:
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        return date.fromisoformat(str(value)[:10])
+
+    current = _as_date(start)
+    last = _as_date(end)
+    if cutoff is not None:
+        last = min(last, _as_date(cutoff))
+    out: list[str] = []
+    while current <= last:
+        out.append(current.isoformat())
+        current += timedelta(days=1)
+    return out
 
 
 def parse_hourly_period_string(value: str) -> datetime:

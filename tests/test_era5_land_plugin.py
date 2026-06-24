@@ -26,15 +26,6 @@ def test_era5_land_hourly_plugin_rejects_unknown_variable() -> None:
         ERA5LandCDSHourlyPlugin(variable="unknown")
 
 
-def test_era5_land_hourly_probe_derives_shape_from_bbox() -> None:
-    plugin = ERA5LandCDSHourlyPlugin(variable="t2m")
-    spec = asyncio.run(plugin.probe([-13.5, 6.9, -10.1, 10.0]))
-    assert spec.shape == (31, 34)
-    assert spec.time_dim == "t"
-    assert spec.x_dim == "x"
-    assert spec.y_dim == "y"
-
-
 def test_era5_land_hourly_periods_enumerates_hours() -> None:
     from datetime import timezone
 
@@ -65,8 +56,8 @@ def test_era5_land_hourly_fetch_uses_cached_monthly_batch(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(ERA5LandCDSHourlyPlugin, "_fetch_month", fake_fetch_month)
 
-    asyncio.run(plugin.fetch_period("2026-01-01T00", [-1.0, 8.0, 31.0, 10.0]))
-    asyncio.run(plugin.fetch_period("2026-01-01T01", [-1.0, 8.0, 31.0, 10.0]))
+    plugin.fetch_period("2026-01-01T00", [-1.0, 8.0, 31.0, 10.0])
+    plugin.fetch_period("2026-01-01T01", [-1.0, 8.0, 31.0, 10.0])
 
     assert fetch_calls == [(2026, 1)]
 
@@ -88,7 +79,7 @@ def test_era5_land_hourly_fetch_converts_temperature(monkeypatch: pytest.MonkeyP
         return kelvin_to_celsius(ds, {"variable": "t2m"})
 
     monkeypatch.setattr(ERA5LandCDSHourlyPlugin, "_fetch_month", fake_fetch_month)
-    ds = asyncio.run(plugin.fetch_period("2026-01-01T00", [-1.0, 8.0, 31.0, 10.0]))
+    ds = plugin.fetch_period("2026-01-01T00", [-1.0, 8.0, 31.0, 10.0])
     np.testing.assert_allclose(ds["t2m"].values, [[300.0 - 273.15]], atol=1e-3)
 
 
@@ -106,7 +97,7 @@ def test_era5_land_precipitation_plugin_uses_tp_and_converts_to_mm(monkeypatch: 
         )
 
     monkeypatch.setattr(ERA5LandCDSHourlyPlugin, "_fetch_month", fake_fetch_month)
-    ds = asyncio.run(plugin.fetch_period("2026-01-01T00", [-1.0, 8.0, 31.0, 10.0]))
+    ds = plugin.fetch_period("2026-01-01T00", [-1.0, 8.0, 31.0, 10.0])
     assert list(ds.data_vars) == ["tp"]
     np.testing.assert_allclose(ds["tp"].values, [[2.0]], atol=1e-3)
 
@@ -123,14 +114,6 @@ def test_era5_land_hourly_availability_cutoff_uses_cds() -> None:
         cutoff = _hourly_availability_cutoff()
 
     assert cutoff == datetime(2026, 5, 29, 23, tzinfo=timezone.utc)
-
-
-def test_era5_land_daily_probe_derives_shape_from_bbox() -> None:
-    plugin = ERA5LandDailyTemperaturePlugin()
-    spec = asyncio.run(plugin.probe([-13.5, 6.9, -10.1, 10.0]))
-    assert spec.shape == (31, 34)
-    assert spec.crs == 4326
-    assert spec.time_dim == "t"
 
 
 def test_era5_land_daily_periods_enumerates_days() -> None:
@@ -162,9 +145,9 @@ def test_era5_land_daily_fetch_uses_cached_monthly_batch(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(ERA5LandDailyTemperaturePlugin, "_fetch_month", fake_fetch_month)
 
-    asyncio.run(plugin.fetch_period("2024-01-01", [-1.0, 8.0, 31.0, 10.0]))
-    asyncio.run(plugin.fetch_period("2024-01-02", [-1.0, 8.0, 31.0, 10.0]))
-    asyncio.run(plugin.fetch_period("2024-01-03", [-1.0, 8.0, 31.0, 10.0]))
+    plugin.fetch_period("2024-01-01", [-1.0, 8.0, 31.0, 10.0])
+    plugin.fetch_period("2024-01-02", [-1.0, 8.0, 31.0, 10.0])
+    plugin.fetch_period("2024-01-03", [-1.0, 8.0, 31.0, 10.0])
 
     # Three days in the same month → only one CDS API call
     assert fetch_calls == [(2024, 1)]
@@ -185,16 +168,6 @@ def test_era5_land_daily_availability_cutoff_uses_cds() -> None:
 def test_era5_land_monthly_plugin_rejects_unknown_variable() -> None:
     with pytest.raises(ValueError, match="unsupported variable"):
         ERA5LandMonthlyPlugin(variable="unknown")
-
-
-def test_era5_land_monthly_probe_derives_shape_from_bbox() -> None:
-    plugin = ERA5LandMonthlyPlugin(variable="t2m")
-    spec = asyncio.run(plugin.probe([-13.5, 6.9, -10.1, 10.0]))
-    assert spec.shape == (31, 34)
-    assert spec.crs == 4326
-    assert spec.time_dim == "t"
-    assert spec.x_dim == "x"
-    assert spec.y_dim == "y"
 
 
 def test_era5_land_monthly_periods_enumerates_months() -> None:
@@ -230,20 +203,16 @@ def _make_monthly_nc(variable: str, value: float, kelvin: bool = False) -> xr.Da
 
 
 def test_era5_land_monthly_fetch_renames_coords_and_converts_temperature(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plugin = ERA5LandMonthlyPlugin(variable="t2m")
     raw_ds = _make_monthly_nc("t2m", 300.0)
 
-    def fake_fetch_sync(period_id: str, bbox: list[float]) -> xr.Dataset:
-        ds = raw_ds[["t2m"]]
-        ds = ds.rename({"longitude": "x", "latitude": "y", "valid_time": "t"})
-        from open_climate_service.transforms.unit_conversion import kelvin_to_celsius
-
-        return kelvin_to_celsius(ds, {"variable": "t2m"})
-
-    monkeypatch.setattr(plugin, "_fetch_sync", fake_fetch_sync)
-    ds = asyncio.run(plugin.fetch_period("2024-01", [-1.0, 8.0, 31.0, 10.0]))
+    # fetch_period now does the CDS download inline, then renames + converts. Mock the
+    # client + open_dataset so the real fetch_period runs against the raw netCDF.
+    monkeypatch.setattr("open_climate_service.plugins.datasets.era5_land._CdsClient", lambda: MagicMock())
+    monkeypatch.setattr("open_climate_service.plugins.datasets.era5_land.xr.open_dataset", lambda *a, **k: raw_ds)
+    ds = plugin.fetch_period("2024-01", [-1.0, 8.0, 31.0, 10.0])
 
     assert "t" in ds.dims
     assert "x" in ds.dims
@@ -263,8 +232,8 @@ def test_era5_land_monthly_precipitation_converts_metres_to_mm_rate(
     def fake_parent_fetch(self: object, period_id: str, bbox: list[float]) -> xr.Dataset:
         return raw_ds
 
-    monkeypatch.setattr(ERA5LandMonthlyPlugin, "_fetch_sync", fake_parent_fetch)
-    ds = asyncio.run(plugin.fetch_period("2024-01", [-1.0, 8.0, 31.0, 10.0]))
+    monkeypatch.setattr(ERA5LandMonthlyPlugin, "fetch_period", fake_parent_fetch)
+    ds = plugin.fetch_period("2024-01", [-1.0, 8.0, 31.0, 10.0])
 
     # CDS gives the mean daily total (m/day). We store the mean daily *rate* in mm/day,
     # NOT the calendar-month total: 0.05 m/day × 1000 mm/m = 50 mm/day. (A flux is the
@@ -312,8 +281,8 @@ def test_era5_land_hourly_refetches_when_month_changes(monkeypatch: pytest.Monke
 
     monkeypatch.setattr(ERA5LandCDSHourlyPlugin, "_fetch_month", fake_fetch_month)
 
-    asyncio.run(plugin.fetch_period("2026-01-01T00", [-1.0, 8.0, 31.0, 10.0]))
-    asyncio.run(plugin.fetch_period("2026-02-01T00", [-1.0, 8.0, 31.0, 10.0]))
+    plugin.fetch_period("2026-01-01T00", [-1.0, 8.0, 31.0, 10.0])
+    plugin.fetch_period("2026-02-01T00", [-1.0, 8.0, 31.0, 10.0])
 
     assert fetch_calls == [(2026, 1), (2026, 2)]
 
@@ -353,7 +322,7 @@ def test_edh_daily_plugin_rejects_unknown_variable() -> None:
 def test_edh_daily_fetch_renames_coords_and_converts_temperature(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = ERA5LandEDHDailyPlugin(variable="t2m")
     monkeypatch.setattr(plugin, "_region_for_bbox", lambda bbox: _fake_edh_daily_region())
-    ds = asyncio.run(plugin.fetch_period("2026-01-01", [-1.0, 8.0, 31.0, 10.0]))
+    ds = plugin.fetch_period("2026-01-01", [-1.0, 8.0, 31.0, 10.0])
     assert set(ds.dims) == {"t", "y", "x"}
     np.testing.assert_allclose(ds["t2m"].values, [[[285.0 - 273.15]]], atol=1e-3)
 

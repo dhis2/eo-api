@@ -317,7 +317,7 @@ class SyncDetail(BaseModel):
         default=None,
         description=(
             "Period list already fetched from the plugin during planning. "
-            "Passed to the orchestrator to avoid a second periods() probe at execution time."
+            "Passed to the orchestrator to avoid a second periods() call at execution time."
         ),
         exclude=True,
     )

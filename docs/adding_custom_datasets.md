@@ -8,7 +8,7 @@ The built-in dataset templates (CHIRPS3, ERA5-Land, WorldPop) ship as package da
 
 Adding a custom dataset involves two things:
 
-1. **A streaming plugin** — a Python class that probes the source, enumerates periods, and fetches one period at a time as an `xarray.Dataset`.
+1. **A streaming plugin** — a Python class that enumerates periods and fetches one period at a time as an `xarray.Dataset`.
 2. **A dataset template YAML** — a file that describes the dataset and tells the API which plugin class to use.
 
 Place both in your `plugins/datasets/` directory:
@@ -22,39 +22,86 @@ plugins/
 
 ## Step 1: Write the streaming plugin
 
-The plugin class must implement three async methods. The framework handles resume, concurrency, store commits, artifact registration, and publication.
+Subclass `BaseDatasetPlugin` and implement just two methods. The base class supplies
+the concurrency defaults and the canonical dimension names; the framework handles resume,
+concurrency, store commits, artifact registration, and publication.
 
 ```python
 # plugins/datasets/enacts.py
+# Everything you need to write a plugin is importable from open_climate_service.streaming.
 import xarray as xr
-from open_climate_service.streaming.protocol import GridSpec
+from open_climate_service.streaming import BaseDatasetPlugin, daily_period_ids, normalize_period
 
-class ENACTSRainfallPlugin:
-    max_concurrency = 2    # how many periods to fetch concurrently
-    commit_batch_size = 10 # commit to the Zarr store after this many periods
-
-    async def probe(self, bbox: list[float], **params) -> GridSpec:
-        """Return the native grid specification for the given bounding box."""
-        ...
-
+class ENACTSRainfallPlugin(BaseDatasetPlugin):
     async def periods(self, start: str, end: str) -> list[str]:
-        """Return the list of period ids available between start and end."""
+        """Return the ordered list of period ids available between start and end."""
         ...
 
-    async def fetch_period(
-        self, period_id: str, bbox: list[float], **params
-    ) -> xr.Dataset:
+    def fetch_period(self, period_id: str, bbox: list[float], **params) -> xr.Dataset:
         """Fetch one period and return it as an xarray Dataset."""
-        ...
+        da = ...  # read the source raster for this period
+        return normalize_period(da, variable="rainfall", period=period_id, bbox=bbox)
 ```
 
-**`probe`** — called once before fetching begins. Returns a `GridSpec` describing the native resolution and CRS of the source. The framework uses this to determine chunking and reprojection.
+**`periods`** — returns an ordered list of period identifiers (typically ISO 8601 date
+strings) the source has available between `start` and `end`. The framework uses it to
+determine which periods are missing and need to be fetched.
 
-**`periods`** — returns an ordered list of period identifiers (typically ISO 8601 date strings) that the source has available between `start` and `end`. The framework uses this list to determine which periods are missing and need to be fetched.
+**`fetch_period`** — fetches exactly one period and returns it as an `xarray.Dataset`
+normalized to `(t, y, x)`. Write it as a regular (blocking) method and the framework runs
+it in a worker thread, so ordinary blocking I/O is fine; the framework appends the result
+directly to the Icechunk-backed Zarr store, so the function should not write to disk. For
+a natively-async source (e.g. lazy Zarr access), declare it `async def fetch_period(...)`
+instead — the orchestrator awaits it directly.
 
-**`fetch_period`** — fetches exactly one period and returns it as an `xarray.Dataset`. The framework appends it directly to the Icechunk-backed Zarr store. The function should not write to disk.
+The framework **closes the dataset you return** after writing it (releasing the
+`open_rasterio` / `open_dataset` handles), so return a self-contained dataset — not a lazy
+view that shares a backing handle with a long-lived cache. A plugin that caches a fetched
+month/region should `.load()` it into memory so the per-period slices it returns are
+independent.
 
-`**params` in both `probe` and `fetch_period` receives the `params` dict from the YAML template, making it possible to reuse the same class for multiple variables.
+`**params` receives the `params` dict from the YAML template, so the same class can serve
+multiple variables.
+
+### Helpers, grid inference, and tuning
+
+The helpers below are all importable from `open_climate_service.streaming` (the single
+plugin import surface), alongside `BaseDatasetPlugin`.
+
+- **`normalize_period(obj, *, variable, period=None, nodata=None, bbox=None, bbox_crs="EPSG:4326", ...)`**
+  — turns a freshly read raster/dataset into the canonical
+  `(t, y, x)` single-variable shape. It drops curvilinear 2-D `lon`/`lat` helper coordinates,
+  renames the source axes (`lon`/`longitude`/`X` → `x`, `lat`/`latitude`/`Y` → `y`,
+  `time`/`valid_time` → `t`), clips to `bbox` (reprojecting the bbox from `bbox_crs` — WGS84
+  by default — onto the source CRS, so a projected/UTM grid clips correctly), drops a
+  singleton `band`, masks the nodata sentinel, and stamps the period onto the time axis.
+- **`daily_period_ids(start, end)`** — enumerate the inclusive ISO day strings for a daily
+  `periods()` implementation; apply your own availability clamp around it (accepts ISO
+  strings or `date` objects, returns `[]` when `start > end`).
+- **Tuning** — set the class attributes `max_concurrency` (default 1) and
+  `commit_batch_size` (default 1) only when the defaults don't fit.
+- **Grid inference** — the framework infers the store grid from the
+  **first fetched period** — shape and dtype from the array, the nodata sentinel from the
+  source `_FillValue`, and the CRS from the data. CRS inference falls back to **EPSG:4326**
+  when the data carries none, so a **projected-grid** source should declare its CRS with the
+  **`crs` class attribute** (an EPSG int or string).
+
+### Projected-grid (non-WGS84) sources
+
+For a source on a projected grid (e.g. a national UTM product), set the `crs` class attribute
+and write that CRS onto the data before normalizing. `normalize_period` then reprojects the
+(WGS84) request bbox onto the grid for the spatial clip, so no manual coordinate transform is
+needed — and the declared `crs` is what the grid inference records for the store:
+
+```python
+class SeNorgePlugin(BaseDatasetPlugin):
+    crs = 32633  # UTM33 (EPSG) — drives both grid inference and the normalize_period clip
+
+    def fetch_period(self, period_id, bbox, **params):
+        import rioxarray  # noqa: F401  # activates the .rio accessor for write_crs
+        ds = read_source(period_id).rio.write_crs(self.crs)
+        return normalize_period(ds, variable="tg", bbox=bbox)
+```
 
 ## Step 2: Create a dataset template YAML
 
@@ -102,7 +149,7 @@ class ENACTSRainfallPlugin:
 | Field | Required | Description |
 | ----- | -------- | ----------- |
 | `ingestion.plugin` | Yes | Dotted path to the streaming plugin class |
-| `ingestion.params` | No | Extra keyword arguments forwarded to `probe` and `fetch_period` as `**params`, and to the plugin constructor |
+| `ingestion.params` | No | Extra keyword arguments forwarded to `fetch_period` as `**params`, and to the plugin constructor |
 
 Multiple templates can share the same plugin class and differ only in `params`:
 
