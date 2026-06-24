@@ -135,7 +135,7 @@ class WorldPopYearlyPlugin(BaseDatasetPlugin):
         url = _population_url(
             int(period_id), _required_country_code(params), self.revision, self.resolution, self.constrained
         )
-        da = rioxarray.open_rasterio(url, masked=True)
+        da = rioxarray.open_rasterio(url, masked=True, chunks="auto")  # type: ignore[arg-type]
         if not isinstance(da, xr.DataArray):
             raise TypeError(f"Expected DataArray from WorldPop raster read, got {type(da).__name__}")
         # Mask the WorldPop sentinel (-99999) so the Zarr store uses NaN as the fill
@@ -187,7 +187,7 @@ class WorldPopAgeSexYearlyPlugin(BaseDatasetPlugin):
             bands: list[xr.DataArray] = []
             for age in _AGE_BANDS:
                 url = _agesex_url(year, country_code, self.revision, sex_token, age, self.constrained)
-                da = rioxarray.open_rasterio(url, masked=True, chunks={})  # lazy — no data read yet
+                da = rioxarray.open_rasterio(url, masked=True, chunks="auto")  # type: ignore[arg-type]  # lazy — no data read yet
                 if not isinstance(da, xr.DataArray):
                     raise TypeError(f"Expected DataArray from WorldPop raster read, got {type(da).__name__}")
                 bands.append(da.squeeze("band", drop=True))
