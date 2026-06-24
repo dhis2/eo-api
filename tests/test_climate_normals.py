@@ -1,4 +1,4 @@
-"""Tests for the climate-normals dataset plugin (ClimateNormalsPlugin)."""
+"""Tests for the ERA5-Land climate normals plugin (ERA5LandNormalsPlugin)."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from open_climate_service.plugins.datasets import climate_normals as cn
-from open_climate_service.plugins.datasets.climate_normals import ClimateNormalsPlugin
+from open_climate_service.plugins.datasets import era5_land as cn
+from open_climate_service.plugins.datasets.era5_land import ERA5LandNormalsPlugin
 
 
 def _synthetic_region(*, var: str = "t2m", time_dim: str = "valid_time", years: tuple[str, str] = ("1991", "1992")):
@@ -25,10 +25,10 @@ def _synthetic_region(*, var: str = "t2m", time_dim: str = "valid_time", years: 
     )
 
 
-def _edh_plugin(**overrides: object) -> ClimateNormalsPlugin:
+def _edh_plugin(**overrides: object) -> ERA5LandNormalsPlugin:
     kwargs: dict[str, object] = dict(edh_variable="t2m", variable="t2m", smoothing_window=0, unit_transform=None)
     kwargs.update(overrides)
-    return ClimateNormalsPlugin(**kwargs)  # type: ignore[arg-type]
+    return ERA5LandNormalsPlugin(**kwargs)  # type: ignore[arg-type]
 
 
 def test_periods_are_dayofyear_ids() -> None:
@@ -87,7 +87,7 @@ def test_load_reference_edh_normalises_longitude_and_renames(monkeypatch: pytest
         {"t2m": (("valid_time", "latitude", "longitude"), np.ones((len(times), 2, 2), dtype="float32"))},
         coords={"valid_time": times, "latitude": [2.0, 1.0], "longitude": [350.0, 351.0]},  # 0–360
     )
-    monkeypatch.setattr(cn, "_edh_open_daily", lambda: edh)
+    monkeypatch.setattr(cn, "_edh_open_zarr", lambda *args, **kwargs: edh)
     plugin = _edh_plugin(period=[1991, 1991])
 
     region = plugin._load_reference([-10.0, 1.0, -9.0, 2.0])  # bbox in -180/180; lon 350 -> -10
@@ -98,4 +98,4 @@ def test_load_reference_edh_normalises_longitude_and_renames(monkeypatch: pytest
 
 def test_param_validation() -> None:
     with pytest.raises(ValueError, match="edh_variable"):
-        ClimateNormalsPlugin(variable="t2m", edh_variable="")
+        ERA5LandNormalsPlugin(variable="t2m", edh_variable="")

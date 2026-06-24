@@ -171,3 +171,55 @@
     colormap: blues
     range: [0.0, 20.0]
     nodata: 0.0
+
+- id: era5land_temperature_normal
+  name: 2m temperature normal (ERA5-Land, 1991–2020)
+  short_name: Temperature normal
+  variable: t2m
+  period_type: climatology
+  sync:
+    kind: static
+  extents:
+    spatial:
+      bbox: [-180, -90, 180, 90]
+  ingestion:
+    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandNormalsPlugin
+    params:
+      edh_variable: t2m
+      variable: t2m
+      period: [1991, 2020]
+      smoothing_window: 31
+      unit_transform: kelvin_to_celsius
+  units: degC
+  resolution: 9 km x 9 km
+  source: ERA5-Land Reanalysis (Earth Data Hub)
+  source_url: https://earthdatahub.destine.eu/collections/era5/datasets/era5-land-daily
+  display:
+    colormap: rdbu_r
+    range: [-30.0, 30.0]
+
+- id: era5land_precipitation_normal
+  name: Total precipitation normal (ERA5-Land, 1991–2020)
+  short_name: Precipitation normal
+  variable: tp
+  period_type: climatology
+  sync:
+    kind: static
+  extents:
+    spatial:
+      bbox: [-180, -90, 180, 90]
+  ingestion:
+    plugin: open_climate_service.plugins.datasets.era5_land.ERA5LandNormalsPlugin
+    params:
+      edh_variable: tp
+      variable: tp
+      period: [1991, 2020]
+      smoothing_window: 31
+      unit_transform: metres_to_mm
+  units: mm
+  resolution: 9 km x 9 km
+  source: ERA5-Land Reanalysis (Earth Data Hub)
+  source_url: https://earthdatahub.destine.eu/collections/era5/datasets/era5-land-daily
+  display:
+    colormap: blues
+    range: [0.0, 20.0]
