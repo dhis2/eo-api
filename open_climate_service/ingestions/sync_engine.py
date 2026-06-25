@@ -488,11 +488,18 @@ def _sync_current_end(*, source_dataset: dict[str, Any], latest_artifact: Artifa
     datasets, but keeps planning aligned with execution on the committed store
     state rather than a cached metadata snapshot.
     """
+    end = latest_artifact.coverage.temporal.end
+    if end is None:
+        # Sync planning only applies to temporal datasets; a non-temporal (ordinal)
+        # dataset such as a day-of-year climatology has no temporal end to advance from.
+        raise ValueError(
+            f"Dataset '{source_dataset.get('id', '<unknown>')}' has no temporal coverage and cannot be synced"
+        )
     if not _is_plugin_backed(source_dataset):
-        return latest_artifact.coverage.temporal.end
+        return end
     raw_artifact_path = _icechunk_path_for(latest_artifact)
     if raw_artifact_path is None:
-        return latest_artifact.coverage.temporal.end
+        return end
     local_artifact_path, path_reason = _resolve_local_artifact_path(raw_artifact_path)
     if local_artifact_path is None:
         logger.warning(
@@ -501,7 +508,7 @@ def _sync_current_end(*, source_dataset: dict[str, Any], latest_artifact: Artifa
             path_reason or "unsupported",
             raw_artifact_path,
         )
-        return latest_artifact.coverage.temporal.end
+        return end
     try:
         committed = read_committed_period_ids(
             local_artifact_path,
@@ -515,9 +522,9 @@ def _sync_current_end(*, source_dataset: dict[str, Any], latest_artifact: Artifa
             str(local_artifact_path),
             exc,
         )
-        return latest_artifact.coverage.temporal.end
+        return end
     if not committed:
-        return latest_artifact.coverage.temporal.end
+        return end
     try:
         return normalize_period_string(
             max(committed, key=parse_period_string_to_datetime),
@@ -531,4 +538,4 @@ def _sync_current_end(*, source_dataset: dict[str, Any], latest_artifact: Artifa
             str(local_artifact_path),
             exc,
         )
-        return latest_artifact.coverage.temporal.end
+        return end

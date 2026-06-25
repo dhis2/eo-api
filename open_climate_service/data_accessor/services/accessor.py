@@ -174,11 +174,19 @@ def _coverage_from_dataset(*, ds: xr.Dataset, period_type: str, native_crs: str 
             },
         }
 
-    time_dim = get_time_dim(ds)
     x_dim, y_dim = get_x_y_dims(ds)
 
-    start = _period_string_scalar(numpy_datetime_to_period_string(ds[time_dim].min(), period_type))  # type: ignore[arg-type]
-    end = _period_string_scalar(numpy_datetime_to_period_string(ds[time_dim].max(), period_type))  # type: ignore[arg-type]
+    # A non-temporal (ordinal) dataset — e.g. a day-of-year climatology has a
+    # `dayofyear` axis, not a datetime one — has no temporal coverage. Report
+    # spatial coverage only, mirroring how the STAC builder treats these stores.
+    start: str | None
+    end: str | None
+    try:
+        time_dim = get_time_dim(ds)
+        start = _period_string_scalar(numpy_datetime_to_period_string(ds[time_dim].min(), period_type))  # type: ignore[arg-type]
+        end = _period_string_scalar(numpy_datetime_to_period_string(ds[time_dim].max(), period_type))  # type: ignore[arg-type]
+    except ValueError:
+        start = end = None
 
     xmin, xmax = ds[x_dim].min().item(), ds[x_dim].max().item()
     ymin, ymax = ds[y_dim].min().item(), ds[y_dim].max().item()

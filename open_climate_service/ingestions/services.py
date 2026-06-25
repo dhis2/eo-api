@@ -370,17 +370,21 @@ def _create_streaming_artifact(
             spatial=CoverageSpatial(**coverage_data["coverage"]["spatial"]),
             spatial_wgs84=CoverageSpatial(**_spatial_wgs84_data) if _spatial_wgs84_data else None,
         )
-        if not _temporal_coverage_matches_streaming_request_scope(coverage.temporal, request_scope):
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "Materialized artifact coverage does not match the requested scope: "
-                    f"coverage={coverage.temporal.start}..{coverage.temporal.end}, "
-                    f"request={request_scope.start}..{request_scope.end}"
-                ),
-            )
-
-        request_scope = request_scope.model_copy(update={"end": coverage.temporal.end})
+        # Temporal datasets: verify the realized coverage matches the requested scope
+        # and clamp the request end to the realized (possibly source-limited) end. A
+        # non-temporal (ordinal) dataset — e.g. a day-of-year climatology — has no
+        # temporal coverage, so there is nothing to match or clamp.
+        if coverage.temporal.start is not None:
+            if not _temporal_coverage_matches_streaming_request_scope(coverage.temporal, request_scope):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Materialized artifact coverage does not match the requested scope: "
+                        f"coverage={coverage.temporal.start}..{coverage.temporal.end}, "
+                        f"request={request_scope.start}..{request_scope.end}"
+                    ),
+                )
+            request_scope = request_scope.model_copy(update={"end": coverage.temporal.end})
 
         _maybe_build_pyramid(store_path, dataset)
 
@@ -1089,7 +1093,7 @@ def _temporal_coverage_matches_streaming_request_scope(
     """
     if temporal.start != request_scope.start:
         return False
-    if request_scope.end is not None and temporal.end > request_scope.end:
+    if request_scope.end is not None and temporal.end is not None and temporal.end > request_scope.end:
         return False
     return True
 
