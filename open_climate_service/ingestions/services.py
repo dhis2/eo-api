@@ -967,6 +967,10 @@ def _default_request_end(period_type: str) -> str:
         return f"{today.year:04d}-{today.month:02d}"
     if period_type == "yearly":
         return str(utc_today().year)
+    if period_type == "climatology":
+        # Day-of-year climatology: the plugin enumerates 1..366 regardless of the
+        # request range, so the end value is unused — return a stable sentinel.
+        return "366"
     raise HTTPException(status_code=400, detail=f"Invalid period_type '{period_type}' for request end defaulting")
 
 

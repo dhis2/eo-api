@@ -22,7 +22,6 @@ from open_climate_service.shared.time import (
     parse_period_string_to_datetime,
 )
 from open_climate_service.streaming import BaseDatasetPlugin
-from open_climate_service.streaming.protocol import GridSpec
 from open_climate_service.transforms.unit_conversion import kelvin_to_celsius, metres_to_mm
 
 # CDS API long-name variables for reanalysis-era5-land-monthly-means
@@ -751,7 +750,7 @@ def _circular_rolling_mean(da: xr.DataArray, window: int) -> xr.DataArray:
     return da.copy(data=result)
 
 
-class ERA5LandNormalsPlugin:
+class ERA5LandNormalsPlugin(BaseDatasetPlugin):
     """Streaming plugin that computes WMO day-of-year climate normals from ERA5-Land.
 
     Reads the reference period directly from the Earth Data Hub daily ERA5-Land Zarr
@@ -769,6 +768,12 @@ class ERA5LandNormalsPlugin:
 
     max_concurrency = 1
     commit_batch_size = 30
+    # Non-temporal stepping axis: the orchestrator appends along dayofyear (1..366),
+    # not a datetime ``t``. Declared as a class attribute since the contract no longer
+    # has a ``probe()`` to report it; the grid (shape/dtype/CRS) is inferred from the
+    # first fetched period.
+    time_dim = _NORMALS_DAYOFYEAR_DIM
+    crs = 4326
 
     def __init__(
         self,
@@ -786,19 +791,14 @@ class ERA5LandNormalsPlugin:
         self.edh_variable = edh_variable
         self.period = (int(period[0]), int(period[1]))
         self.smoothing_window = int(smoothing_window)
+        # _circular_rolling_mean assumes a centred, odd window; 0 disables smoothing.
+        if self.smoothing_window < 0:
+            raise ValueError(f"smoothing_window must be >= 0, got {self.smoothing_window}")
+        if self.smoothing_window % 2 == 0 and self.smoothing_window != 0:
+            raise ValueError(f"smoothing_window must be odd (a centred window), got {self.smoothing_window}")
         self.unit_transform = unit_transform
         self._lock = Lock()
         self._climatology: xr.Dataset | None = None
-
-    async def probe(self, bbox: list[float], **_: Any) -> GridSpec:
-        clim = await asyncio.to_thread(self._ensure_climatology, bbox)
-        return GridSpec(
-            shape=(int(clim.sizes["y"]), int(clim.sizes["x"])),
-            crs=4326,
-            dtype=np.dtype(clim[self.variable].dtype),
-            nodata=None,
-            time_dim=_NORMALS_DAYOFYEAR_DIM,
-        )
 
     async def periods(self, start: str, end: str) -> list[str]:
         _ = start, end
@@ -841,21 +841,37 @@ class ERA5LandNormalsPlugin:
         start_year, end_year = self.period
         eps = 0.05
         xmin, ymin, xmax, ymax = map(float, bbox)
-        lon_min = (xmin % 360) - eps
-        lon_max = (xmax % 360) + eps
         ds = _edh_open_zarr(_EDH_DAILY_URL)
-        region = (
-            ds[[self.edh_variable]]
-            .sel(
+        try:
+            base = ds[[self.edh_variable]].sel(
                 latitude=slice(ymax + eps, ymin - eps),
-                longitude=slice(lon_min, lon_max),
                 valid_time=slice(f"{start_year}-01-01", f"{end_year}-12-31"),
             )
-            .load()
-        )
-        ds.close()
+            # EDH stores longitude in [0, 360). Map the WGS84 (-180/180) bbox onto it.
+            # A bbox that straddles the 0°/360° seam (e.g. spans the prime meridian)
+            # gives lon_min > lon_max, so select the two pieces and concatenate; a
+            # (near-)global span takes the whole axis. A single `slice(xmin%360, xmax%360)`
+            # would silently return empty/reversed results for these cases.
+            if xmax - xmin >= 360 - eps:
+                region = base
+            else:
+                lon_min, lon_max = xmin % 360, xmax % 360
+                if lon_min <= lon_max:
+                    region = base.sel(longitude=slice(lon_min - eps, lon_max + eps))
+                else:
+                    region = xr.concat(
+                        [
+                            base.sel(longitude=slice(lon_min - eps, 360.0)),
+                            base.sel(longitude=slice(0.0, lon_max + eps)),
+                        ],
+                        dim="longitude",
+                    )
+            region = region.load()
+        finally:
+            ds.close()
+        # Back to WGS84 (-180/180), ascending, with canonical dim names.
         region = region.assign_coords(longitude=((region.longitude + 180) % 360) - 180)
-        region = region.rename({"longitude": "x", "latitude": "y"})
+        region = region.sortby("longitude").rename({"longitude": "x", "latitude": "y"})
         if self.edh_variable != self.variable:
             region = region.rename({self.edh_variable: self.variable})
         return region

@@ -99,3 +99,38 @@ def test_load_reference_edh_normalises_longitude_and_renames(monkeypatch: pytest
 def test_param_validation() -> None:
     with pytest.raises(ValueError, match="edh_variable"):
         ERA5LandNormalsPlugin(variable="t2m", edh_variable="")
+
+
+def test_plugin_declares_dayofyear_stepping_dimension() -> None:
+    # After the BaseDatasetPlugin migration the orchestrator reads time_dim from the
+    # class attribute (probe() is gone), so it must point at the dayofyear axis.
+    from open_climate_service.streaming import BaseDatasetPlugin
+
+    plugin = _edh_plugin()
+    assert isinstance(plugin, BaseDatasetPlugin)
+    assert plugin.time_dim == "dayofyear"
+
+
+@pytest.mark.parametrize("bad", [-1, 30])
+def test_smoothing_window_must_be_nonnegative_and_odd(bad: int) -> None:
+    with pytest.raises(ValueError, match="smoothing_window"):
+        _edh_plugin(smoothing_window=bad)
+
+
+def test_load_reference_handles_bbox_crossing_zero_meridian(monkeypatch: pytest.MonkeyPatch) -> None:
+    times = pd.date_range("1991-01-01", "1991-12-31", freq="D")
+    # Monotonic-ascending [0, 360) store (as EDH publishes it); the seam pieces the
+    # bbox needs are the low (0,1,2) and high (358,359) ends.
+    edh = xr.Dataset(
+        {"t2m": (("valid_time", "latitude", "longitude"), np.ones((len(times), 2, 5), dtype="float32"))},
+        coords={"valid_time": times, "latitude": [2.0, 1.0], "longitude": [0.0, 1.0, 2.0, 358.0, 359.0]},
+    )
+    monkeypatch.setattr(cn, "_edh_open_zarr", lambda *args, **kwargs: edh)
+    plugin = _edh_plugin(period=[1991, 1991])
+
+    region = plugin._load_reference([-2.0, 1.0, 2.0, 2.0])  # bbox crosses the prime meridian
+
+    xs = [float(v) for v in region["x"].values]
+    assert xs == sorted(xs)  # ascending after the 0–360 → -180/180 conversion
+    assert min(xs) < 0 < max(xs)  # genuinely spans the meridian, not an empty/reversed strip
+    assert len(xs) == 5  # all five source longitudes selected (358→-2 … 2→2)
