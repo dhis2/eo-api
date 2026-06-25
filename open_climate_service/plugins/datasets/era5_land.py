@@ -508,8 +508,15 @@ class ERA5LandTempDailyPlugin(ERA5LandEDHDailyPlugin):
     def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
         edh_latest = self._latest_available()
         if self._cds_plugin is None or period_id <= edh_latest:
-            return super().fetch_period(period_id, bbox)
-        return self._cds_plugin.fetch_period(period_id, bbox)
+            ds = super().fetch_period(period_id, bbox)
+        else:
+            ds = self._cds_plugin.fetch_period(period_id, bbox)
+        # ERA5 sources carry an ensemble-member coordinate ('number', value 0 for ERA5-Land
+        # reanalysis; sometimes also 'expver') that otherwise persists as a phantom second
+        # band — which then loads as a spurious `bands` dimension downstream (e.g. anomalies).
+        # Keep only the target variable and its dimension coordinates.
+        extras = [v for v in ds.variables if v != self.variable and v not in ds.dims]
+        return ds.drop_vars(extras, errors="ignore")
 
 
 class ERA5LandEDHPrecipitationDailyPlugin(_ERA5LandEDHBase):
