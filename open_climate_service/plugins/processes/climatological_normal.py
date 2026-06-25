@@ -19,15 +19,23 @@ _FREQUENCIES = ("dayofyear", "month")
 
 
 def _circular_rolling_mean(da: xr.DataArray, window: int, dim: str) -> xr.DataArray:
-    """Circular rolling mean over the (leading) ``dim`` axis (wraps end→start)."""
-    vals = np.concatenate([da.values, da.values, da.values], axis=0)
-    result = np.empty_like(da.values)
-    half = window // 2
+    """Circular rolling mean over ``dim`` (wraps end→start), preserving laziness.
+
+    Pads ``half = window // 2`` steps from each end of the (circular) axis and applies
+    xarray's rolling mean, which is dask-aware — so the ``(dim, y, x, …)`` array is never
+    fully materialised and chunking survives until the final write. Requires an odd
+    ``window`` no larger than the axis length (validated by the caller).
+    """
     n = da.sizes[dim]
-    for i in range(n):
-        centre = n + i
-        result[i] = vals[centre - half : centre + half + 1].mean(axis=0)
-    return da.copy(data=result)
+    half = window // 2
+    if half == 0:  # window == 1 → identity
+        return da
+    head = da.isel({dim: slice(0, half)})
+    tail = da.isel({dim: slice(n - half, n)})
+    padded = xr.concat([tail, da, head], dim=dim)
+    smoothed = padded.rolling({dim: window}, center=True).mean()
+    # Drop the wrap padding and restore the original ordinal coordinate.
+    return smoothed.isel({dim: slice(half, half + n)}).assign_coords({dim: da[dim]})
 
 
 @process(
@@ -37,7 +45,8 @@ def _circular_rolling_mean(da: xr.DataArray, window: int, dim: str) -> xr.DataAr
         "smoothing_window": {
             "description": (
                 "Circular rolling-mean window in days for WMO day-of-year smoothing "
-                "(0 disables, default 31). Ignored when frequency='month'."
+                "(0 disables, must be odd and <= the number of days, default 31). "
+                "Ignored when frequency='month'."
             )
         },
     },
@@ -53,17 +62,28 @@ def climatological_normal(data: xr.DataArray, frequency: str = "dayofyear", smoo
     """
     if frequency not in _FREQUENCIES:
         raise ValueError(f"frequency must be one of {_FREQUENCIES}, got {frequency!r}")
+    window = int(smoothing_window)
+    if window < 0:
+        raise ValueError(f"smoothing_window must be >= 0 (0 disables), got {window}")
+
+    # Require a datetime-coordinate axis to group on: falling back to a non-datetime
+    # dim named "t" would only surface as a confusing error inside groupby(".dayofyear").
     t_dim = next(
         (d for d in data.dims if d in data.coords and np.issubdtype(data[d].dtype, np.datetime64)),
-        "t" if "t" in data.dims else None,
+        None,
     )
     if t_dim is None:
-        raise ValueError("climatological_normal requires a temporal dimension on the input cube")
+        raise ValueError("climatological_normal requires a datetime temporal dimension on the input cube")
     t_dim = str(t_dim)
 
     clim = data.groupby(f"{t_dim}.{frequency}").mean(t_dim)
     clim = clim.transpose(frequency, ...)  # ensure the ordinal axis leads (for smoothing)
     # Circular smoothing is only meaningful for the dense day-of-year axis, not 12 months.
-    if frequency == "dayofyear" and smoothing_window and int(smoothing_window) > 0:
-        clim = _circular_rolling_mean(clim, int(smoothing_window), frequency)
+    if frequency == "dayofyear" and window > 0:
+        n = clim.sizes["dayofyear"]
+        if window % 2 == 0:
+            raise ValueError(f"smoothing_window must be odd (a centred window), got {window}")
+        if window > n:
+            raise ValueError(f"smoothing_window ({window}) must be <= the number of days ({n})")
+        clim = _circular_rolling_mean(clim, window, "dayofyear")
     return clim

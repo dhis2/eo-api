@@ -249,13 +249,15 @@
     range: [-30.0, 30.0]
 
 - id: era5land_precipitation_monthly_normal_1991_2020
-  name: Total precipitation monthly normal (ERA5-Land, 1991–2020)
+  name: Mean daily precipitation monthly normal (ERA5-Land, 1991–2020)
   short_name: Precipitation monthly normal
   variable: tp
   period_type: climatology
   sync:
     kind: static
-  units: mm
+  # mm/d, not a monthly total: the workflow averages the daily-rate (mm/d) source over
+  # the days in each calendar month, so the result stays a mean daily rate.
+  units: mm/d
   source: Derived (climate_normal workflow)
   display:
     colormap: blues

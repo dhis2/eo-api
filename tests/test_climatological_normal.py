@@ -59,3 +59,28 @@ def test_climatological_normal_monthly_reduces_time_to_month() -> None:
 def test_climatological_normal_rejects_unknown_frequency() -> None:
     with pytest.raises(ValueError, match="frequency"):
         climatological_normal(_daily_cube(), frequency="weekly")
+
+
+def test_climatological_normal_requires_datetime_temporal_dim() -> None:
+    # A dim named "t" with non-datetime coords must raise clearly, not fall through to
+    # groupby("t.dayofyear") on integer values.
+    arr = xr.DataArray(
+        np.zeros((3, 2, 2), dtype="float32"),
+        dims=("t", "y", "x"),
+        coords={"t": [0, 1, 2], "y": [1.0, 2.0], "x": [1.0, 2.0]},
+    )
+    with pytest.raises(ValueError, match="datetime"):
+        climatological_normal(arr)
+
+
+@pytest.mark.parametrize("bad", [-1, 30, 999])
+def test_climatological_normal_validates_smoothing_window(bad: int) -> None:
+    # negative (< 0), even (30), and too-large (> 366 days) all raise.
+    with pytest.raises(ValueError, match="smoothing_window"):
+        climatological_normal(_daily_cube(), smoothing_window=bad)
+
+
+def test_climatological_normal_smoothing_preserves_dask_laziness() -> None:
+    cube = _daily_cube().chunk({"y": 1, "x": 1})
+    out = climatological_normal(cube, smoothing_window=31)
+    assert out.chunks is not None  # smoothing stays lazy — not materialised via .values
