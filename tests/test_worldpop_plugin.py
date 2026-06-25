@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -9,6 +10,7 @@ from open_climate_service.plugins.datasets.worldpop import (
     WorldPopYearlyPlugin,
     _population_url,
     _resolve_variant,
+    _worldpop_cache_dir,
 )
 
 
@@ -77,6 +79,21 @@ def test_worldpop_plugin_fetch_period_reads_country_url(monkeypatch: pytest.Monk
 
     assert "/2022/SLE/" in str(captured["url"])
     assert list(dataset.data_vars) == ["pop_total"]
+
+
+def test_worldpop_cache_dir_uses_data_dir_from_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "climate-service.yaml"
+    config_file.write_text("data_dir: ./data\nextent:\n  id: test\n", encoding="utf-8")
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
+
+    assert _worldpop_cache_dir() == tmp_path / "data" / "cache" / "worldpop"
+
+
+def test_worldpop_cache_dir_falls_back_to_xdg_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+
+    assert _worldpop_cache_dir() == tmp_path / "climate-service" / "cache" / "worldpop"
 
 
 def test_worldpop_plugin_requires_country_code() -> None:

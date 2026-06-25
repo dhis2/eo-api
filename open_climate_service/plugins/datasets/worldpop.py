@@ -25,6 +25,7 @@ https://github.com/dhis2/open-climate-service/issues/269).
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
+from open_climate_service import config as api_config
 from open_climate_service.streaming import BaseDatasetPlugin, normalize_period
 
 _WORLDPOP_NODATA = -99999.0
@@ -49,6 +51,21 @@ def _global2_years(start: str, end: str) -> list[str]:
     return [str(year) for year in range(start_year, end_year + 1)]
 
 
+def _worldpop_cache_dir() -> Path:
+    """Directory for cached WorldPop GeoTIFF downloads.
+
+    Lives under the instance ``data_dir`` (``<data_dir>/cache/worldpop``) so the cache
+    shares the instance's lifecycle, mirroring how downloads/jobs are resolved. Falls
+    back to an XDG cache path when no config/``data_dir`` is set (e.g. CI).
+    """
+    data_dir = api_config.get_data_dir()
+    if data_dir is not None:
+        base = data_dir
+    else:
+        base = Path(os.getenv("XDG_CACHE_HOME", Path.home() / ".cache")) / "climate-service"
+    return base / "cache" / "worldpop"
+
+
 def _open_worldpop_raster(url: str, **open_kwargs: Any) -> xr.DataArray:
     """Open a WorldPop GeoTIFF, downloading it to a local cache first.
 
@@ -60,7 +77,7 @@ def _open_worldpop_raster(url: str, **open_kwargs: Any) -> xr.DataArray:
     """
     import rioxarray
 
-    cache = Path.home() / ".cache" / "chap-gis" / "worldpop"
+    cache = _worldpop_cache_dir()
     cache.mkdir(parents=True, exist_ok=True)
     target = cache / url.rsplit("/", 1)[-1]
     if not target.exists():
