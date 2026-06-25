@@ -33,11 +33,12 @@
 # computed from the already-ingested CHIRPS3 store). No ingestion plugin — the data is
 # produced by the workflow and published via save_result. Run the workflow on
 # chirps3_precipitation_daily; `frequency` selects day-of-year (366) or month (12).
-# Monthly values are the mean daily rate per calendar month.
+# Monthly values are the mean daily rate per calendar month. The reference period is
+# baked into the id (e.g. _1991_2020); add a copy with a new period when one is adopted.
 # ---------------------------------------------------------------------------
 
-- id: chirps3_precipitation_daily_normal_from_store
-  name: Precipitation daily normal (CHIRPS3, from managed store)
+- id: chirps3_precipitation_daily_normal_1991_2020
+  name: Precipitation daily normal (CHIRPS3, 1991–2020)
   short_name: Precipitation daily normal
   variable: precip
   period_type: climatology
@@ -50,8 +51,8 @@
     range: [0.0, 20.0]
     nodata: -9999.0
 
-- id: chirps3_precipitation_monthly_normal_from_store
-  name: Precipitation monthly normal (CHIRPS3, from managed store)
+- id: chirps3_precipitation_monthly_normal_1991_2020
+  name: Precipitation monthly normal (CHIRPS3, 1991–2020)
   short_name: Precipitation monthly normal
   variable: precip
   period_type: climatology

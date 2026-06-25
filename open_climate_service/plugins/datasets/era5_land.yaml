@@ -225,29 +225,18 @@
     range: [0.0, 20.0]
 
 # ---------------------------------------------------------------------------
-# Climate-normal output templates for the `climate_normal` openEO workflow
-# (normals computed from an already-ingested managed GeoZarr store). These have NO
-# ingestion plugin — the data is produced by the workflow and published via
-# save_result, which requires a registered static template for the output id.
-# Run the workflow on the daily dataset; `frequency` selects day-of-year (366) or
-# month (12). Monthly values are the mean of the daily field per calendar month.
+# Monthly climate-normal output templates for the `climate_normal` openEO workflow
+# (month-of-year means computed from an already-ingested managed GeoZarr store). These
+# have NO ingestion plugin — the data is produced by the workflow and published via
+# save_result, which requires a registered static template for the output id. Run the
+# workflow on an ERA5-Land dataset with `frequency: month`. The reference period is
+# baked into the id (e.g. _1991_2020); add a copy with a new period when one is adopted.
+# (Day-of-year ERA5-Land normals come from the EDH-direct era5land_*_daily_normal_*
+# templates above, so only the monthly variants are produced from the store here.)
 # ---------------------------------------------------------------------------
 
-- id: era5land_temperature_daily_normal_from_store
-  name: 2m temperature daily normal (from managed store)
-  short_name: Temperature daily normal
-  variable: t2m
-  period_type: climatology
-  sync:
-    kind: static
-  units: degC
-  source: Derived (climate_normal workflow)
-  display:
-    colormap: rdbu_r
-    range: [-30.0, 30.0]
-
-- id: era5land_temperature_monthly_normal_from_store
-  name: 2m temperature monthly normal (from managed store)
+- id: era5land_temperature_monthly_normal_1991_2020
+  name: 2m temperature monthly normal (ERA5-Land, 1991–2020)
   short_name: Temperature monthly normal
   variable: t2m
   period_type: climatology
@@ -259,21 +248,8 @@
     colormap: rdbu_r
     range: [-30.0, 30.0]
 
-- id: era5land_precipitation_daily_normal_from_store
-  name: Total precipitation daily normal (from managed store)
-  short_name: Precipitation daily normal
-  variable: tp
-  period_type: climatology
-  sync:
-    kind: static
-  units: mm
-  source: Derived (climate_normal workflow)
-  display:
-    colormap: blues
-    range: [0.0, 20.0]
-
-- id: era5land_precipitation_monthly_normal_from_store
-  name: Total precipitation monthly normal (from managed store)
+- id: era5land_precipitation_monthly_normal_1991_2020
+  name: Total precipitation monthly normal (ERA5-Land, 1991–2020)
   short_name: Precipitation monthly normal
   variable: tp
   period_type: climatology
