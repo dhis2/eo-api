@@ -333,17 +333,21 @@
       function stepLabelAt(steps, i) {
         if (Array.isArray(steps)) return steps[i];
         const sd = new Date(steps.start);
+        // Label at the granularity of the step: year for P1Y, year-month for P1M,
+        // date for daily, date+time for sub-daily — so a yearly axis shows "2026",
+        // not "2026-01-01".
         if (steps.calUnit === "M") {
           const d = new Date(sd);
           d.setUTCMonth(d.getUTCMonth() + i * steps.n);
-          return d.toISOString().slice(0, 10);
+          return d.toISOString().slice(0, 7);
         }
         if (steps.calUnit === "Y") {
           const d = new Date(sd);
           d.setUTCFullYear(d.getUTCFullYear() + i * steps.n);
-          return d.toISOString().slice(0, 10);
+          return d.toISOString().slice(0, 4);
         }
-        return new Date(sd.getTime() + i * steps.inc).toISOString().slice(0, 10);
+        const iso = new Date(sd.getTime() + i * steps.inc).toISOString();
+        return steps.inc < 86_400_000 ? iso.slice(0, 16).replace("T", " ") : iso.slice(0, 10);
       }
 
       const MAP_UNAVAILABLE_MESSAGE =
