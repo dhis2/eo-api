@@ -38,6 +38,20 @@ def test_periods_are_dayofyear_ids() -> None:
     assert periods[-1] == "366"
 
 
+def test_periods_omit_day_366_for_a_non_leap_reference_period() -> None:
+    # A reference period that spans no leap year has no day-of-year 366; periods()
+    # must not enumerate it (fetch_period would KeyError selecting it off the cube).
+    periods = asyncio.run(_edh_plugin(period=[2021, 2023]).periods("ignored", "ignored"))
+    assert len(periods) == 365
+    assert periods[-1] == "365"
+
+
+def test_periods_include_day_366_when_reference_period_has_a_leap_year() -> None:
+    periods = asyncio.run(_edh_plugin(period=[2019, 2021]).periods("ignored", "ignored"))  # 2020 is leap
+    assert len(periods) == 366
+    assert periods[-1] == "366"
+
+
 def test_compute_climatology_groups_by_dayofyear(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = _edh_plugin()
     monkeypatch.setattr(plugin, "_load_reference", lambda bbox: _synthetic_region())

@@ -804,7 +804,13 @@ class ERA5LandNormalsPlugin(BaseDatasetPlugin):
         _ = start, end
         if self._climatology is not None:
             return [str(int(d)) for d in self._climatology[_NORMALS_DAYOFYEAR_DIM].values]
-        return [str(d) for d in range(1, 367)]
+        # periods() runs before the first fetch (without a bbox), so the climatology
+        # isn't computed yet. Derive the day count from the reference period's leap
+        # status: a period that spans no leap year has no day 366, and enumerating it
+        # would KeyError when fetch_period selects that day-of-year off the climatology.
+        start_year, end_year = self.period
+        has_leap = any(calendar.isleap(year) for year in range(start_year, end_year + 1))
+        return [str(d) for d in range(1, (366 if has_leap else 365) + 1)]
 
     async def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
         return await asyncio.to_thread(self._fetch_sync, period_id, bbox)
@@ -866,6 +872,10 @@ class ERA5LandNormalsPlugin(BaseDatasetPlugin):
                         ],
                         dim="longitude",
                     )
+            # Eagerly load the whole reference-period region (≈30 years daily for the
+            # bbox) before reducing. Fine for a country-sized instance extent; a very
+            # large/continental extent would want a chunked (dask) groupby-mean instead
+            # of materialising the full period in memory.
             region = region.load()
         finally:
             ds.close()
