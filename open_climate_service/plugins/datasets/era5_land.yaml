@@ -262,3 +262,37 @@
   display:
     colormap: blues
     range: [0.0, 20.0]
+
+# ---------------------------------------------------------------------------
+# Anomaly output templates for the `climate_anomaly` openEO workflow
+# (observed − climatological normal, aligned by day-of-year). No ingestion plugin —
+# produced by the workflow and published via save_result. Run the workflow with the
+# observed daily dataset + the matching _normal_1991_2020 dataset; refresh by re-running.
+# Anomalies are diverging (above/below normal), so a centred rdbu_r colormap.
+# ---------------------------------------------------------------------------
+
+- id: era5land_temperature_daily_anomaly_1991_2020
+  name: 2m temperature daily anomaly (ERA5-Land, vs 1991–2020 normal)
+  short_name: Temperature anomaly
+  variable: t2m
+  period_type: daily
+  sync:
+    kind: static
+  units: degC
+  source: Derived (climate_anomaly workflow)
+  display:
+    colormap: rdbu_r
+    range: [-15.0, 15.0]
+
+- id: era5land_precipitation_daily_anomaly_1991_2020
+  name: Precipitation daily anomaly (ERA5-Land, vs 1991–2020 normal)
+  short_name: Precipitation anomaly
+  variable: tp
+  period_type: daily
+  sync:
+    kind: static
+  units: mm/d
+  source: Derived (climate_anomaly workflow)
+  display:
+    colormap: rdbu_r
+    range: [-20.0, 20.0]

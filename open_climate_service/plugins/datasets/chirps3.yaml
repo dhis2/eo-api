@@ -64,3 +64,19 @@
     colormap: blues
     range: [0.0, 20.0]
     nodata: -9999.0
+
+# Anomaly output template for the `climate_anomaly` workflow (observed − normal, by
+# day-of-year). No ingestion plugin — produced by the workflow; refresh by re-running.
+- id: chirps3_precipitation_daily_anomaly_1991_2020
+  name: Precipitation daily anomaly (CHIRPS3, vs 1991–2020 normal)
+  short_name: Precipitation anomaly
+  variable: precip
+  period_type: daily
+  sync:
+    kind: static
+  units: mm/d
+  source: Derived (climate_anomaly workflow)
+  display:
+    colormap: rdbu_r
+    range: [-20.0, 20.0]
+    nodata: -9999.0
