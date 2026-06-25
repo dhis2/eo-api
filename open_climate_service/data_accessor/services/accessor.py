@@ -183,10 +183,14 @@ def _coverage_from_dataset(*, ds: xr.Dataset, period_type: str, native_crs: str 
     end: str | None
     try:
         time_dim = get_time_dim(ds)
+    except ValueError:
+        # No datetime axis — a non-temporal (ordinal) dataset, e.g. a day-of-year
+        # climatology — so there is no temporal coverage. (Scoped to get_time_dim only,
+        # so a genuine period-string conversion error below still surfaces.)
+        start = end = None
+    else:
         start = _period_string_scalar(numpy_datetime_to_period_string(ds[time_dim].min(), period_type))  # type: ignore[arg-type]
         end = _period_string_scalar(numpy_datetime_to_period_string(ds[time_dim].max(), period_type))  # type: ignore[arg-type]
-    except ValueError:
-        start = end = None
 
     xmin, xmax = ds[x_dim].min().item(), ds[x_dim].max().item()
     ymin, ymax = ds[y_dim].min().item(), ds[y_dim].max().item()

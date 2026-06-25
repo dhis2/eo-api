@@ -219,8 +219,8 @@ def normalize_period_string(value: str, period_type: str) -> str:
     if period_type == "climatology":
         # Non-temporal (day-of-year) dataset: period ids are ordinal dayofyear values,
         # not dates, and the plugin enumerates 1..366 independent of the request range —
-        # so there is nothing to normalize. Pass the value through unchanged.
-        return value
+        # so there is nothing to normalize beyond trimming incidental whitespace.
+        return value.strip()
     raise ValueError(f"Unsupported period_type '{period_type}'")
 
 

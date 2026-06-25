@@ -115,6 +115,16 @@ def test_param_validation() -> None:
         ERA5LandNormalsPlugin(variable="t2m", edh_variable="")
 
 
+def test_param_validation_rejects_empty_variable() -> None:
+    with pytest.raises(ValueError, match="variable"):
+        ERA5LandNormalsPlugin(variable="", edh_variable="t2m")
+
+
+def test_param_validation_rejects_malformed_period() -> None:
+    with pytest.raises(ValueError, match="period"):
+        ERA5LandNormalsPlugin(variable="t2m", edh_variable="t2m", period=[1991])  # type: ignore[arg-type]
+
+
 def test_plugin_declares_dayofyear_stepping_dimension() -> None:
     # After the BaseDatasetPlugin migration the orchestrator reads time_dim from the
     # class attribute (probe() is gone), so it must point at the dayofyear axis.

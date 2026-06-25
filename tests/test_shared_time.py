@@ -78,6 +78,7 @@ def test_normalize_period_string_passes_climatology_through() -> None:
     # normalize, so the request value passes through instead of raising.
     assert normalize_period_string("2020", "climatology") == "2020"
     assert normalize_period_string("anything", "climatology") == "anything"
+    assert normalize_period_string("  2020  ", "climatology") == "2020"  # incidental whitespace trimmed
 
 
 def test_normalize_period_string_accepts_dataset_native_weekly_period() -> None:

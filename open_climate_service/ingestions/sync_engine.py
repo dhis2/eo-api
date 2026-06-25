@@ -71,9 +71,12 @@ def plan_sync(
         raise ValueError("source_dataset must define sync.kind for sync planning")
     sync_kind = SyncKind(sync_kind_value)
     current_start = latest_artifact.request_scope.start
-    current_end = _sync_current_end(source_dataset=source_dataset, latest_artifact=latest_artifact)
 
     if sync_kind == SyncKind.STATIC:
+        # Static datasets are never synced. Report NOT_SYNCABLE directly, reading the
+        # coverage end from the artifact (None for a non-temporal dataset such as a
+        # climatology) — don't call _sync_current_end, which requires a temporal end.
+        static_end = latest_artifact.coverage.temporal.end
         return SyncDetail(
             source_dataset_id=latest_artifact.dataset_id,
             sync_kind=sync_kind,
@@ -81,10 +84,12 @@ def plan_sync(
             reason="static_dataset",
             message="This dataset is static and is not syncable.",
             current_start=current_start,
-            current_end=current_end,
-            target_end=current_end,
+            current_end=static_end,
+            target_end=static_end,
             target_end_source="current_coverage",
         )
+
+    current_end = _sync_current_end(source_dataset=source_dataset, latest_artifact=latest_artifact)
     period_type = str(source_dataset["period_type"])
     normalized_requested_end = requested_end.strip() if isinstance(requested_end, str) else None
     normalized_requested_end = normalized_requested_end or None

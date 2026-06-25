@@ -787,9 +787,17 @@ class ERA5LandNormalsPlugin(BaseDatasetPlugin):
     ) -> None:
         if not edh_variable:
             raise ValueError("ERA5LandNormalsPlugin requires 'edh_variable' in params")
+        if not variable:
+            raise ValueError("ERA5LandNormalsPlugin requires a non-empty 'variable'")
+        try:
+            start_year, end_year = int(period[0]), int(period[1])
+        except (TypeError, IndexError, ValueError) as exc:
+            raise ValueError(f"period must be [start_year, end_year], got {period!r}") from exc
+        if start_year > end_year:
+            raise ValueError(f"period start {start_year} is after end {end_year}")
         self.variable = variable
         self.edh_variable = edh_variable
-        self.period = (int(period[0]), int(period[1]))
+        self.period = (start_year, end_year)
         self.smoothing_window = int(smoothing_window)
         # _circular_rolling_mean assumes a centred, odd window; 0 disables smoothing.
         if self.smoothing_window < 0:
