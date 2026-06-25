@@ -14,6 +14,7 @@ from urllib.parse import urlparse, urlunparse
 
 import numpy as np
 import xarray as xr
+from earthkit.transforms import climatology as ek_climatology
 from ecmwf.datastores import Client as _CdsClient
 
 from open_climate_service.shared.time import (
@@ -835,7 +836,10 @@ class ERA5LandNormalsPlugin(BaseDatasetPlugin):
 
     def _compute_climatology(self, bbox: list[float]) -> xr.Dataset:
         region = self._load_reference(bbox)
-        normals = region.groupby("valid_time.dayofyear").mean("valid_time")
+        # earthkit computes the day-of-year mean (1..366), handling the calendar/leap-year
+        # binning and preserving dask laziness. It has no rolling-window option yet
+        # (ecmwf/earthkit-transforms#103), so the WMO circular smoothing stays a post-step.
+        normals = cast(xr.Dataset, ek_climatology.daily_mean(region, time_dim="valid_time"))
         if self.smoothing_window > 0:
             normals[self.variable] = _circular_rolling_mean(normals[self.variable], self.smoothing_window)
         normals = self._apply_unit_transform(normals)
