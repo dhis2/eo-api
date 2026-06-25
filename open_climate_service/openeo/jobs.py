@@ -551,7 +551,10 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     source_template = _resolve_source_template(options)
     template = _reg.get_dataset(dataset_id)
     if template is None:
-        _reg.write_dataset_template(_derive_managed_dataset_template(ds, options, source_template, t_dim))
+        try:
+            _reg.write_dataset_template(_derive_managed_dataset_template(ds, options, source_template, t_dim))
+        except FileExistsError:
+            pass
         template = _reg.get_dataset(dataset_id)
     if template is None:
         raise ValueError(f"Auto-registered dataset template for '{dataset_id}' could not be reloaded")
@@ -722,11 +725,11 @@ def _derive_display_config(
     if explicit.get("nodata") is not None:
         display["nodata"] = float(explicit["nodata"])
 
-    data_min, data_max = _data_range(ds, variable)
     signed_output = output_kind in {"Change", "Anomaly", "Difference", "Delta"}
     if signed_output:
         display.setdefault("colormap", "RdBu")
         if "range" not in display:
+            data_min, data_max = _data_range(ds, variable)
             bound = max(abs(data_min), abs(data_max))
             if bound == 0:
                 bound = 1.0
@@ -744,6 +747,7 @@ def _derive_display_config(
                 display["nodata"] = float(nodata)
         display.setdefault("colormap", "viridis")
         if "range" not in display:
+            data_min, data_max = _data_range(ds, variable)
             display["range"] = _normalize_range(data_min, data_max)
 
     return display
@@ -765,11 +769,18 @@ def _data_range(ds: Any, variable: str) -> tuple[float, float]:
     """Return finite min/max for one variable, falling back to (0, 1)."""
     import numpy as np
 
-    values = np.asarray(ds[variable].values, dtype="float64")
-    finite = values[np.isfinite(values)]
-    if finite.size == 0:
+    array = ds[variable].astype("float64")
+    min_value = array.min(skipna=True)
+    max_value = array.max(skipna=True)
+    if hasattr(min_value, "compute"):
+        min_value = min_value.compute()
+    if hasattr(max_value, "compute"):
+        max_value = max_value.compute()
+    low = float(np.asarray(min_value.values))
+    high = float(np.asarray(max_value.values))
+    if not np.isfinite(low) or not np.isfinite(high):
         return 0.0, 1.0
-    return float(finite.min()), float(finite.max())
+    return low, high
 
 
 def _normalize_range(data_min: float, data_max: float) -> list[float]:

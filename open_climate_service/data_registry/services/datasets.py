@@ -113,6 +113,10 @@ def write_dataset_template(dataset: dict[str, Any], *, overwrite: bool = False) 
     dataset_id = dataset.get("id")
     if not isinstance(dataset_id, str) or not dataset_id:
         raise ValueError("dataset template must define a non-empty string id")
+    if Path(dataset_id).name != dataset_id:
+        raise ValueError(
+            f"Invalid dataset id '{dataset_id}': must be a plain name with no path separators or traversal segments"
+        )
 
     datasets_dir = get_instance_datasets_dir(create=True)
     destination = datasets_dir / f"{dataset_id}.yaml"

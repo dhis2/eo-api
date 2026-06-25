@@ -214,3 +214,29 @@ def test_write_dataset_template_rejects_existing_file(
 
     with pytest.raises(FileExistsError, match="already exists"):
         datasets.write_dataset_template(template)
+
+
+@pytest.mark.parametrize("bad_id", ["../evil", "nested/file", "/abs/path"])
+def test_write_dataset_template_rejects_path_traversal_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    bad_id: str,
+) -> None:
+    plugins_dir = tmp_path / "plugins"
+    config_file = tmp_path / "climate-service.yaml"
+    config_file.write_text(f"plugins_dir: {plugins_dir}\n", encoding="utf-8")
+    monkeypatch.setattr(datasets, "CONFIGS_DIR", None)
+    monkeypatch.setattr(api_config, "_cache", None)
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
+
+    with pytest.raises(ValueError, match="Invalid dataset id"):
+        datasets.write_dataset_template(
+            {
+                "id": bad_id,
+                "name": "Derived Change",
+                "variable": "change",
+                "period_type": "yearly",
+                "sync": {"kind": "static"},
+                "display": {"colormap": "RdBu", "range": [-10.0, 10.0]},
+            }
+        )
