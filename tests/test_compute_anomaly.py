@@ -46,7 +46,10 @@ def test_relative_anomaly_is_percent_of_normal() -> None:
 
 
 def test_month_aligned_anomaly() -> None:
-    times = pd.date_range("2024-01-01", "2024-12-31", freq="D")
+    # Monthly observed + monthly normal: each month's value is month+1 and the normal is
+    # month, so the anomaly is 1 everywhere. earthkit aligns on the normal's `month` axis
+    # and keeps the (monthly) observed time axis.
+    times = pd.date_range("2024-01-01", "2024-12-01", freq="MS")  # 12 monthly steps
     month = times.month.to_numpy().astype("float32")
     obs = xr.DataArray(
         np.broadcast_to((month + 1.0)[:, None, None], (len(times), 2, 2)).copy(),

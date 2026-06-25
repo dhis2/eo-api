@@ -1,16 +1,20 @@
 """Built-in openEO process: climate anomaly (observed − climatological normal).
 
-Aligns a normal's ordinal axis (``dayofyear`` 1..366 or ``month`` 1..12) onto an observed
-cube's datetime ``t`` axis and combines them, so anomalies can be computed from an already
--published observed dataset and a published normal (see the ``climate_anomaly`` workflow).
-The standard openEO ``subtract`` can't do this — it would require the normal to already
-carry a matching ``t`` axis.
+Delegates the day-of-year/month alignment and subtraction to
+``earthkit.transforms.climatology.anomaly``, which indexes the normal's ordinal axis
+(``dayofyear`` 1..366 or ``month`` 1..12, auto-detected from the climatology) onto the
+observed cube's datetime axis and combines them — so anomalies can be computed from an
+already-published observed dataset and a published normal (see the ``climate_anomaly``
+workflow). ``relative=True`` yields percent-of-normal.
 """
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 import xarray as xr
+from earthkit.transforms import climatology as ek_climatology
 
 from open_climate_service.process import process
 
@@ -18,23 +22,23 @@ _ORDINALS = ("dayofyear", "month")
 _METHODS = ("absolute", "relative")
 
 
-def _match_spatial_grid(aligned: xr.DataArray, observed: xr.DataArray, t_dim: str) -> xr.DataArray:
-    """Snap the aligned normal onto the observed cube's spatial grid.
+def _match_spatial_grid(normal: xr.DataArray, observed: xr.DataArray, t_dim: str) -> xr.DataArray:
+    """Snap the normal onto the observed cube's spatial grid.
 
     Observed and normal cubes can be produced independently (e.g. a CDS-derived observed
-    vs an EDH-derived normal whose longitudes were remapped from [0, 360)), so equal
-    nominal grids may still differ by floating-point noise (~1e-11). xarray aligns
-    coordinates by exact equality, which would intersect such grids to nothing — and the
-    whole anomaly would come out empty. Reindex the normal onto the observed coordinates by
-    nearest neighbour within half a grid step, so float noise snaps cleanly while genuinely
-    unmatched cells become NaN rather than silently collapsing the grid.
+    vs an EDH normal whose longitudes were remapped from [0, 360)), so equal nominal grids
+    may still differ by floating-point noise (~1e-11). earthkit's anomaly subtracts the
+    climatology with xarray, which aligns coordinates by exact equality — that would
+    intersect such grids to nothing and yield an empty anomaly. Reindex the normal onto the
+    observed coordinates by nearest neighbour within half a grid step, so float noise snaps
+    cleanly while genuinely unmatched cells become NaN rather than collapsing the grid.
     """
-    spatial_dims = [d for d in observed.dims if d != t_dim and d in aligned.dims and d in observed.coords]
+    spatial_dims = [d for d in observed.dims if d != t_dim and d in normal.dims and d in observed.coords]
     if not spatial_dims:
-        return aligned
+        return normal
     steps = [abs(float(np.diff(observed[d].values)[0])) for d in spatial_dims if observed.sizes[d] > 1]
     tolerance = 0.5 * min(steps) if steps else None
-    return aligned.reindex({d: observed[d] for d in spatial_dims}, method="nearest", tolerance=tolerance)
+    return normal.reindex({d: observed[d] for d in spatial_dims}, method="nearest", tolerance=tolerance)
 
 
 @process(
@@ -54,10 +58,9 @@ def _match_spatial_grid(aligned: xr.DataArray, observed: xr.DataArray, t_dim: st
 def compute_anomaly(observed: xr.DataArray, normal: xr.DataArray, method: str = "absolute") -> xr.DataArray:
     """Compute observed − climatological normal, aligning the normal by day-of-year/month.
 
-    The normal's ordinal axis (``dayofyear`` or ``month``) is indexed by each observed
-    timestep's corresponding calendar value and broadcast onto the observed ``t`` axis,
-    then combined per ``method``. The result keeps the observed ``(t, y, x)`` shape. The
-    selection is vectorised (lazy/dask-preserving), so large cubes aren't materialised.
+    earthkit indexes the normal's ordinal axis (``dayofyear`` or ``month``) by each observed
+    timestep's calendar value and combines per ``method``; the result keeps the observed
+    time axis and stays lazy/dask-backed.
     """
     if method not in _METHODS:
         if method == "standardised":
@@ -75,12 +78,9 @@ def compute_anomaly(observed: xr.DataArray, normal: xr.DataArray, method: str = 
     if ordinal is None:
         raise ValueError(f"normal must have one of {_ORDINALS} as a dimension, got dims {tuple(normal.dims)}")
 
-    # Per-timestep calendar value (e.g. day-of-year) along t, used to pick the matching
-    # normal slice for every observed time step (vectorised → stays lazy).
-    calendar_index = getattr(observed[t_dim].dt, ordinal)
-    aligned = normal.sel({ordinal: calendar_index}).drop_vars(ordinal, errors="ignore")
-    aligned = _match_spatial_grid(aligned, observed, str(t_dim))
-
-    if method == "absolute":
-        return observed - aligned
-    return 100.0 * (observed - aligned) / aligned  # relative (%)
+    # Guard the float-noise grid mismatch before earthkit's xarray subtraction (see helper).
+    normal = _match_spatial_grid(normal, observed, str(t_dim))
+    return cast(
+        xr.DataArray,
+        ek_climatology.anomaly(observed, climatology=normal, time_dim=str(t_dim), relative=method == "relative"),
+    )
