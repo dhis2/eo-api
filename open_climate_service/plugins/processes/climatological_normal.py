@@ -10,8 +10,11 @@ map viewer's generic slider/dropdown renders.
 
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 import xarray as xr
+from earthkit.transforms import climatology as ek_climatology
 
 from open_climate_service.process import process
 
@@ -76,7 +79,12 @@ def climatological_normal(data: xr.DataArray, frequency: str = "dayofyear", smoo
         raise ValueError("climatological_normal requires a datetime temporal dimension on the input cube")
     t_dim = str(t_dim)
 
-    clim = data.groupby(f"{t_dim}.{frequency}").mean(t_dim)
+    # earthkit reduces the temporal axis to the day-of-year (1..366) or month (1..12) mean,
+    # handling the calendar binning and preserving dask laziness; the output ordinal dim is
+    # named exactly 'dayofyear'/'month'. (Circular WMO smoothing below stays a post-step —
+    # earthkit has no rolling-window option yet, ecmwf/earthkit-transforms#103.)
+    reducer = ek_climatology.daily_mean if frequency == "dayofyear" else ek_climatology.monthly_mean
+    clim = cast(xr.DataArray, reducer(data, time_dim=t_dim))
     clim = clim.transpose(frequency, ...)  # ensure the ordinal axis leads (for smoothing)
     # Circular smoothing is only meaningful for the dense day-of-year axis, not 12 months.
     if frequency == "dayofyear" and window > 0:
