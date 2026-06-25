@@ -216,6 +216,11 @@ def normalize_period_string(value: str, period_type: str) -> str:
             return datetime_to_period_string(datetime.fromisoformat(value), period_type)
         except ValueError as exc:
             raise ValueError(f"Invalid yearly period '{value}'; expected YYYY or ISO datetime") from exc
+    if period_type == "climatology":
+        # Non-temporal (day-of-year) dataset: period ids are ordinal dayofyear values,
+        # not dates, and the plugin enumerates 1..366 independent of the request range —
+        # so there is nothing to normalize beyond trimming incidental whitespace.
+        return value.strip()
     raise ValueError(f"Unsupported period_type '{period_type}'")
 
 

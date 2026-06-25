@@ -296,6 +296,28 @@ def test_plan_sync_for_plugin_backed_icechunk_uses_committed_store_state(
     assert result.current_end == "2026-01-31"
 
 
+def test_plan_sync_marks_static_non_temporal_dataset_not_syncable() -> None:
+    # A static, non-temporal dataset (e.g. a day-of-year climatology) has no temporal
+    # end. Planning must return NOT_SYNCABLE, not raise/400 by trying to compute one.
+    latest = _artifact(artifact_id="c1", managed_dataset_id="era5land_temperature_normal_sle")
+    latest.coverage.temporal.start = None
+    latest.coverage.temporal.end = None
+
+    result = sync_engine.plan_sync(
+        source_dataset={
+            "id": "era5land_temperature_normal",
+            "period_type": "climatology",
+            "sync": {"kind": "static"},
+        },
+        latest_artifact=latest,
+        requested_end=None,
+    )
+
+    assert result.action == SyncAction.NOT_SYNCABLE
+    assert result.reason == "static_dataset"
+    assert result.current_end is None
+
+
 def test_plan_sync_for_plugin_backed_icechunk_normalizes_committed_period_before_returning(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -552,6 +574,9 @@ def test_plan_sync_for_plugin_backed_icechunk_falls_back_to_artifact_end_when_co
 
     monkeypatch.setattr(sync_engine, "_artifact_storage_roots", lambda: (Path("/tmp").resolve(),))
     monkeypatch.setattr(sync_engine, "read_committed_period_ids", lambda *args, **kwargs: set())
+    # Avoid a real network call from CHIRPS3DailyPlugin._availability_cutoff() —
+    # this test is about the committed-set fallback, not plugin availability.
+    monkeypatch.setattr(sync_engine, "_query_available_periods", lambda *args, **kwargs: ["2026-01-31"])
 
     result = sync_engine.plan_sync(
         source_dataset={

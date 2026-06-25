@@ -727,3 +727,169 @@ class ERA5LandTempDailyFromHourlyPlugin(_ERA5LandEDHBase):
         ds = xr.Dataset({"t2m": daily_mean})
         ts = np.datetime64(period_id, "D").astype("datetime64[ns]")
         return ds.expand_dims({"valid_time": [ts]}).rename({"valid_time": "t"})
+
+
+# ---------------------------------------------------------------------------
+# ERA5-Land day-of-year climate normals (WMO climatology)
+# ---------------------------------------------------------------------------
+
+_NORMALS_DAYOFYEAR_DIM = "dayofyear"
+_NORMALS_DEFAULT_PERIOD = (1991, 2020)
+_NORMALS_DEFAULT_SMOOTHING = 31
+
+
+def _circular_rolling_mean(da: xr.DataArray, window: int) -> xr.DataArray:
+    """Circular rolling mean over the dayofyear axis (wraps Dec→Jan)."""
+    vals = np.concatenate([da.values, da.values, da.values], axis=0)
+    result = np.empty_like(da.values)
+    half = window // 2
+    n = da.sizes["dayofyear"]
+    for i in range(n):
+        centre = n + i
+        result[i] = vals[centre - half : centre + half + 1].mean(axis=0)
+    return da.copy(data=result)
+
+
+class ERA5LandNormalsPlugin(BaseDatasetPlugin):
+    """Streaming plugin that computes WMO day-of-year climate normals from ERA5-Land.
+
+    Reads the reference period directly from the Earth Data Hub daily ERA5-Land Zarr
+    store so no prior 30-year ingestion is required. The result is stored with a real
+    ``dayofyear`` dimension (1..366) — a non-temporal stepping axis rendered by the
+    map viewer's generic dimension slider.
+
+    Args (from ``ingestion.params``):
+        variable: output variable name written into the store.
+        edh_variable: EDH variable name to read (e.g. ``t2m``, ``tp``).
+        period: ``[start_year, end_year]`` reference period (default 1991–2020).
+        smoothing_window: circular rolling-mean window in days (default 31; 0 disables).
+        unit_transform: ``kelvin_to_celsius`` | ``metres_to_mm`` | ``none``.
+    """
+
+    max_concurrency = 1
+    commit_batch_size = 30
+    # Non-temporal stepping axis: the orchestrator appends along dayofyear (1..366),
+    # not a datetime ``t``. Declared as a class attribute since the contract no longer
+    # has a ``probe()`` to report it; the grid (shape/dtype/CRS) is inferred from the
+    # first fetched period.
+    time_dim = _NORMALS_DAYOFYEAR_DIM
+    crs = 4326
+
+    def __init__(
+        self,
+        *,
+        variable: str,
+        edh_variable: str,
+        period: list[int] | tuple[int, int] = _NORMALS_DEFAULT_PERIOD,
+        smoothing_window: int = _NORMALS_DEFAULT_SMOOTHING,
+        unit_transform: str | None = None,
+        **_: Any,
+    ) -> None:
+        if not edh_variable:
+            raise ValueError("ERA5LandNormalsPlugin requires 'edh_variable' in params")
+        if not variable:
+            raise ValueError("ERA5LandNormalsPlugin requires a non-empty 'variable'")
+        try:
+            start_year, end_year = int(period[0]), int(period[1])
+        except (TypeError, IndexError, ValueError) as exc:
+            raise ValueError(f"period must be [start_year, end_year], got {period!r}") from exc
+        if start_year > end_year:
+            raise ValueError(f"period start {start_year} is after end {end_year}")
+        self.variable = variable
+        self.edh_variable = edh_variable
+        self.period = (start_year, end_year)
+        self.smoothing_window = int(smoothing_window)
+        # _circular_rolling_mean assumes a centred, odd window; 0 disables smoothing.
+        if self.smoothing_window < 0:
+            raise ValueError(f"smoothing_window must be >= 0, got {self.smoothing_window}")
+        if self.smoothing_window % 2 == 0 and self.smoothing_window != 0:
+            raise ValueError(f"smoothing_window must be odd (a centred window), got {self.smoothing_window}")
+        self.unit_transform = unit_transform
+        self._lock = Lock()
+        self._climatology: xr.Dataset | None = None
+
+    async def periods(self, start: str, end: str) -> list[str]:
+        _ = start, end
+        if self._climatology is not None:
+            return [str(int(d)) for d in self._climatology[_NORMALS_DAYOFYEAR_DIM].values]
+        # periods() runs before the first fetch (without a bbox), so the climatology
+        # isn't computed yet. Derive the day count from the reference period's leap
+        # status: a period that spans no leap year has no day 366, and enumerating it
+        # would KeyError when fetch_period selects that day-of-year off the climatology.
+        start_year, end_year = self.period
+        has_leap = any(calendar.isleap(year) for year in range(start_year, end_year + 1))
+        return [str(d) for d in range(1, (366 if has_leap else 365) + 1)]
+
+    async def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
+        return await asyncio.to_thread(self._fetch_sync, period_id, bbox)
+
+    def _fetch_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
+        clim = self._ensure_climatology(bbox)
+        return clim.sel({_NORMALS_DAYOFYEAR_DIM: [int(period_id)]})
+
+    def _ensure_climatology(self, bbox: list[float]) -> xr.Dataset:
+        with self._lock:
+            if self._climatology is None:
+                self._climatology = self._compute_climatology(bbox)
+            return self._climatology
+
+    def _compute_climatology(self, bbox: list[float]) -> xr.Dataset:
+        region = self._load_reference(bbox)
+        normals = region.groupby("valid_time.dayofyear").mean("valid_time")
+        if self.smoothing_window > 0:
+            normals[self.variable] = _circular_rolling_mean(normals[self.variable], self.smoothing_window)
+        normals = self._apply_unit_transform(normals)
+        return normals.load()
+
+    def _apply_unit_transform(self, ds: xr.Dataset) -> xr.Dataset:
+        if self.unit_transform in (None, "", "none"):
+            return ds
+        if self.unit_transform == "kelvin_to_celsius":
+            return kelvin_to_celsius(ds, {"variable": self.variable})
+        if self.unit_transform == "metres_to_mm":
+            return metres_to_mm(ds, {"variable": self.variable})
+        raise ValueError(f"Unknown unit_transform {self.unit_transform!r}")
+
+    def _load_reference(self, bbox: list[float]) -> xr.Dataset:
+        """Load the reference-period ERA5-Land data from EDH as a (valid_time, y, x) dataset."""
+        start_year, end_year = self.period
+        eps = 0.05
+        xmin, ymin, xmax, ymax = map(float, bbox)
+        ds = _edh_open_zarr(_EDH_DAILY_URL)
+        try:
+            base = ds[[self.edh_variable]].sel(
+                latitude=slice(ymax + eps, ymin - eps),
+                valid_time=slice(f"{start_year}-01-01", f"{end_year}-12-31"),
+            )
+            # EDH stores longitude in [0, 360). Map the WGS84 (-180/180) bbox onto it.
+            # A bbox that straddles the 0°/360° seam (e.g. spans the prime meridian)
+            # gives lon_min > lon_max, so select the two pieces and concatenate; a
+            # (near-)global span takes the whole axis. A single `slice(xmin%360, xmax%360)`
+            # would silently return empty/reversed results for these cases.
+            if xmax - xmin >= 360 - eps:
+                region = base
+            else:
+                lon_min, lon_max = xmin % 360, xmax % 360
+                if lon_min <= lon_max:
+                    region = base.sel(longitude=slice(lon_min - eps, lon_max + eps))
+                else:
+                    region = xr.concat(
+                        [
+                            base.sel(longitude=slice(lon_min - eps, 360.0)),
+                            base.sel(longitude=slice(0.0, lon_max + eps)),
+                        ],
+                        dim="longitude",
+                    )
+            # Eagerly load the whole reference-period region (≈30 years daily for the
+            # bbox) before reducing. Fine for a country-sized instance extent; a very
+            # large/continental extent would want a chunked (dask) groupby-mean instead
+            # of materialising the full period in memory.
+            region = region.load()
+        finally:
+            ds.close()
+        # Back to WGS84 (-180/180), ascending, with canonical dim names.
+        region = region.assign_coords(longitude=((region.longitude + 180) % 360) - 180)
+        region = region.sortby("longitude").rename({"longitude": "x", "latitude": "y"})
+        if self.edh_variable != self.variable:
+            region = region.rename({self.edh_variable: self.variable})
+        return region

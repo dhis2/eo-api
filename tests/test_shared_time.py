@@ -73,6 +73,14 @@ def test_normalize_period_string_converts_aware_daily_datetime_to_utc_period() -
     assert normalize_period_string("2026-04-21T00:30:00+02:00", "daily") == "2026-04-20"
 
 
+def test_normalize_period_string_passes_climatology_through() -> None:
+    # A day-of-year climatology has ordinal period ids, not dates — nothing to
+    # normalize, so the request value passes through instead of raising.
+    assert normalize_period_string("2020", "climatology") == "2020"
+    assert normalize_period_string("anything", "climatology") == "anything"
+    assert normalize_period_string("  2020  ", "climatology") == "2020"  # incidental whitespace trimmed
+
+
 def test_normalize_period_string_accepts_dataset_native_weekly_period() -> None:
     assert normalize_period_string("2026-W17", "weekly") == "2026-W17"
 
