@@ -416,9 +416,14 @@ def _build_ordinal_dimensions(ds: xr.Dataset, x_dim: str, y_dim: str, time_dim: 
         values = coord.values.tolist()
         entry: dict[str, Any] = {"type": "other", "values": values}
         if len(values) > 1 and all(isinstance(v, int) for v in values):
-            step = values[1] - values[0]
-            if step:
-                entry["step"] = step
+            # Only publish a step for a genuinely evenly spaced axis: every
+            # consecutive delta must match. Deriving it from the first delta
+            # alone would emit a wrong step for irregular integer coordinates.
+            deltas = {b - a for a, b in zip(values, values[1:])}
+            if len(deltas) == 1:
+                (step,) = deltas
+                if step:
+                    entry["step"] = step
         out[str(name)] = entry
     return out
 
