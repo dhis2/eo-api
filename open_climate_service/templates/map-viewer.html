@@ -251,10 +251,12 @@
 
       // Every non-spatial dimension, in cube order, that the user steps through.
       // Each gets its own control; the layer selector must pin all of them so the
-      // cube reduces to 2-D for rendering.
+      // cube reduces to 2-D for rendering. Skip the synthetic openEO `bands`
+      // dimension (type "bands"): it lists the collection's variables rather than a
+      // real axis of the rendered variable, which is selected separately.
       function getSteppingDims(dimensions) {
         return Object.entries(dimensions ?? {})
-          .filter(([, v]) => v.type !== "spatial" && (Array.isArray(v.values) || v.extent))
+          .filter(([, v]) => v.type !== "spatial" && v.type !== "bands" && (Array.isArray(v.values) || v.extent))
           .map(([key]) => key);
       }
 
