@@ -12,9 +12,12 @@ Two plugins, both Global2 with a per-revision id (the hub reissues yearly, curre
   also knows the 1 km (``1km_ua``) and unconstrained layouts, but only the 100 m
   constrained template ships today.
 - ``WorldPopAgeSexYearlyPlugin`` — age/sex structures (hub category id=8): ~40
-  per-(sex, age) rasters per country-year, combined lazily into one cube
-  (``population_female`` / ``population_male`` over an ``age_group`` dimension), 100 m
-  per-country only.
+  per-(sex, age) rasters per country-year, combined lazily into one ``population``
+  cube over ``sex`` and ``age_group`` dimensions, 100 m per-country only.
+
+WorldPop's hub advertises but does not honour HTTP Range requests, so each GeoTIFF is
+downloaded to a local cache and opened from disk rather than read lazily over
+``/vsicurl`` (see ``_open_worldpop_raster``).
 
 Global 1 km mosaics are not yet supported (they are not COGs — see
 https://github.com/dhis2/open-climate-service/issues/269).
@@ -23,6 +26,7 @@ https://github.com/dhis2/open-climate-service/issues/269).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -43,6 +47,36 @@ def _global2_years(start: str, end: str) -> list[str]:
     if start_year > end_year:
         return []
     return [str(year) for year in range(start_year, end_year + 1)]
+
+
+def _open_worldpop_raster(url: str, **open_kwargs: Any) -> xr.DataArray:
+    """Open a WorldPop GeoTIFF, downloading it to a local cache first.
+
+    WorldPop's hub (``data.worldpop.org``) advertises ``Accept-Ranges: bytes`` but
+    does not honour Range requests — a ranged GET returns the full ``200`` response —
+    so GDAL's ``/vsicurl`` lazy reads abort with "Range downloading not supported by
+    this server!". The per-country GeoTIFFs are small (a few MB), so fetch each whole
+    file once to a local cache and open it from disk, where seeking works normally.
+    """
+    import rioxarray
+
+    cache = Path.home() / ".cache" / "chap-gis" / "worldpop"
+    cache.mkdir(parents=True, exist_ok=True)
+    target = cache / url.rsplit("/", 1)[-1]
+    if not target.exists():
+        import httpx
+
+        with httpx.stream("GET", url, follow_redirects=True, timeout=300) as response:
+            response.raise_for_status()
+            tmp = target.with_name(target.name + ".part")
+            with tmp.open("wb") as handle:
+                for chunk in response.iter_bytes():
+                    handle.write(chunk)
+            tmp.rename(target)
+    da = rioxarray.open_rasterio(target, masked=True, **open_kwargs)
+    if not isinstance(da, xr.DataArray):
+        raise TypeError(f"Expected DataArray from WorldPop raster read, got {type(da).__name__}")
+    return da
 
 
 # WorldPop age/sex 5-year bands (lower bound of each band), as the filename tokens.
@@ -68,9 +102,10 @@ _AGE_BANDS = (
     "85",
     "90",
 )
-# Output variable -> WorldPop sex filename token. The t_* / T_F / T_M totals are
-# redundant sums of these, so we skip them.
-_AGESEX_VARS = {"population_female": "f", "population_male": "m"}
+# Sex -> WorldPop filename token. Sex becomes a cube dimension on the single
+# ``population`` variable; the t_* / T_F / T_M totals are redundant sums of these,
+# so we skip them.
+_SEX_TOKENS = {"female": "f", "male": "m"}
 
 
 @dataclass(frozen=True)
@@ -130,14 +165,10 @@ class WorldPopYearlyPlugin(BaseDatasetPlugin):
 
         A regular (blocking) method — the framework runs it in a worker thread.
         """
-        import rioxarray
-
         url = _population_url(
             int(period_id), _required_country_code(params), self.revision, self.resolution, self.constrained
         )
-        da = rioxarray.open_rasterio(url, masked=True, chunks="auto")  # type: ignore[arg-type]
-        if not isinstance(da, xr.DataArray):
-            raise TypeError(f"Expected DataArray from WorldPop raster read, got {type(da).__name__}")
+        da = _open_worldpop_raster(url, chunks="auto")
         # Mask the WorldPop sentinel (-99999) so the Zarr store uses NaN as the fill
         # value for unpopulated / ocean cells. No bbox clip: WorldPop publishes one
         # GeoTIFF per country, so we ingest the whole country rather than crop it to
@@ -149,14 +180,15 @@ class WorldPopAgeSexYearlyPlugin(BaseDatasetPlugin):
     """Streaming plugin for WorldPop Global2 age/sex population structures (hub id=8).
 
     For each country-year WorldPop publishes one GeoTIFF per (sex, 5-year age band).
-    This plugin combines them into a single store with two variables —
-    ``population_female`` / ``population_male`` — each carrying an ordinal
-    ``age_group`` dimension (the lower bound of the 5-year band: 0, 1, 5, 10, … 90).
+    This plugin combines them into a single ``population`` variable over a ``sex``
+    dimension (``female`` / ``male``) and an ordinal ``age_group`` dimension (the lower
+    bound of the 5-year band: 0, 1, 5, 10, … 90) — so the cube is ``(t, sex, age_group,
+    y, x)``. Population is the quantity; sex and age are both disaggregation dimensions.
     Only 100 m per-country is supported.
 
-    Memory: each band is opened **lazily** (dask-chunked), so the ~40 rasters never
-    all sit in memory — the orchestrator streams the combined cube to Zarr one year
-    at a time. No bbox clip: the per-country rasters are ingested whole.
+    Memory: each band is opened **lazily** (dask-chunked) from a local cache, so the
+    ~40 rasters never all sit in memory — the orchestrator streams the combined cube to
+    Zarr one year at a time. No bbox clip: the per-country rasters are ingested whole.
     """
 
     def __init__(
@@ -172,28 +204,27 @@ class WorldPopAgeSexYearlyPlugin(BaseDatasetPlugin):
         return _global2_years(start, end)
 
     def fetch_period(self, period_id: str, bbox: list[float], **params: Any) -> xr.Dataset:
-        """Combine the per-(sex, age) GeoTIFFs into one lazy ``(t, age_group, y, x)`` cube.
+        """Combine the per-(sex, age) GeoTIFFs into one lazy ``(t, sex, age_group, y, x)`` cube.
 
         A regular (blocking) method — the framework runs it in a worker thread.
         """
-        import rioxarray  # noqa: F401  # registers the .rio accessor
+        import rioxarray  # noqa: F401  # registers the .rio accessor for write_crs
 
         country_code = _required_country_code(params)
         year = int(period_id)
         ages = [int(a) for a in _AGE_BANDS]
 
-        data_vars: dict[str, xr.DataArray] = {}
-        for var_name, sex_token in _AGESEX_VARS.items():
+        sex_cubes: list[xr.DataArray] = []
+        for sex_token in _SEX_TOKENS.values():
             bands: list[xr.DataArray] = []
             for age in _AGE_BANDS:
                 url = _agesex_url(year, country_code, self.revision, sex_token, age, self.constrained)
-                da = rioxarray.open_rasterio(url, masked=True, chunks="auto")  # type: ignore[arg-type]  # lazy — no data read yet
-                if not isinstance(da, xr.DataArray):
-                    raise TypeError(f"Expected DataArray from WorldPop raster read, got {type(da).__name__}")
+                da = _open_worldpop_raster(url, chunks="auto")  # lazy — fetched to cache, opened from disk
                 bands.append(da.squeeze("band", drop=True))
-            data_vars[var_name] = xr.concat(bands, dim="age_group").assign_coords(age_group=ages)
+            sex_cubes.append(xr.concat(bands, dim="age_group").assign_coords(age_group=ages))
 
-        ds = xr.Dataset(data_vars).rio.write_crs("EPSG:4326")
+        population = xr.concat(sex_cubes, dim="sex").assign_coords(sex=list(_SEX_TOKENS))
+        ds = population.to_dataset(name="population").rio.write_crs("EPSG:4326")
         ds = ds.where(ds != _WORLDPOP_NODATA)  # mask the sentinel (lazy)
         return ds.expand_dims(t=[np.datetime64(str(year))])  # type: ignore[no-any-return]
 

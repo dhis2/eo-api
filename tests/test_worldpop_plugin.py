@@ -71,7 +71,7 @@ def test_worldpop_plugin_fetch_period_reads_country_url(monkeypatch: pytest.Monk
         captured["url"] = url
         return _fake_geotiff([[[1.0, 2.0], [3.0, 4.0]]])
 
-    monkeypatch.setattr("rioxarray.open_rasterio", fake_open)
+    monkeypatch.setattr("open_climate_service.plugins.datasets.worldpop._open_worldpop_raster", fake_open)
 
     dataset = plugin.fetch_period("2022", [-1.0, -1.0, 5.0, 5.0], country_code="SLE")
 
@@ -100,7 +100,10 @@ def test_worldpop_plugin_variant_resolver_rejects_unknown_product() -> None:
 
 def test_worldpop_plugin_renames_output_variable(monkeypatch: pytest.MonkeyPatch) -> None:
     plugin = WorldPopYearlyPlugin(product="total", variable="population_total")
-    monkeypatch.setattr("rioxarray.open_rasterio", lambda url, **_: _fake_geotiff([[[1.0, 2.0], [3.0, 4.0]]]))
+    monkeypatch.setattr(
+        "open_climate_service.plugins.datasets.worldpop._open_worldpop_raster",
+        lambda url, **_: _fake_geotiff([[[1.0, 2.0], [3.0, 4.0]]]),
+    )
 
     dataset = plugin.fetch_period("2022", [-1.0, -1.0, 5.0, 5.0], country_code="SLE")
 
@@ -111,7 +114,10 @@ def test_worldpop_plugin_renames_output_variable(monkeypatch: pytest.MonkeyPatch
 def test_worldpop_plugin_masks_nodata_sentinel_to_nan(monkeypatch: pytest.MonkeyPatch) -> None:
     """Values equal to the WorldPop -99999 sentinel must become NaN, not be stored."""
     plugin = WorldPopYearlyPlugin()
-    monkeypatch.setattr("rioxarray.open_rasterio", lambda url, **_: _fake_geotiff([[[5.0, -99999.0], [12.0, 7.0]]]))
+    monkeypatch.setattr(
+        "open_climate_service.plugins.datasets.worldpop._open_worldpop_raster",
+        lambda url, **_: _fake_geotiff([[[5.0, -99999.0], [12.0, 7.0]]]),
+    )
 
     dataset = plugin.fetch_period("2020", [-1.0, -1.0, 5.0, 5.0], country_code="SLE")
 
@@ -148,15 +154,21 @@ def test_agesex_plugin_rejects_non_100m() -> None:
         WorldPopAgeSexYearlyPlugin(resolution="1km")
 
 
-def test_agesex_fetch_builds_per_sex_age_group_cube(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agesex_fetch_builds_population_sex_age_cube(monkeypatch: pytest.MonkeyPatch) -> None:
     from open_climate_service.plugins.datasets.worldpop import _AGE_BANDS, WorldPopAgeSexYearlyPlugin
 
     plugin = WorldPopAgeSexYearlyPlugin()
-    monkeypatch.setattr("rioxarray.open_rasterio", lambda url, **_: _fake_geotiff([[[1.0, 2.0], [3.0, 4.0]]]))
+    monkeypatch.setattr(
+        "open_climate_service.plugins.datasets.worldpop._open_worldpop_raster",
+        lambda url, **_: _fake_geotiff([[[1.0, 2.0], [3.0, 4.0]]]),
+    )
 
     ds = plugin.fetch_period("2020", [-1.0, -1.0, 5.0, 5.0], country_code="SLE")
 
-    assert set(ds.data_vars) == {"population_female", "population_male"}
+    # Single quantity (population); sex and age are both disaggregation dimensions.
+    assert set(ds.data_vars) == {"population"}
+    assert ds.sizes["sex"] == 2
     assert ds.sizes["age_group"] == len(_AGE_BANDS)
-    assert {"t", "age_group", "y", "x"} <= set(ds.dims)
+    assert {"t", "sex", "age_group", "y", "x"} <= set(ds.dims)
+    assert list(ds["sex"].values) == ["female", "male"]
     assert list(ds["age_group"].values[:3]) == [0, 1, 5]

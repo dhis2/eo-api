@@ -31,7 +31,7 @@
 - id: worldpop_agesex_global2_R2025A_100m
   name: Population by age and sex (WorldPop Global2 R2025A, 100m)
   short_name: Age/sex population
-  variable: population_female
+  variable: population
   period_type: yearly
   sync:
     kind: release

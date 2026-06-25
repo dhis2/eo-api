@@ -205,16 +205,10 @@
             </select>
           </div>
 
-          <div id="time-section" class="panel-section hidden">
-            <div class="time-header">
-              <label id="time-label" style="margin-bottom:0">Time step</label>
-              <span id="time-count" class="time-count"></span>
-            </div>
-            <div style="margin-bottom:0.4rem">
-              <span id="time-value" class="time-value">—</span>
-            </div>
-            <input type="range" id="time-slider" min="0" step="1" value="0" />
-          </div>
+          <!-- One control per non-spatial dimension, generated in JS:
+               a slider for temporal/regular-ordinal axes, a dropdown for
+               categorical/irregular ones (see controlForDim). -->
+          <div id="dim-controls" class="panel-section hidden"></div>
 
           <dl id="dataset-meta" class="meta-grid hidden">
             <dt>Source</dt>
@@ -255,19 +249,41 @@
         }
       }
 
-      // Resolve the primary "stepping" dimension key from cube:dimensions. Prefer a
-      // non-temporal, non-spatial dimension (e.g. dayofyear, bands) so the slider can
-      // drive an ordinal axis; otherwise fall back to the temporal dimension.
-      function getStepDimKey(dimensions) {
-        const entries = Object.entries(dimensions ?? {});
-        for (const [key, val] of entries) {
-          if (val.type === "spatial" || val.type === "temporal") continue;
-          if (Array.isArray(val.values) || val.extent) return key;
+      // Every non-spatial dimension, in cube order, that the user steps through.
+      // Each gets its own control; the layer selector must pin all of them so the
+      // cube reduces to 2-D for rendering.
+      function getSteppingDims(dimensions) {
+        return Object.entries(dimensions ?? {})
+          .filter(([, v]) => v.type !== "spatial" && (Array.isArray(v.values) || v.extent))
+          .map(([key]) => key);
+      }
+
+      // Slider for a continuous / evenly-spaced axis (temporal, or an ordinal axis
+      // with a regular numeric `step` such as day-of-year); dropdown for a categorical
+      // or irregular one (sex, the irregular age bands). An explicit
+      // `open_climate_service:control` on the dimension overrides the heuristic.
+      function controlForDim(dim) {
+        const hint = dim["open_climate_service:control"];
+        if (hint === "slider" || hint === "dropdown") return hint;
+        if (dim.type === "temporal" || typeof dim.step === "number") return "slider";
+        return "dropdown";
+      }
+
+      function dimLabel(key, dim) {
+        if (dim.type === "temporal") return "Time step";
+        if (key === "dayofyear") return "Day of year";
+        return key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " ");
+      }
+
+      // Human label for one step. Integer age bands render as ranges (0, 1–4, …, 90+).
+      function stepDisplay(key, steps, i) {
+        const v = stepLabelAt(steps, i);
+        if (key === "age_group" && Array.isArray(steps)) {
+          const next = steps[i + 1];
+          if (next === undefined) return `${v}+`;
+          return next - v === 1 ? `${v}` : `${v}–${next - 1}`;
         }
-        for (const [key, val] of entries) {
-          if (val.type === "temporal") return key;
-        }
-        return "time";
+        return String(v);
       }
 
       // Build the step list for a dimension: explicit `values` (temporal or ordinal),
@@ -310,28 +326,24 @@
         return { lazy: true, start, inc, count };
       }
 
-      function timeStepCount() {
-        return Array.isArray(timeSteps) ? timeSteps.length : timeSteps.count;
+      function stepCount(steps) {
+        return Array.isArray(steps) ? steps.length : steps.count;
       }
 
-      function initialTimeIndex() {
-        return Math.max(0, timeStepCount() - 1);
-      }
-
-      function timeStepAt(i) {
-        if (Array.isArray(timeSteps)) return timeSteps[i];
-        const sd = new Date(timeSteps.start);
-        if (timeSteps.calUnit === "M") {
+      function stepLabelAt(steps, i) {
+        if (Array.isArray(steps)) return steps[i];
+        const sd = new Date(steps.start);
+        if (steps.calUnit === "M") {
           const d = new Date(sd);
-          d.setUTCMonth(d.getUTCMonth() + i * timeSteps.n);
+          d.setUTCMonth(d.getUTCMonth() + i * steps.n);
           return d.toISOString().slice(0, 10);
         }
-        if (timeSteps.calUnit === "Y") {
+        if (steps.calUnit === "Y") {
           const d = new Date(sd);
-          d.setUTCFullYear(d.getUTCFullYear() + i * timeSteps.n);
+          d.setUTCFullYear(d.getUTCFullYear() + i * steps.n);
           return d.toISOString().slice(0, 10);
         }
-        return new Date(sd.getTime() + i * timeSteps.inc).toISOString().slice(0, 10);
+        return new Date(sd.getTime() + i * steps.inc).toISOString().slice(0, 10);
       }
 
       const MAP_UNAVAILABLE_MESSAGE =
@@ -340,15 +352,13 @@
       let map = null;
       let mapUnavailable = false;
       let activeLayer = null;
-      let timeSteps = [];
-      let timeDimKey = "time";
+      // One entry per non-spatial dimension: { key, dim, steps, control, count, label, index }.
+      let dimStates = [];
+      // Current index per dimension key — pins every non-spatial axis for the layer.
+      let selector = {};
 
       const selectEl = document.getElementById("dataset-select");
-      const timeSection = document.getElementById("time-section");
-      const timeLabelEl = document.getElementById("time-label");
-      const timeSlider = document.getElementById("time-slider");
-      const timeValueEl = document.getElementById("time-value");
-      const timeCountEl = document.getElementById("time-count");
+      const dimControls = document.getElementById("dim-controls");
       const datasetMeta = document.getElementById("dataset-meta");
       const metaSource = document.getElementById("meta-source");
       const metaUnits = document.getElementById("meta-units");
@@ -461,7 +471,8 @@
           } catch {}
           activeLayer = null;
         }
-        timeSection.classList.add("hidden");
+        dimControls.classList.add("hidden");
+        dimControls.replaceChildren();
         datasetMeta.classList.add("hidden");
         legendEl.classList.add("hidden");
 
@@ -490,9 +501,20 @@
           Object.keys(collection["cube:variables"] ?? {})[0] ??
           "data";
 
+        // Build a control state for every non-spatial dimension. The layer selector
+        // must pin each one so the cube reduces to 2-D for rendering.
         const dimensions = collection["cube:dimensions"] ?? {};
-        timeDimKey = getStepDimKey(dimensions);
-        timeSteps = buildSteps(dimensions, timeDimKey);
+        dimStates = getSteppingDims(dimensions).map((key) => {
+          const dim = dimensions[key];
+          const steps = buildSteps(dimensions, key);
+          const control = controlForDim(dim);
+          const count = stepCount(steps);
+          // A slider defaults to its last step (e.g. latest time); a dropdown to its first.
+          const index = control === "slider" ? Math.max(0, count - 1) : 0;
+          return { key, dim, steps, control, count, label: dimLabel(key, dim), index };
+        });
+        selector = {};
+        for (const d of dimStates) selector[d.key] = d.index;
 
         // For projected-CRS stores, pass crs + proj4 string so ZarrLayer
         // reprojects natively instead of treating coordinates as WGS84 degrees.
@@ -520,8 +542,6 @@
         try {
           cm = buildColormap(colormapName);
           const zarrVersion = zarr["zarr:zarr_format"] ?? null;
-          const selector =
-            timeStepCount() > 0 ? { [timeDimKey]: initialTimeIndex() } : {};
           activeLayer = new ZarrLayer({
             id: "zarr-layer",
             source: zarr.href,
@@ -547,22 +567,8 @@
         }
 
 
-        // Dimension slider (temporal, or an ordinal axis such as day-of-year).
-        if (timeStepCount() > 1) {
-          const initialIndex = initialTimeIndex();
-          const stepDim = dimensions[timeDimKey] ?? {};
-          timeLabelEl.textContent =
-            stepDim.type === "temporal"
-              ? "Time step"
-              : timeDimKey === "dayofyear"
-                ? "Day of year"
-                : timeDimKey;
-          timeSlider.max = timeStepCount() - 1;
-          timeSlider.value = initialIndex;
-          timeValueEl.textContent = timeStepAt(initialIndex);
-          timeCountEl.textContent = `${initialIndex + 1} / ${timeStepCount()}`;
-          timeSection.classList.remove("hidden");
-        }
+        // One control per non-spatial dimension (slider or dropdown).
+        renderDimControls();
 
         // Metadata strip.
         const source = collection.keywords?.find(
@@ -590,17 +596,83 @@
       });
 
       let _selectorDebounce = null;
-      timeSlider.addEventListener("input", (e) => {
-        const i = parseInt(e.target.value, 10);
-        timeValueEl.textContent = timeStepAt(i) ?? "—";
-        timeCountEl.textContent = `${i + 1} / ${timeStepCount()}`;
+      function applySelector() {
         const layer = activeLayer;
-        const dimKey = timeDimKey;
         clearTimeout(_selectorDebounce);
         _selectorDebounce = setTimeout(() => {
-          layer?.setSelector({ [dimKey]: i });
+          layer?.setSelector({ ...selector });
         }, 150);
-      });
+      }
+
+      // Render one control per non-spatial dimension with more than one step.
+      // Sliders for temporal/regular-ordinal axes, dropdowns for categorical/irregular
+      // ones; each writes its index into the shared `selector` and re-renders the layer.
+      function renderDimControls() {
+        dimControls.replaceChildren();
+        const stepping = dimStates.filter((d) => d.count > 1);
+        if (!stepping.length) {
+          dimControls.classList.add("hidden");
+          return;
+        }
+        for (const d of stepping) {
+          const block = document.createElement("div");
+          block.style.marginBottom = "0.8rem";
+
+          const header = document.createElement("div");
+          header.className = "time-header";
+          const label = document.createElement("label");
+          label.style.marginBottom = "0";
+          label.textContent = d.label;
+          const count = document.createElement("span");
+          count.className = "time-count";
+          header.append(label, count);
+          block.append(header);
+
+          if (d.control === "slider") {
+            const valueWrap = document.createElement("div");
+            valueWrap.style.marginBottom = "0.4rem";
+            const valueEl = document.createElement("span");
+            valueEl.className = "time-value";
+            valueEl.textContent = stepDisplay(d.key, d.steps, d.index);
+            valueWrap.append(valueEl);
+            count.textContent = `${d.index + 1} / ${d.count}`;
+
+            const slider = document.createElement("input");
+            slider.type = "range";
+            slider.min = "0";
+            slider.step = "1";
+            slider.max = String(d.count - 1);
+            slider.value = String(d.index);
+            slider.addEventListener("input", (e) => {
+              const i = parseInt(e.target.value, 10);
+              d.index = i;
+              selector[d.key] = i;
+              valueEl.textContent = stepDisplay(d.key, d.steps, i) ?? "—";
+              count.textContent = `${i + 1} / ${d.count}`;
+              applySelector();
+            });
+            block.append(valueWrap, slider);
+          } else {
+            const select = document.createElement("select");
+            for (let i = 0; i < d.count; i++) {
+              const opt = document.createElement("option");
+              opt.value = String(i);
+              opt.textContent = stepDisplay(d.key, d.steps, i);
+              if (i === d.index) opt.selected = true;
+              select.append(opt);
+            }
+            select.addEventListener("change", (e) => {
+              const i = parseInt(e.target.value, 10);
+              d.index = i;
+              selector[d.key] = i;
+              applySelector();
+            });
+            block.append(select);
+          }
+          dimControls.append(block);
+        }
+        dimControls.classList.remove("hidden");
+      }
 
       initMap();
       loadCatalog();
