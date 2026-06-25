@@ -56,8 +56,12 @@ stores (using MapLibre and zarr-layer), so only datasets ingested with publishin
 appear here.
 
 - **Dataset selector** — pick any published dataset from the dropdown.
-- **Time slider** — datasets with a time dimension get a slider to step through periods;
-  the current period and the number of steps are shown above it.
+- **Dimension controls** — the viewer builds one control per non-spatial dimension of the
+  dataset, choosing the type from the dimension's metadata: a **slider** for a continuous,
+  evenly-spaced axis (time, or a regular ordinal axis like day-of-year) and a **dropdown**
+  for a categorical or irregular one. A WorldPop age/sex dataset, for example, shows a year
+  slider plus **Sex** and **Age group** dropdowns. Time sliders are labelled at the
+  dataset's granularity (a yearly dataset shows `2026`, a monthly one `2026-01`).
 - **Legend** — a colour bar with the value range and units, derived from the dataset's
   metadata (including the colour scheme defined in its template).
 - **Source and units** — shown alongside the legend for context.

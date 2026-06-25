@@ -103,6 +103,27 @@ class SeNorgePlugin(BaseDatasetPlugin):
         return normalize_period(ds, variable="tg", bbox=bbox)
 ```
 
+### Extra (non-spatial) dimensions
+
+A dataset is not limited to `(t, y, x)`. `fetch_period` may return a single variable with
+additional non-spatial dimensions — for example a `dayofyear` climatology axis, or `sex`
+and `age_group` disaggregation axes (as the WorldPop age/sex plugin does). Keep one variable
+for the quantity and express the disaggregations as dimensions, rather than splitting them
+into several variables:
+
+```python
+# one period -> a (t, sex, age_group, y, x) cube for the single "population" variable
+population = xr.concat(sex_cubes, dim="sex").assign_coords(sex=["female", "male"])
+ds = population.to_dataset(name="population").rio.write_crs("EPSG:4326")
+return ds.expand_dims(t=[np.datetime64(year)])
+```
+
+STAC declares each non-spatial dimension under `cube:dimensions`, and the map viewer builds
+one control per dimension: a **slider** for a temporal or evenly-spaced ordinal axis (one
+with a regular numeric `step`, e.g. `dayofyear`), and a **dropdown** for a categorical or
+irregularly-spaced one (e.g. `sex`, or the irregular age bands). The control type follows
+from the dimension's metadata, so there's nothing extra to configure.
+
 ## Step 2: Create a dataset template YAML
 
 ```yaml

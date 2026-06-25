@@ -62,7 +62,7 @@ WorldPop Global2 provides gridded population estimates and projections at 100 m 
 | Property | Value |
 | --- | --- |
 | **Dataset ID** | `worldpop_agesex_global2_R2025A_100m` |
-| **Variables** | `population_female`, `population_male` (each over an `age_group` dimension) |
+| **Variable** | `population` (over `sex` and `age_group` dimensions) |
 | **Units** | people |
 | **Period** | Yearly |
 | **Spatial coverage** | Per-country (set `extent.country_code`) |
@@ -71,7 +71,9 @@ WorldPop Global2 provides gridded population estimates and projections at 100 m 
 | **Record end** | 2030 |
 | **Source** | [WorldPop Global2 age & sex structures](https://hub.worldpop.org/project/categories?id=8) |
 
-Population disaggregated by sex and 5-year age band. WorldPop publishes one GeoTIFF per (sex, age band); the plugin combines them into a single store with two variables — `population_female` and `population_male` — each carrying an ordinal `age_group` dimension (the lower bound of the band: 0, 1, 5, 10, … 90). Each band is read lazily so memory stays bounded despite the ~40 source rasters per country-year.
+Population disaggregated by sex and 5-year age band. Population is the quantity; sex and age are both disaggregation dimensions of it — so WorldPop's ~40 per-(sex, age) GeoTIFFs per country-year are combined into a **single `population` variable** over a `sex` dimension (`female`, `male`) and an ordinal `age_group` dimension (the lower bound of each band: 0, 1, 5, 10, … 90). In the map viewer these surface as a **Sex** and an **Age group** dropdown alongside the year slider. Each band is read lazily so memory stays bounded despite the many source rasters.
+
+WorldPop's hub advertises but does not honour HTTP Range requests, so each GeoTIFF is downloaded to a local cache (`~/.cache/chap-gis/worldpop`) and opened from disk rather than read lazily over the network.
 
 ---
 
