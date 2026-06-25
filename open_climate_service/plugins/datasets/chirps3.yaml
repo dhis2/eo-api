@@ -27,3 +27,39 @@
     colormap: blues
     range: [0.0, 20.0]
     nodata: -9999.0
+
+# ---------------------------------------------------------------------------
+# Climate-normal output templates for the `climate_normal` openEO workflow (normals
+# computed from the already-ingested CHIRPS3 store). No ingestion plugin — the data is
+# produced by the workflow and published via save_result. Run the workflow on
+# chirps3_precipitation_daily; `frequency` selects day-of-year (366) or month (12).
+# Monthly values are the mean daily rate per calendar month.
+# ---------------------------------------------------------------------------
+
+- id: chirps3_precipitation_daily_normal_from_store
+  name: Precipitation daily normal (CHIRPS3, from managed store)
+  short_name: Precipitation daily normal
+  variable: precip
+  period_type: climatology
+  sync:
+    kind: static
+  units: mm/d
+  source: Derived (climate_normal workflow)
+  display:
+    colormap: blues
+    range: [0.0, 20.0]
+    nodata: -9999.0
+
+- id: chirps3_precipitation_monthly_normal_from_store
+  name: Precipitation monthly normal (CHIRPS3, from managed store)
+  short_name: Precipitation monthly normal
+  variable: precip
+  period_type: climatology
+  sync:
+    kind: static
+  units: mm/d
+  source: Derived (climate_normal workflow)
+  display:
+    colormap: blues
+    range: [0.0, 20.0]
+    nodata: -9999.0

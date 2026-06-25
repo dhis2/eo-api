@@ -1,7 +1,7 @@
 {
   "id": "climate_normal",
-  "summary": "Compute a day-of-year climatology from a published collection and publish it as a new GeoZarr dataset",
-  "description": "Loads a published GeoZarr collection over a reference period and computes a WMO-style day-of-year climatology (mean per day-of-year, optionally circular-smoothed), then publishes the result as a new GeoZarr dataset with a `dayofyear` dimension (1..366).\n\nUse it to derive normals from a dataset you have already ingested for the reference period — e.g. ingest era5land_temperature_daily for 1991-2020, then compute its day-of-year normal. (To compute normals without ingesting 30 years first, use the `era5land_temperature_normal` / `era5land_precipitation_normal` dataset templates, which read the reference period directly from the Earth Data Hub.)\n\nThe `output_dataset_id` must have a registered dataset template on the instance: a YAML in `plugins/datasets/` with `sync: {kind: static}` and a `display` block (colormap/range). No ingestion plugin is required — the data is produced by this workflow.\n\nZarr output cannot be produced synchronously, so run this as a batch job (`POST /jobs`, then `POST /jobs/{id}/results`):\n\n{\n  \"normal\": {\n    \"process_id\": \"climate_normal\",\n    \"arguments\": {\n      \"dataset_id\": \"era5land_temperature_daily\",\n      \"output_dataset_id\": \"era5land_temperature_normal_from_store\",\n      \"variable\": \"t2m\",\n      \"temporal_extent\": [\"1991-01-01\", \"2020-12-31\"],\n      \"smoothing_window\": 31\n    },\n    \"result\": true\n  }\n}",
+  "summary": "Compute a climatological normal (day-of-year or month-of-year) from a published collection and publish it as a new GeoZarr dataset",
+  "description": "Loads a published GeoZarr collection over a reference period and computes a WMO-style climatology — mean per day-of-year (1..366, optionally circular-smoothed) or per month (1..12), selected by `frequency` — then publishes the result as a new GeoZarr dataset with a `dayofyear` or `month` dimension.\n\nUse it to derive normals from a dataset you have already ingested for the reference period — e.g. ingest era5land_temperature_daily for 1991-2020, then compute its day-of-year normal. (To compute ERA5-Land day-of-year normals without ingesting 30 years first, use the `era5land_temperature_daily_normal` / `era5land_precipitation_daily_normal` dataset templates, which read the reference period directly from the Earth Data Hub.)\n\nThe `output_dataset_id` must have a registered dataset template on the instance: a YAML in `plugins/datasets/` with `sync: {kind: static}` and a `display` block (colormap/range). No ingestion plugin is required — the data is produced by this workflow.\n\nZarr output cannot be produced synchronously, so run this as a batch job (`POST /jobs`, then `POST /jobs/{id}/results`):\n\n{\n  \"normal\": {\n    \"process_id\": \"climate_normal\",\n    \"arguments\": {\n      \"dataset_id\": \"era5land_temperature_daily\",\n      \"output_dataset_id\": \"era5land_temperature_daily_normal_from_store\",\n      \"variable\": \"t2m\",\n      \"temporal_extent\": [\"1991-01-01\", \"2020-12-31\"],\n      \"frequency\": \"dayofyear\",\n      \"smoothing_window\": 31\n    },\n    \"result\": true\n  }\n}",
   "parameters": [
     {
       "name": "dataset_id",
@@ -24,8 +24,15 @@
       "schema": { "type": "array", "subtype": "temporal-interval" }
     },
     {
+      "name": "frequency",
+      "description": "Climatology resolution: 'dayofyear' (1..366, default) or 'month' (1..12).",
+      "schema": { "type": "string", "enum": ["dayofyear", "month"] },
+      "optional": true,
+      "default": "dayofyear"
+    },
+    {
       "name": "smoothing_window",
-      "description": "Circular rolling-mean window in days (WMO smoothing). 0 disables. Default 31.",
+      "description": "Circular rolling-mean window in days (WMO smoothing, day-of-year only). 0 disables. Default 31.",
       "schema": { "type": "integer" },
       "optional": true,
       "default": 31
@@ -43,6 +50,7 @@
       "process_id": "climatological_normal",
       "arguments": {
         "data": { "from_node": "load" },
+        "frequency": { "from_parameter": "frequency" },
         "smoothing_window": { "from_parameter": "smoothing_window" }
       }
     },

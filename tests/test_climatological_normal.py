@@ -38,3 +38,24 @@ def test_climatological_normal_requires_temporal_dimension() -> None:
     flat = xr.DataArray(np.zeros((2, 2), dtype="float32"), dims=("y", "x"), coords={"y": [1.0, 2.0], "x": [1.0, 2.0]})
     with pytest.raises(ValueError, match="temporal dimension"):
         climatological_normal(flat)
+
+
+def test_climatological_normal_monthly_reduces_time_to_month() -> None:
+    # A cube where each step equals its calendar month → the month-of-year mean is the
+    # month itself (1..12).
+    times = pd.date_range("1991-01-01", "1992-12-31", freq="D")
+    month = times.month.to_numpy().astype("float32")
+    data = np.broadcast_to(month[:, None, None], (len(times), 2, 2)).copy()
+    cube = xr.DataArray(data, dims=("t", "y", "x"), coords={"t": times, "y": [1.0, 2.0], "x": [1.0, 2.0]})
+
+    out = climatological_normal(cube, frequency="month")
+
+    assert "month" in out.dims and "dayofyear" not in out.dims and "t" not in out.dims
+    assert out.sizes["month"] == 12
+    assert float(out.sel(month=1).isel(y=0, x=0)) == pytest.approx(1.0)
+    assert float(out.sel(month=12).isel(y=0, x=0)) == pytest.approx(12.0)
+
+
+def test_climatological_normal_rejects_unknown_frequency() -> None:
+    with pytest.raises(ValueError, match="frequency"):
+        climatological_normal(_daily_cube(), frequency="weekly")

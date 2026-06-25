@@ -612,12 +612,14 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     ingestion_services.register_artifact_record(record, publish=_publish_raw)
 
 
-def _recover_temporal_from_attrs(ds: Any) -> tuple[str, str]:
+def _recover_temporal_from_attrs(ds: Any) -> tuple[str | None, str | None]:
     """Extract temporal extent from reduce_dimension min/max attrs.
 
     openeo-processes-dask stores the reduced dimension's value range in
     ``reduced_dimensions_min_values`` / ``reduced_dimensions_max_values`` on each
-    variable's attrs after ``reduce_dimension``.  Fall back to ("", "") when not found.
+    variable's attrs after ``reduce_dimension``.  Fall back to ``(None, None)`` when not
+    found — a non-temporal output (e.g. a day-of-year/month climatology) genuinely has no
+    temporal extent, matching the ``None`` convention used elsewhere for coverage.
     """
     import numpy as np
 
@@ -640,7 +642,7 @@ def _recover_temporal_from_attrs(ds: Any) -> tuple[str, str]:
                     return t_start, t_end
                 except Exception:
                     pass
-    return "", ""
+    return None, None
 
 
 def _derive_coverage(ds: Any, x_dim: str, y_dim: str, t_dim: str | None) -> Any:
@@ -672,6 +674,8 @@ def _derive_coverage(ds: Any, x_dim: str, y_dim: str, t_dim: str | None) -> Any:
         except Exception:
             pass
 
+    t_start: str | None
+    t_end: str | None
     if t_dim is not None and t_dim in ds.coords and ds.sizes.get(t_dim, 0) > 0:
         # min/max rather than first/last so coverage is correct for a non-monotonic time axis.
         t_values = ds[t_dim].values
