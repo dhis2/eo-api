@@ -172,9 +172,9 @@
     range: [0.0, 20.0]
     nodata: 0.0
 
-- id: era5land_temperature_normal
-  name: 2m temperature normal (ERA5-Land, 1991–2020)
-  short_name: Temperature normal
+- id: era5land_temperature_daily_normal
+  name: 2m temperature daily normal (ERA5-Land, 1991–2020)
+  short_name: Temperature daily normal
   variable: t2m
   period_type: climatology
   sync:
@@ -198,9 +198,9 @@
     colormap: rdbu_r
     range: [-30.0, 30.0]
 
-- id: era5land_precipitation_normal
-  name: Total precipitation normal (ERA5-Land, 1991–2020)
-  short_name: Precipitation normal
+- id: era5land_precipitation_daily_normal
+  name: Total precipitation daily normal (ERA5-Land, 1991–2020)
+  short_name: Precipitation daily normal
   variable: tp
   period_type: climatology
   sync:
