@@ -174,3 +174,36 @@ def aggregate_spatial(
     combined = xr.concat(results, dim=geom_dim)
     combined[geom_dim] = geom_labels
     return combined
+
+
+_REDUCE_METHODS: dict[str, Callable[..., Any]] = {
+    "mean": np.mean,
+    "sum": np.sum,
+    "min": np.min,
+    "max": np.max,
+    "median": np.median,
+}
+
+
+@process(
+    summary="Reduce pixel values by a named method",
+    parameters={
+        "data": {"description": "The array of values to reduce."},
+        "method": {"description": "Reduction method: mean (default), sum, min, max or median."},
+    },
+)
+def reduce_by_method(data: Any, method: str = "mean") -> float:
+    """Reduce an array of values by a named method.
+
+    A spec-compliant alternative to parameterising a reducer's ``process_id``: workflows
+    pass ``method`` as an ordinary string argument (mean/sum/min/max/median) while
+    ``process_id`` stays the literal ``"reduce_by_method"``, so standard openEO tooling
+    can validate the graph. Used as the reducer in the ``aggregate_*`` workflows, where
+    it receives the (already NaN-dropped, 1-D) pixel values within each geometry.
+    """
+    if method not in _REDUCE_METHODS:
+        raise ValueError(f"Unknown reduce method '{method}'; expected one of {sorted(_REDUCE_METHODS)}")
+    arr = np.asarray(data, dtype="float64").ravel()
+    if arr.size == 0:
+        return float("nan")
+    return float(_REDUCE_METHODS[method](arr))
