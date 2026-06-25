@@ -53,7 +53,7 @@
   source_url: https://hub.worldpop.org/project/categories?id=8
   display:
     colormap: reds
-    range: [0.5, 100.0]
+    range: [0.5, 10.0]
 
 - id: worldpop_population_change
   name: Population change (WorldPop Global2)

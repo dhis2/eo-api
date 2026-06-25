@@ -28,7 +28,7 @@ The Open Climate Service is envisioned as the shared data infrastructure layer f
 
 ### 2.1 Relationship to existing DHIS2 climate work
 
-The Open Climate Service supplements and extends the existing DHIS2 climate data integration work documented at dhis2.org/climate/climate-data/. It builds on the same broader DHIS2 climate ecosystem. The platform wraps climate and earth observation workflows in a standardised API so that data access, processing, and publication can be configured and run without writing code.
+The Open Climate Service supplements and extends the existing DHIS2 climate data integration work documented at dhis2.org/climate/climate-data/. The platform wraps climate and earth observation workflows in a standardised API so that data access, processing, and publication can be configured and run without writing code.
 
 ### 2.2 Scope of this document
 
@@ -208,23 +208,23 @@ Long-running jobs (ingestion, sync, aggregation) are executed asynchronously. Th
 
 ### 8.4 Technology stack
 
-| Technology                    | Role in the Open Climate Service                                                                                                                                                                  |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FastAPI (Python)              | Core REST API framework. Handles ingestion, sync, dataset, processing, and STAC endpoints. Each pipeline step is exposed as a separate endpoint.                                                      |
-| Xarray + Zarr                 | In-memory dataset model and cloud-native chunked storage format. GeoZarr conventions applied for geospatial metadata and multiscale pyramid support.                                     |
-| Dask                          | Parallel computation within jobs — processes Zarr chunks concurrently for aggregation, reprojection, and derived variable computation. Works natively with Xarray.                       |
-| rioxarray                     | Raster operations on Xarray datasets — reprojection, clipping, resampling, and CRS management.                                                                                           |
-| openeo-pg-parser-networkx + openeo-processes-dask | openEO process-graph parsing and execution — the processing and aggregation engine (temporal/spatial aggregation, derived variables, and reusable workflows).        |
-| topozarr                      | Builds multiscale pyramid overview levels at ingest time, for zarr-layer zoom-level-aware chunk fetching.                                                                               |
-| geozarr-toolkit               | Applies GeoZarr metadata conventions (multiscales, CRS, spatial) to stored datasets.                                                                                                    |
-| icechunk                      | Transactional, versioned storage engine for the managed Zarr datasets.                                                                                                                  |
-| xclim                         | Climate-index library (179 CF-compliant indicators) exposed automatically as openEO processes.                                                                                          |
-| xstac                         | Derives STAC and datacube metadata from the published Zarr datasets.                                                                                                                     |
-| fsspec                        | Unified filesystem abstraction for storage backends (local, S3-compatible, Azure Blob, GCS, Ceph/RGW). Backend is environment-variable configuration only.                               |
-| zarr-layer (MapLibre)         | TypeScript library for rendering Zarr directly as a native MapLibre Custom Layer in the browser. GPU reprojection from the stored CRS to Spherical Mercator; uses multiscale levels per zoom. |
-| Docker                        | Containerised deployment. Supports local, cloud-hosted, and country sovereign deployments.                                                                                               |
-| dhis2-python-client          | Planned DHIS2 Web API integration library for future data value push and related DHIS2 write workflows.                                                                                  |
-| STAC                          | Complementary discovery and metadata catalogue layer. Each dataset exposed as a STAC Item with temporal, spatial, and access metadata.                                                   |
+| Technology                                        | Role in the Open Climate Service                                                                                                                                                              |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FastAPI (Python)                                  | Core REST API framework. Handles ingestion, sync, dataset, processing, and STAC endpoints. Each pipeline step is exposed as a separate endpoint.                                              |
+| Xarray + Zarr                                     | In-memory dataset model and cloud-native chunked storage format. GeoZarr conventions applied for geospatial metadata and multiscale pyramid support.                                          |
+| Dask                                              | Parallel computation within jobs — processes Zarr chunks concurrently for aggregation, reprojection, and derived variable computation. Works natively with Xarray.                            |
+| rioxarray                                         | Raster operations on Xarray datasets — reprojection, clipping, resampling, and CRS management.                                                                                                |
+| openeo-pg-parser-networkx + openeo-processes-dask | openEO process-graph parsing and execution — the processing and aggregation engine (temporal/spatial aggregation, derived variables, and reusable workflows).                                 |
+| topozarr                                          | Builds multiscale pyramid overview levels at ingest time, for zarr-layer zoom-level-aware chunk fetching.                                                                                     |
+| geozarr-toolkit                                   | Applies GeoZarr metadata conventions (multiscales, CRS, spatial) to stored datasets.                                                                                                          |
+| icechunk                                          | Transactional, versioned storage engine for the managed Zarr datasets.                                                                                                                        |
+| xclim                                             | Climate-index library (179 CF-compliant indicators) exposed automatically as openEO processes.                                                                                                |
+| xstac                                             | Derives STAC and datacube metadata from the published Zarr datasets.                                                                                                                          |
+| fsspec                                            | Unified filesystem abstraction for storage backends (local, S3-compatible, Azure Blob, GCS, Ceph/RGW). Backend is environment-variable configuration only.                                    |
+| zarr-layer (MapLibre)                             | TypeScript library for rendering Zarr directly as a native MapLibre Custom Layer in the browser. GPU reprojection from the stored CRS to Spherical Mercator; uses multiscale levels per zoom. |
+| Docker                                            | Containerised deployment. Supports local, cloud-hosted, and country sovereign deployments.                                                                                                    |
+| dhis2-python-client                               | Planned DHIS2 Web API integration library for future data value push and related DHIS2 write workflows.                                                                                       |
+| STAC                                              | Complementary discovery and metadata catalogue layer. Each dataset exposed as a STAC Item with temporal, spatial, and access metadata.                                                        |
 
 ---
 
@@ -256,10 +256,10 @@ The storage backend is configured entirely via environment variables — no code
 
 ## 11. Related work and repositories
 
-| Resource                | Link / Description                           |
-| ----------------------- | -------------------------------------------- |
-| Open Climate Service GitHub      | https://github.com/dhis2/open-climate-service         |
-| DHIS2 climate data      | https://dhis2.org/climate/climate-data/      |
-| CHAP Modelling Platform | https://chap.dhis2.org/                      |
-| dhis2-python-client     | https://github.com/dhis2/dhis2-python-client |
-| GeoZarr roadmap         | https://geozarr.org/roadmap.html             |
+| Resource                    | Link / Description                            |
+| --------------------------- | --------------------------------------------- |
+| Open Climate Service GitHub | https://github.com/dhis2/open-climate-service |
+| DHIS2 climate data          | https://dhis2.org/climate/climate-data/       |
+| CHAP Modelling Platform     | https://chap.dhis2.org/                       |
+| dhis2-python-client         | https://github.com/dhis2/dhis2-python-client  |
+| GeoZarr roadmap             | https://geozarr.org/roadmap.html              |

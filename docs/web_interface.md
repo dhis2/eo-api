@@ -4,13 +4,13 @@ Every Open Climate Service instance ships with a small built-in web interface �
 separate application to install. Once the instance is running, open its root URL
 (`http://127.0.0.1:8000` by default) and the landing page links to everything below.
 
-| Page | URL | What it does |
-| ---- | --- | ------------ |
-| Landing page | `/` | Instance overview — name, extent, available dataset templates, and ingested datasets |
-| **Manage** | `/manage` | Ingest data, sync datasets forward, and see what is already ingested |
-| **Map viewer** | `/map` | View published datasets on an interactive map |
-| openEO editor | `/openeo` | Redirects to the openEO Web Editor, pre-connected to this instance |
-| API docs | `/docs` | Interactive Swagger documentation for the REST API |
+| Page           | URL       | What it does                                                                         |
+| -------------- | --------- | ------------------------------------------------------------------------------------ |
+| Landing page   | `/`       | Instance overview — name, extent, available dataset templates, and ingested datasets |
+| **Manage**     | `/manage` | Ingest data, sync datasets forward, and see what is already ingested                 |
+| **Map viewer** | `/map`    | View published datasets on an interactive map                                        |
+| openEO editor  | `/openeo` | Redirects to the openEO Web Editor, pre-connected to this instance                   |
+| API docs       | `/docs`   | Interactive Swagger documentation for the REST API                                   |
 
 The interface is intended for operators setting up and curating an instance. Everything
 it does is also available through the REST API, so the same operations can be scripted or
@@ -59,9 +59,7 @@ appear here.
 - **Dimension controls** — the viewer builds one control per non-spatial dimension of the
   dataset, choosing the type from the dimension's metadata: a **slider** for a continuous,
   evenly-spaced axis (time, or a regular ordinal axis like day-of-year) and a **dropdown**
-  for a categorical or irregular one. A WorldPop age/sex dataset, for example, shows a year
-  slider plus **Sex** and **Age group** dropdowns. Time sliders are labelled at the
-  dataset's granularity (a yearly dataset shows `2026`, a monthly one `2026-01`).
+  for a categorical or irregular one.
 - **Legend** — a colour bar with the value range and units, derived from the dataset's
   metadata (including the colour scheme defined in its template).
 - **Source and units** — shown alongside the legend for context.

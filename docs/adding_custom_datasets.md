@@ -107,16 +107,7 @@ class SeNorgePlugin(BaseDatasetPlugin):
 
 A dataset is not limited to `(t, y, x)`. `fetch_period` may return a single variable with
 additional non-spatial dimensions — for example a `dayofyear` climatology axis, or `sex`
-and `age_group` disaggregation axes (as the WorldPop age/sex plugin does). Keep one variable
-for the quantity and express the disaggregations as dimensions, rather than splitting them
-into several variables:
-
-```python
-# one period -> a (t, sex, age_group, y, x) cube for the single "population" variable
-population = xr.concat(sex_cubes, dim="sex").assign_coords(sex=["female", "male"])
-ds = population.to_dataset(name="population").rio.write_crs("EPSG:4326")
-return ds.expand_dims(t=[np.datetime64(year)])
-```
+and `age_group` disaggregation axes (as the WorldPop age/sex plugin does).
 
 STAC declares each non-spatial dimension under `cube:dimensions`, and the map viewer builds
 one control per dimension: a **slider** for a temporal or evenly-spaced ordinal axis (one
@@ -148,29 +139,29 @@ from the dimension's metadata, so there's nothing extra to configure.
 
 **Identity**
 
-| Field        | Required | Description |
-| ------------ | -------- | ----------- |
-| `id`         | Yes | Unique template identifier. This becomes the dataset ID in the API |
-| `name`       | Yes | Full human-readable name shown in API responses and STAC metadata |
-| `short_name` | No  | Short label used in compact displays |
-| `variable`   | Yes | Name of the data variable in the Zarr store (e.g. `precip`, `t2m`, `rainfall`) |
-| `source`     | No  | Name of the upstream data source |
-| `source_url` | No  | URL to the upstream dataset documentation or landing page |
+| Field        | Required | Description                                                                    |
+| ------------ | -------- | ------------------------------------------------------------------------------ |
+| `id`         | Yes      | Unique template identifier. This becomes the dataset ID in the API             |
+| `name`       | Yes      | Full human-readable name shown in API responses and STAC metadata              |
+| `short_name` | No       | Short label used in compact displays                                           |
+| `variable`   | Yes      | Name of the data variable in the Zarr store (e.g. `precip`, `t2m`, `rainfall`) |
+| `source`     | No       | Name of the upstream data source                                               |
+| `source_url` | No       | URL to the upstream dataset documentation or landing page                      |
 
 **Period and sync**
 
-| Field | Required | Description |
-| ----- | -------- | ----------- |
-| `period_type` | Yes | Temporal resolution: `hourly`, `daily`, `monthly`, `yearly` |
-| `sync.kind` | Yes | `temporal` — data grows over time; `release` — versioned releases; `static` — never synced |
-| `sync.execution` | No | `append` — new time steps appended to existing store; `rematerialize` — full rebuild on each sync |
+| Field            | Required | Description                                                                                       |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------- |
+| `period_type`    | Yes      | Temporal resolution: `hourly`, `daily`, `monthly`, `yearly`                                       |
+| `sync.kind`      | Yes      | `temporal` — data grows over time; `release` — versioned releases; `static` — never synced        |
+| `sync.execution` | No       | `append` — new time steps appended to existing store; `rematerialize` — full rebuild on each sync |
 
 **Ingestion**
 
-| Field | Required | Description |
-| ----- | -------- | ----------- |
-| `ingestion.plugin` | Yes | Dotted path to the streaming plugin class |
-| `ingestion.params` | No | Extra keyword arguments forwarded to `fetch_period` as `**params`, and to the plugin constructor |
+| Field              | Required | Description                                                                                      |
+| ------------------ | -------- | ------------------------------------------------------------------------------------------------ |
+| `ingestion.plugin` | Yes      | Dotted path to the streaming plugin class                                                        |
+| `ingestion.params` | No       | Extra keyword arguments forwarded to `fetch_period` as `**params`, and to the plugin constructor |
 
 Multiple templates can share the same plugin class and differ only in `params`:
 
@@ -193,13 +184,13 @@ Multiple templates can share the same plugin class and differ only in `params`:
 ```yaml
 extents:
   spatial:
-    bbox: [-180, -50, 180, 50]   # [xmin, ymin, xmax, ymax] in WGS84
+    bbox: [-180, -50, 180, 50] # [xmin, ymin, xmax, ymax] in WGS84
     crs: http://www.opengis.net/def/crs/OGC/1.3/CRS84
   temporal:
     begin: "1981-01-01"
-    end: "2030-12-31"            # omit if ongoing
+    end: "2030-12-31" # omit if ongoing
     trs: http://www.opengis.net/def/uom/ISO-8601/0/Gregorian
-    resolution: P1D              # ISO 8601 duration: PT1H, P1D, P1M, P1Y
+    resolution: P1D # ISO 8601 duration: PT1H, P1D, P1M, P1Y
 ```
 
 **CF metadata** — stamped onto the stored variable at ingest so the GeoZarr store is
@@ -207,20 +198,20 @@ CF-compliant on disk and CF-aware tools (xclim climate indices, cf-xarray, QGIS)
 without per-process glue. These fields take effect when the store is written, so changing
 them requires re-ingesting the dataset:
 
-| Field | Required | Description |
-| ----- | -------- | ----------- |
-| `units` | No | Physical units, as a **CF/udunits** string (e.g. `mm`, `mm/d`, `degC`, `kg m-2 s-1`). Validated at registration — a non-udunits value (e.g. `people`) is logged as a warning. Use `""` for a dimensionless quantity (e.g. a standardized index). For unit-aware processes (e.g. SPI) the unit must be *dimensionally* correct — a precipitation **rate** is `mm/d`, not bare `mm`. |
-| `standard_name` | No | CF [standard name](https://cfconventions.org/standard-names.html) (e.g. `air_temperature`, `lwe_thickness_of_precipitation_amount`). |
-| `cell_methods` | No | CF cell methods describing the temporal aggregation (e.g. `time: mean`, `time: sum`). |
+| Field           | Required | Description                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `units`         | No       | Physical units, as a **CF/udunits** string (e.g. `mm`, `mm/d`, `degC`, `kg m-2 s-1`). Validated at registration — a non-udunits value (e.g. `people`) is logged as a warning. Use `""` for a dimensionless quantity (e.g. a standardized index). For unit-aware processes (e.g. SPI) the unit must be _dimensionally_ correct — a precipitation **rate** is `mm/d`, not bare `mm`. |
+| `standard_name` | No       | CF [standard name](https://cfconventions.org/standard-names.html) (e.g. `air_temperature`, `lwe_thickness_of_precipitation_amount`).                                                                                                                                                                                                                                               |
+| `cell_methods`  | No       | CF cell methods describing the temporal aggregation (e.g. `time: mean`, `time: sum`).                                                                                                                                                                                                                                                                                              |
 
 **Display**
 
-| Field | Required | Description |
-| ----- | -------- | ----------- |
-| `resolution` | No | Human-readable spatial resolution (e.g. `5 km x 5 km`) |
-| `display.colormap` | No | Colormap name for map rendering (e.g. `blues`, `rdbu_r`) |
-| `display.range` | No | `[min, max]` display range for the colormap |
-| `display.nodata` | No | No-data / fill value |
+| Field              | Required | Description                                              |
+| ------------------ | -------- | -------------------------------------------------------- |
+| `resolution`       | No       | Human-readable spatial resolution (e.g. `5 km x 5 km`)   |
+| `display.colormap` | No       | Colormap name for map rendering (e.g. `blues`, `rdbu_r`) |
+| `display.range`    | No       | `[min, max]` display range for the colormap              |
+| `display.nodata`   | No       | No-data / fill value                                     |
 
 ## Step 3: Point the instance at your plugins directory
 
