@@ -305,7 +305,7 @@ def test_plan_sync_marks_static_non_temporal_dataset_not_syncable() -> None:
 
     result = sync_engine.plan_sync(
         source_dataset={
-            "id": "era5land_temperature_daily_normal",
+            "id": "era5land_temperature_daily_normal_1991_2020",
             "period_type": "climatology",
             "sync": {"kind": "static"},
         },
