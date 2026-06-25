@@ -56,9 +56,19 @@ def read_committed_period_ids(store_path: Path, period_type: str, *, time_dim: s
         try:
             if time_dim not in ds.coords:
                 return set()
+            coord = ds[time_dim]
+            if coord.dtype.kind != "M":
+                # Non-datetime (ordinal) step dimension — e.g. an integer
+                # ``dayofyear`` axis. Period ids are the coord values as plain
+                # strings, matching what ``plugin.periods()`` emits; parsing them
+                # as datetimes would mangle every value and leave ``committed``
+                # empty, causing duplicate appends on resume.
+                if coord.dtype.kind in "iu":
+                    return {str(int(item)) for item in coord.values}
+                return {str(item.item()) for item in coord.values}
             return {
                 datetime_to_period_string(pd.Timestamp(item.item()).to_pydatetime(), period_type)
-                for item in ds[time_dim].values
+                for item in coord.values
             }
         finally:
             ds.close()

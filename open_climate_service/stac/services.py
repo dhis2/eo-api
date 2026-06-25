@@ -265,6 +265,12 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
             # so the map viewer can resolve the variable name and spatial axes.
             payload.setdefault("cube:dimensions", _build_static_cube_dimensions(ds, x_dimension, y_dimension))
             payload.setdefault("cube:variables", _build_cube_variables(ds))
+        # Declare ordinal (non-spatial, non-temporal) axes — e.g. a day-of-year
+        # climatology — that xstac/the static path would otherwise drop, so the map
+        # viewer can offer a slider over them.
+        ordinal_dims = _build_ordinal_dimensions(ds, x_dimension, y_dimension, time_dimension)
+        if ordinal_dims:
+            payload.setdefault("cube:dimensions", {}).update(ordinal_dims)
         _cache_xstac_collection_payload(artifact.artifact_id, payload)
         return deepcopy(payload)
     except HTTPException:
@@ -384,6 +390,42 @@ def _build_static_cube_dimensions(ds: xr.Dataset, x_dim: str, y_dim: str) -> dic
             "reference_system": crs,
         },
     }
+
+
+def _build_ordinal_dimensions(ds: xr.Dataset, x_dim: str, y_dim: str, time_dim: str | None) -> dict[str, Any]:
+    """cube:dimensions entries for non-spatial, non-temporal axes (e.g. ``dayofyear``).
+
+    The datacube/STAC machinery only declares spatial and temporal axes, so an ordinal
+    coordinate like a day-of-year climatology axis would otherwise be dropped — and the
+    map viewer could not slider it. Declared here with explicit ``values`` (and a ``step``
+    for evenly spaced integer axes) so the viewer can step over them.
+    """
+    import numpy as np
+
+    dims = getattr(ds, "dims", None)
+    if not dims:
+        return {}
+    skip = {x_dim, y_dim} | ({time_dim} if time_dim else set())
+    out: dict[str, Any] = {}
+    for name in dims:
+        if name in skip or name not in ds.coords:
+            continue
+        coord = ds[name]
+        if np.issubdtype(coord.dtype, np.datetime64):
+            continue  # a temporal axis — handled by xstac
+        values = coord.values.tolist()
+        entry: dict[str, Any] = {"type": "other", "values": values}
+        if len(values) > 1 and all(isinstance(v, int) for v in values):
+            # Only publish a step for a genuinely evenly spaced axis: every
+            # consecutive delta must match. Deriving it from the first delta
+            # alone would emit a wrong step for irregular integer coordinates.
+            deltas = {b - a for a, b in zip(values, values[1:])}
+            if len(deltas) == 1:
+                (step,) = deltas
+                if step:
+                    entry["step"] = step
+        out[str(name)] = entry
+    return out
 
 
 def _build_cube_variables(ds: xr.Dataset) -> dict[str, Any]:
