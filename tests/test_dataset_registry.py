@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from open_climate_service import config as api_config
 from open_climate_service.data_registry.services import datasets
 
 
@@ -159,3 +160,57 @@ def test_dataset_registry_accepts_supported_sync_execution(
     monkeypatch.setattr(datasets, "CONFIGS_DIR", tmp_path)
 
     assert datasets.list_datasets()[0]["sync"]["execution"] == "append"
+
+
+def test_write_dataset_template_persists_into_plugins_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plugins_dir = tmp_path / "plugins"
+    config_file = tmp_path / "climate-service.yaml"
+    config_file.write_text(f"plugins_dir: {plugins_dir}\n", encoding="utf-8")
+    monkeypatch.setattr(datasets, "CONFIGS_DIR", None)
+    monkeypatch.setattr(api_config, "_cache", None)
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
+
+    path = datasets.write_dataset_template(
+        {
+            "id": "derived_change",
+            "name": "Derived Change",
+            "variable": "change",
+            "period_type": "yearly",
+            "sync": {"kind": "static"},
+            "display": {"colormap": "RdBu", "range": [-10.0, 10.0]},
+        }
+    )
+
+    assert path == plugins_dir / "datasets" / "derived_change.yaml"
+    assert path.exists()
+    loaded = datasets.get_dataset("derived_change")
+    assert loaded is not None
+    assert loaded["display"]["colormap"] == "RdBu"
+
+
+def test_write_dataset_template_rejects_existing_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plugins_dir = tmp_path / "plugins"
+    config_file = tmp_path / "climate-service.yaml"
+    config_file.write_text(f"plugins_dir: {plugins_dir}\n", encoding="utf-8")
+    monkeypatch.setattr(datasets, "CONFIGS_DIR", None)
+    monkeypatch.setattr(api_config, "_cache", None)
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
+
+    template = {
+        "id": "derived_change",
+        "name": "Derived Change",
+        "variable": "change",
+        "period_type": "yearly",
+        "sync": {"kind": "static"},
+        "display": {"colormap": "RdBu", "range": [-10.0, 10.0]},
+    }
+    datasets.write_dataset_template(template)
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        datasets.write_dataset_template(template)
