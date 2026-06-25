@@ -207,9 +207,10 @@ class WorldPopAgeSexYearlyPlugin(BaseDatasetPlugin):
         """Combine the per-(sex, age) GeoTIFFs into one lazy ``(t, sex, age_group, y, x)`` cube.
 
         A regular (blocking) method — the framework runs it in a worker thread.
-        """
-        import rioxarray  # noqa: F401  # registers the .rio accessor for write_crs
 
+        ``_open_worldpop_raster`` imports rioxarray, registering the ``.rio`` accessor
+        used by ``write_crs`` below, so no separate import is needed here.
+        """
         country_code = _required_country_code(params)
         year = int(period_id)
         ages = [int(a) for a in _AGE_BANDS]
