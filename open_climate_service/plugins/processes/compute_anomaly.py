@@ -18,6 +18,25 @@ _ORDINALS = ("dayofyear", "month")
 _METHODS = ("absolute", "relative")
 
 
+def _match_spatial_grid(aligned: xr.DataArray, observed: xr.DataArray, t_dim: str) -> xr.DataArray:
+    """Snap the aligned normal onto the observed cube's spatial grid.
+
+    Observed and normal cubes can be produced independently (e.g. a CDS-derived observed
+    vs an EDH-derived normal whose longitudes were remapped from [0, 360)), so equal
+    nominal grids may still differ by floating-point noise (~1e-11). xarray aligns
+    coordinates by exact equality, which would intersect such grids to nothing — and the
+    whole anomaly would come out empty. Reindex the normal onto the observed coordinates by
+    nearest neighbour within half a grid step, so float noise snaps cleanly while genuinely
+    unmatched cells become NaN rather than silently collapsing the grid.
+    """
+    spatial_dims = [d for d in observed.dims if d != t_dim and d in aligned.dims and d in observed.coords]
+    if not spatial_dims:
+        return aligned
+    steps = [abs(float(np.diff(observed[d].values)[0])) for d in spatial_dims if observed.sizes[d] > 1]
+    tolerance = 0.5 * min(steps) if steps else None
+    return aligned.reindex({d: observed[d] for d in spatial_dims}, method="nearest", tolerance=tolerance)
+
+
 @process(
     summary="Climate anomaly (observed − climatological normal)",
     parameters={
@@ -60,6 +79,7 @@ def compute_anomaly(observed: xr.DataArray, normal: xr.DataArray, method: str = 
     # normal slice for every observed time step (vectorised → stays lazy).
     calendar_index = getattr(observed[t_dim].dt, ordinal)
     aligned = normal.sel({ordinal: calendar_index}).drop_vars(ordinal, errors="ignore")
+    aligned = _match_spatial_grid(aligned, observed, str(t_dim))
 
     if method == "absolute":
         return observed - aligned

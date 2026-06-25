@@ -93,6 +93,21 @@ def test_requires_ordinal_normal_axis() -> None:
         compute_anomaly(_observed_doy(), bad_normal)
 
 
+def test_aligns_grids_differing_by_float_noise() -> None:
+    # Observed and normal can be produced independently (e.g. CDS-derived observed vs an
+    # EDH normal whose lon was remapped from [0, 360)), leaving spatial coords off by
+    # ~1e-11. Exact-equality alignment would intersect to an empty grid; the process must
+    # snap the normal onto the observed grid so the subtraction survives.
+    normal = _normal_doy()
+    noisy = normal.assign_coords(x=normal.x.values - 1e-11, y=normal.y.values + 1e-11)
+
+    out = compute_anomaly(_observed_doy(offset=5.0), noisy, method="absolute")
+
+    assert out.sizes["x"] == 2 and out.sizes["y"] == 2  # not collapsed to an empty grid
+    assert bool(np.isfinite(out).all())
+    assert float(out.isel(t=99, y=0, x=0)) == pytest.approx(5.0)
+
+
 def test_anomaly_preserves_dask_laziness() -> None:
     out = compute_anomaly(_observed_doy(offset=5.0).chunk({"y": 1, "x": 1}), _normal_doy().chunk({"y": 1, "x": 1}))
     assert out.chunks is not None
