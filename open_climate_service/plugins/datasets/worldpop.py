@@ -1,23 +1,22 @@
 """WorldPop plugin for per-period streaming ingest.
 
-Fetches WorldPop's yearly population GeoTIFFs directly from the public
-``data.worldpop.org`` hub (no auth) and streams them through ``normalize_period`` —
-the same read-remote-raster pattern as the CHIRPS3 plugin. The grid is inferred
-from the first fetched year.
+Fetches WorldPop's yearly population GeoTIFFs from the public ``data.worldpop.org``
+hub (no auth). The hub advertises but does not honour HTTP Range requests, so each
+GeoTIFF is downloaded to a local cache and opened from disk rather than read lazily
+over ``/vsicurl`` (see ``_open_worldpop_raster``); the grid is inferred from the first
+fetched year.
 
 Two plugins, both Global2 with a per-revision id (the hub reissues yearly, currently
 ``R2025A``):
 
-- ``WorldPopYearlyPlugin`` — population counts (hub category id=3). The URL builder
-  also knows the 1 km (``1km_ua``) and unconstrained layouts, but only the 100 m
-  constrained template ships today.
+- ``WorldPopYearlyPlugin`` — population counts (hub category id=3), shaped to
+  ``(t, y, x)`` via ``normalize_period``. The URL builder also knows the 1 km
+  (``1km_ua``) and unconstrained layouts, but only the 100 m constrained template
+  ships today.
 - ``WorldPopAgeSexYearlyPlugin`` — age/sex structures (hub category id=8): ~40
-  per-(sex, age) rasters per country-year, combined lazily into one ``population``
-  cube over ``sex`` and ``age_group`` dimensions, 100 m per-country only.
-
-WorldPop's hub advertises but does not honour HTTP Range requests, so each GeoTIFF is
-downloaded to a local cache and opened from disk rather than read lazily over
-``/vsicurl`` (see ``_open_worldpop_raster``).
+  per-(sex, age) rasters per country-year, combined into one ``population`` cube over
+  ``sex`` and ``age_group`` dimensions (built directly, not via ``normalize_period``),
+  100 m per-country only.
 
 Global 1 km mosaics are not yet supported (they are not COGs — see
 https://github.com/dhis2/open-climate-service/issues/269).
@@ -87,7 +86,8 @@ def _open_worldpop_raster(url: str, **open_kwargs: Any) -> xr.DataArray:
         # Hold an exclusive per-entry lock across the download so concurrent
         # ingestions (or worker processes) sharing this cache can't race on the
         # same file and corrupt it. Re-check existence inside the lock: a holder
-        # that finished while we waited means there's nothing left to do.
+        # that finished while we waited means there's nothing left to do. The .lock
+        # sentinel is left on disk on purpose — unlinking it would reopen the race.
         lock_path = target.with_name(target.name + ".lock")
         with open(lock_path, "w") as lock_fh:
             portalocker.lock(lock_fh, portalocker.LOCK_EX)
@@ -244,6 +244,9 @@ class WorldPopAgeSexYearlyPlugin(BaseDatasetPlugin):
         year = int(period_id)
         ages = [int(a) for a in _AGE_BANDS]
 
+        # WorldPop publishes every (sex, age) band for a released country-year, so we
+        # fetch them all. A missing band (a 404 from a partial/unreleased year) raises
+        # and aborts the whole year rather than producing a cube with a hole.
         sex_cubes: list[xr.DataArray] = []
         for sex_token in _SEX_TOKENS.values():
             bands: list[xr.DataArray] = []
