@@ -69,6 +69,66 @@ def get_dataset(dataset_id: str) -> dict[str, Any] | None:
     return datasets_lookup.get(dataset_id)
 
 
+def get_instance_datasets_dir(*, create: bool = False) -> Path:
+    """Return the writable directory for instance dataset templates.
+
+    When CONFIGS_DIR is set (tests), that directory is used directly. Otherwise,
+    templates are written to ``plugins_dir/datasets`` resolved relative to the
+    instance config file.
+    """
+    if CONFIGS_DIR is not None:
+        if create:
+            CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
+        if not CONFIGS_DIR.is_dir():
+            raise ValueError(f"Path is not a directory: {CONFIGS_DIR}")
+        return CONFIGS_DIR
+
+    config = api_config.get_config()
+    plugins_dir = config.get("plugins_dir")
+    if not plugins_dir:
+        raise ValueError("Cannot persist dataset template: plugins_dir is not configured in CLIMATE_SERVICE_CONFIG")
+    if not isinstance(plugins_dir, (str, Path)):
+        raise ValueError(
+            f"plugins_dir in CLIMATE_SERVICE_CONFIG must be a path string, got {type(plugins_dir).__name__}"
+        )
+
+    config_path = api_config.get_config_path()
+    base = config_path.parent if config_path else Path()
+    root = (base / plugins_dir).resolve()
+    if create:
+        root.mkdir(parents=True, exist_ok=True)
+    if not root.is_dir():
+        raise ValueError(f"plugins_dir '{root}' does not exist or is not a directory")
+
+    datasets_dir = root / "datasets"
+    if create:
+        datasets_dir.mkdir(parents=True, exist_ok=True)
+    if not datasets_dir.is_dir():
+        raise ValueError(f"datasets directory '{datasets_dir}' does not exist or is not a directory")
+    return datasets_dir
+
+
+def write_dataset_template(dataset: dict[str, Any], *, overwrite: bool = False) -> Path:
+    """Persist one dataset template YAML into the writable instance datasets directory."""
+    dataset_id = dataset.get("id")
+    if not isinstance(dataset_id, str) or not dataset_id:
+        raise ValueError("dataset template must define a non-empty string id")
+    if Path(dataset_id).name != dataset_id:
+        raise ValueError(
+            f"Invalid dataset id '{dataset_id}': must be a plain name with no path separators or traversal segments"
+        )
+
+    datasets_dir = get_instance_datasets_dir(create=True)
+    destination = datasets_dir / f"{dataset_id}.yaml"
+    if destination.exists() and not overwrite:
+        raise FileExistsError(f"Dataset template file already exists: {destination}")
+
+    _validate_dataset_template(dataset, source=str(destination))
+    payload = yaml.safe_dump([dataset], sort_keys=False, allow_unicode=False)
+    destination.write_text(payload, encoding="utf-8")
+    return destination
+
+
 def _load_builtin_datasets() -> list[dict[str, Any]]:
     """Load built-in dataset templates from package data via importlib.resources.
 
