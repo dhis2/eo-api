@@ -61,6 +61,7 @@
         "format": "Zarr",
         "options": {
           "dataset_id": { "from_parameter": "output_dataset_id" },
+          "source_dataset_id": { "from_parameter": "dataset_id" },
           "variable": { "from_parameter": "variable" },
           "publish": true
         }
