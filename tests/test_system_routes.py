@@ -379,6 +379,7 @@ def test_map_viewer_initializes_at_latest_timestep(client: TestClient) -> None:
     response = client.get("/map")
 
     assert response.status_code == 200
-    assert "function initialTimeIndex()" in response.text
-    assert "{ [timeDimKey]: initialTimeIndex() }" in response.text
-    assert "timeSlider.value = initialIndex;" in response.text
+    # The viewer renders one control per non-spatial dimension...
+    assert "function renderDimControls()" in response.text
+    # ...and a slider-type dimension (e.g. time) defaults to its last index (latest step).
+    assert 'control === "slider" ? Math.max(0, count - 1) : 0' in response.text
