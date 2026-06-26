@@ -228,7 +228,7 @@ It runs `load_collection(observed, temporal_extent) + load_collection(normal) �
 | `output_dataset_id` | Id of the anomaly dataset to publish (needs a static template — see below) |
 | `variable` | Variable/band name carried through to the published dataset |
 | `temporal_extent` | Observed range `[start, end]` |
-| `method` | `absolute` (observed − normal, default) or `relative` (percent of normal) |
+| `method` | `absolute` (observed − normal, default) or `relative` (percent of normal — for ratio-scale variables like precipitation only, **not** temperature) |
 
 The `output_dataset_id` needs a static template like the normals above (auto-registered if missing; a diverging `rdbu_r` display centred on zero suits anomalies). Pair a **daily** observed dataset with a day-of-year normal, or a **monthly** observed dataset with a month normal — `compute_anomaly` aligns on the matching axis automatically.
 

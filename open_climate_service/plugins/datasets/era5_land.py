@@ -454,6 +454,18 @@ class _ERA5LandEDHBase(BaseDatasetPlugin):
             ds.close()
 
 
+def _drop_auxiliary_variables(ds: xr.Dataset, variable: str) -> xr.Dataset:
+    """Keep only ``variable`` and the dimension coordinates, dropping everything else.
+
+    ERA5 sources attach scalar ensemble-member coordinates (``number``, value 0 for
+    ERA5-Land reanalysis; sometimes ``expver``) that otherwise persist as phantom data
+    variables — which then load as a spurious ``bands`` dimension downstream (e.g. anomalies
+    came out with a stray ``number`` band). Shared by the daily ERA5-Land fetch paths.
+    """
+    extras = [v for v in ds.variables if v != variable and v not in ds.dims]
+    return ds.drop_vars(extras, errors="ignore")
+
+
 class ERA5LandEDHDailyPlugin(_ERA5LandEDHBase):
     """Streaming plugin for daily ERA5-Land from the Earth Data Hub Zarr store.
 
@@ -483,7 +495,7 @@ class ERA5LandEDHDailyPlugin(_ERA5LandEDHBase):
         if self._edh_lon_360:
             ds = _normalize_lon(ds)
         ds = ds.rename({"longitude": "x", "latitude": "y", "valid_time": "t"})
-        return self._apply_transforms(ds)
+        return _drop_auxiliary_variables(self._apply_transforms(ds), self.variable)
 
 
 class ERA5LandTempDailyPlugin(ERA5LandEDHDailyPlugin):
@@ -512,12 +524,8 @@ class ERA5LandTempDailyPlugin(ERA5LandEDHDailyPlugin):
             ds = super().fetch_period(period_id, bbox)
         else:
             ds = self._cds_plugin.fetch_period(period_id, bbox)
-        # ERA5 sources carry an ensemble-member coordinate ('number', value 0 for ERA5-Land
-        # reanalysis; sometimes also 'expver') that otherwise persists as a phantom second
-        # band — which then loads as a spurious `bands` dimension downstream (e.g. anomalies).
-        # Keep only the target variable and its dimension coordinates.
-        extras = [v for v in ds.variables if v != self.variable and v not in ds.dims]
-        return ds.drop_vars(extras, errors="ignore")
+        # The EDH path is already cleaned by the base; this also covers the CDS-tail source.
+        return _drop_auxiliary_variables(ds, self.variable)
 
 
 class ERA5LandEDHPrecipitationDailyPlugin(_ERA5LandEDHBase):
@@ -549,7 +557,7 @@ class ERA5LandEDHPrecipitationDailyPlugin(_ERA5LandEDHBase):
         return daily_period_ids(start, end, cutoff=latest_str)
 
     def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
-        return self._fetch_daily_sync(period_id, bbox)
+        return _drop_auxiliary_variables(self._fetch_daily_sync(period_id, bbox), self.variable)
 
     def _fetch_daily_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
         from open_climate_service import config as api_config

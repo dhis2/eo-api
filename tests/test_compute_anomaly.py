@@ -114,3 +114,42 @@ def test_aligns_grids_differing_by_float_noise() -> None:
 def test_anomaly_preserves_dask_laziness() -> None:
     out = compute_anomaly(_observed_doy(offset=5.0).chunk({"y": 1, "x": 1}), _normal_doy().chunk({"y": 1, "x": 1}))
     assert out.chunks is not None
+
+
+def _month_normal() -> xr.DataArray:
+    """Month-of-year normal where each value equals its month (1..12)."""
+    data = np.broadcast_to(np.arange(1, 13, dtype="float32")[:, None, None], (12, 2, 2)).copy()
+    return xr.DataArray(
+        data, dims=("month", "y", "x"), coords={"month": list(range(1, 13)), "y": [1.0, 2.0], "x": [1.0, 2.0]}
+    )
+
+
+def test_relative_rejected_for_temperature() -> None:
+    # 'relative' divides by the normal — meaningless for an interval scale (temperature),
+    # which it detects from the variable's units/standard_name.
+    obs = _observed_doy(scale=2.0)
+    obs.attrs["units"] = "degC"
+    with pytest.raises(ValueError, match="temperature"):
+        compute_anomaly(obs, _normal_doy(), method="relative")
+
+    obs2 = _observed_doy(scale=2.0)
+    obs2.attrs["standard_name"] = "air_temperature"
+    with pytest.raises(ValueError, match="temperature"):
+        compute_anomaly(obs2, _normal_doy(), method="relative")
+
+
+def test_rejects_daily_observed_with_monthly_normal() -> None:
+    # A month normal paired with a daily observed would be silently resampled by earthkit.
+    with pytest.raises(ValueError, match="monthly observed"):
+        compute_anomaly(_observed_doy(), _month_normal())
+
+
+def test_rejects_monthly_observed_with_dayofyear_normal() -> None:
+    times = pd.date_range("2024-01-01", "2024-12-01", freq="MS")  # 12 monthly steps
+    obs = xr.DataArray(
+        np.zeros((len(times), 2, 2), "float32"),
+        dims=("t", "y", "x"),
+        coords={"t": times, "y": [1.0, 2.0], "x": [1.0, 2.0]},
+    )
+    with pytest.raises(ValueError, match="daily observed"):
+        compute_anomaly(obs, _normal_doy())
