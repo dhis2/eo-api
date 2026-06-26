@@ -109,6 +109,58 @@ def needs_pyramid(ds: xr.Dataset) -> bool:
     return _needs_pyramid(ds, "x", "y")
 
 
+def ensure_time_coordinate_chunking(store_path: Path, time_dim: str) -> bool:
+    """Re-chunk an existing Icechunk store's 1-D time coordinate to a bounded chunk size.
+
+    Streaming ingests append one period at a time, which leaves the ``time_dim`` coordinate
+    chunked at size 1. A browser map client reads the whole time axis to drive its step
+    control, so a chunk-per-timestep coordinate means one tiny HTTP request per step — tens
+    of thousands of them for a multi-year daily store, dominating load/step latency. Rewrite
+    only the coordinate array to ``<= _ROOT_TIME_COORD_MAX_CHUNK`` values per chunk (the data
+    variables, chunked at one timestep for independent per-step reads, are left untouched).
+
+    Surgical and transactional (Icechunk commit-or-nothing), and idempotent — a no-op when
+    the coordinate is already coarse enough. Returns True if it re-chunked.
+    """
+    import icechunk
+
+    repo = icechunk.Repository.open(icechunk.local_filesystem_storage(str(store_path)))
+    read_group = zarr.open_group(repo.readonly_session("main").store, mode="r")
+    if time_dim not in read_group:
+        return False
+    coord = read_group[time_dim]
+    if not isinstance(coord, zarr.Array) or coord.ndim != 1:
+        return False
+    n = int(coord.shape[0])
+    target = min(n, _ROOT_TIME_COORD_MAX_CHUNK)
+    if int(coord.chunks[0]) >= target:
+        return False  # already coarse enough
+
+    values = coord[:]
+    attrs = dict(coord.attrs)
+    attrs.pop("_ChunkSizes", None)  # stale netCDF per-chunk hint from the source
+    dtype = coord.dtype
+    fill_value = coord.fill_value
+
+    session = repo.writable_session("main")
+    write_group = zarr.open_group(session.store, mode="r+")
+    del write_group[time_dim]
+    new_coord = write_group.create_array(
+        time_dim,
+        shape=(n,),
+        chunks=(target,),
+        dtype=dtype,
+        fill_value=fill_value,
+        dimension_names=(time_dim,),
+    )
+    new_coord[:] = values
+    for key, value in attrs.items():
+        new_coord.attrs[key] = value
+    session.commit(f"Re-chunk '{time_dim}' coordinate to <= {target}/chunk for browser-friendly axis reads")
+    logger.info("Re-chunked '%s' coordinate of '%s' from 1 to %d values/chunk", time_dim, store_path.name, target)
+    return True
+
+
 def write_to_icechunk_store(
     ds: xr.Dataset,
     store_path: Path,
@@ -224,7 +276,12 @@ def write_to_icechunk_store(
             ds.sizes[y_dim],
         )
         ds = ds.assign_attrs({**ds.attrs, **geozarr_attrs})
-        ds.to_zarr(session.store, mode="w", zarr_format=3)
+        # Bound the time-coordinate chunk so map clients read the axis in a few requests
+        # rather than one per timestep (data variables keep their own chunking).
+        flat_encoding = {}
+        if t_dim is not None and t_dim in ds.coords and ds.sizes.get(t_dim, 0) > _ROOT_TIME_COORD_MAX_CHUNK:
+            flat_encoding[t_dim] = {"chunks": (_ROOT_TIME_COORD_MAX_CHUNK,)}
+        ds.to_zarr(session.store, mode="w", zarr_format=3, encoding=flat_encoding or None)
 
         # xarray demotes scalar coordinates (like spatial_ref) to data variables in zarr v3.
         # Patch the root group so rioxarray can follow the CF grid_mapping attribute.
