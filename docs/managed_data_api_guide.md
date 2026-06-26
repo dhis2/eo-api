@@ -93,7 +93,7 @@ curl -s -X POST http://127.0.0.1:8000/ingestions \
 curl -s -X POST http://127.0.0.1:8000/ingestions \
   -H "Content-Type: application/json" \
   -d '{
-    "dataset_id": "worldpop_population_yearly",
+    "dataset_id": "worldpop_population_global2_R2025A_100m",
     "start": "2020",
     "end": "2020",
     "overwrite": false,
@@ -552,7 +552,7 @@ Create an initial WorldPop managed dataset:
 curl -s -X POST "http://127.0.0.1:8000/ingestions" \
   -H "Content-Type: application/json" \
   -d '{
-    "dataset_id": "worldpop_population_yearly",
+    "dataset_id": "worldpop_population_global2_R2025A_100m",
     "start": "2020",
     "end": "2020",
     "publish": true
@@ -562,7 +562,7 @@ curl -s -X POST "http://127.0.0.1:8000/ingestions" \
 Plan a later release:
 
 ```bash
-curl -s "http://127.0.0.1:8000/sync/worldpop_population_yearly/plan?end=2021" | jq
+curl -s "http://127.0.0.1:8000/sync/worldpop_population_global2_R2025A_100m/plan?end=2021" | jq
 ```
 
 Expected:
@@ -575,7 +575,7 @@ Expected:
 Execute the release sync:
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/sync/worldpop_population_yearly" \
+curl -s -X POST "http://127.0.0.1:8000/sync/worldpop_population_global2_R2025A_100m" \
   -H "Content-Type: application/json" \
   -d '{
     "end": "2021",
@@ -587,7 +587,7 @@ Expected:
 
 - `status` is `completed`
 - `sync_detail.action` is `rematerialize`
-- `dataset.dataset_id` is `worldpop_population_yearly`
+- `dataset.dataset_id` is `worldpop_population_global2_R2025A_100m`
 
 ## Summary
 
