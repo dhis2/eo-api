@@ -232,7 +232,7 @@ Implemented sync behavior:
 
 1. `GET /sync/{dataset_id}/plan` resolves the latest local artifact and source template
 2. `sync_engine.plan_sync(...)` computes the action, target, and delta range
-3. plugin `periods()` is probed to clamp the target end to available data
+3. plugin `periods()` is queried to clamp the target end to available data
 4. `POST /sync/{dataset_id}` returns `up_to_date` or `not_syncable` without writes when applicable
 5. otherwise, sync calls the existing artifact creation path
 6. the new version is optionally published under the same stable managed dataset id
@@ -266,7 +266,6 @@ Implemented sync behavior:
 3. any runtime write API for extents
 4. multi-version publication resolution behind one dataset id
 5. true in-place Zarr append, if storage semantics require it later
-6. upstream `dhis2eo` improvements so provider download boundaries can respect partial months directly
 
 ## Short Summary
 

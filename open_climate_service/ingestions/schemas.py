@@ -53,10 +53,14 @@ class CoverageSpatial(BaseModel):
 
 
 class CoverageTemporal(BaseModel):
-    """Temporal extent summary."""
+    """Temporal extent summary.
 
-    start: str = Field(description="First covered time period in dataset-native string form.")
-    end: str = Field(description="Last covered time period in dataset-native string form.")
+    ``start``/``end`` are ``None`` for a non-temporal (ordinal) dataset such as a
+    day-of-year climatology, which has no datetime extent.
+    """
+
+    start: str | None = Field(default=None, description="First covered time period in dataset-native string form.")
+    end: str | None = Field(default=None, description="Last covered time period in dataset-native string form.")
 
 
 class ArtifactCoverage(BaseModel):

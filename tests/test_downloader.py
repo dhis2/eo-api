@@ -254,6 +254,25 @@ def test_coverage_from_dataset_leaves_spatial_wgs84_none_for_wgs84() -> None:
     assert result["coverage"]["spatial_wgs84"] is None
 
 
+def test_coverage_from_dataset_handles_non_temporal_ordinal_store() -> None:
+    # A day-of-year climatology has a `dayofyear` axis, not a datetime one. Coverage
+    # must report spatial extent with null temporal bounds rather than raising
+    # "Unable to find time dimension" (which 500'd the publish step).
+    x = np.array([-13.0, -11.0])
+    y = np.array([7.0, 9.0])
+    data = np.ones((366, len(y), len(x)), dtype="float32")
+    ds = xr.Dataset(
+        {"t2m": (["dayofyear", "y", "x"], data)},
+        coords={"dayofyear": list(range(1, 367)), "y": y, "x": x},
+    )
+
+    result = _coverage_from_dataset(ds=ds, period_type="climatology", native_crs="EPSG:4326")
+
+    assert result["has_data"] is True
+    assert result["coverage"]["temporal"] == {"start": None, "end": None}
+    assert result["coverage"]["spatial"] == {"xmin": -13.0, "ymin": 7.0, "xmax": -11.0, "ymax": 9.0}
+
+
 def test_write_to_icechunk_store_preserves_native_crs_ignoring_instance_crs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

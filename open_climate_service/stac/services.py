@@ -469,7 +469,7 @@ def _override_spatial_extent_from_artifact(collection: dict[str, Any], artifact:
 def _override_temporal_extent_from_artifact(collection: dict[str, Any], artifact: ArtifactRecord) -> None:
     temporal = artifact.coverage.temporal
 
-    def _fmt(v: str) -> str | None:
+    def _fmt(v: str | None) -> str | None:
         return parse_period_string_to_datetime(v).isoformat().replace("+00:00", "Z") if v else None
 
     start = _fmt(temporal.start)

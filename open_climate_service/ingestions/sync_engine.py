@@ -71,9 +71,12 @@ def plan_sync(
         raise ValueError("source_dataset must define sync.kind for sync planning")
     sync_kind = SyncKind(sync_kind_value)
     current_start = latest_artifact.request_scope.start
-    current_end = _sync_current_end(source_dataset=source_dataset, latest_artifact=latest_artifact)
 
     if sync_kind == SyncKind.STATIC:
+        # Static datasets are never synced. Report NOT_SYNCABLE directly, reading the
+        # coverage end from the artifact (None for a non-temporal dataset such as a
+        # climatology) — don't call _sync_current_end, which requires a temporal end.
+        static_end = latest_artifact.coverage.temporal.end
         return SyncDetail(
             source_dataset_id=latest_artifact.dataset_id,
             sync_kind=sync_kind,
@@ -81,10 +84,12 @@ def plan_sync(
             reason="static_dataset",
             message="This dataset is static and is not syncable.",
             current_start=current_start,
-            current_end=current_end,
-            target_end=current_end,
+            current_end=static_end,
+            target_end=static_end,
             target_end_source="current_coverage",
         )
+
+    current_end = _sync_current_end(source_dataset=source_dataset, latest_artifact=latest_artifact)
     period_type = str(source_dataset["period_type"])
     normalized_requested_end = requested_end.strip() if isinstance(requested_end, str) else None
     normalized_requested_end = normalized_requested_end or None
@@ -488,11 +493,18 @@ def _sync_current_end(*, source_dataset: dict[str, Any], latest_artifact: Artifa
     datasets, but keeps planning aligned with execution on the committed store
     state rather than a cached metadata snapshot.
     """
+    end = latest_artifact.coverage.temporal.end
+    if end is None:
+        # Sync planning only applies to temporal datasets; a non-temporal (ordinal)
+        # dataset such as a day-of-year climatology has no temporal end to advance from.
+        raise ValueError(
+            f"Dataset '{source_dataset.get('id', '<unknown>')}' has no temporal coverage and cannot be synced"
+        )
     if not _is_plugin_backed(source_dataset):
-        return latest_artifact.coverage.temporal.end
+        return end
     raw_artifact_path = _icechunk_path_for(latest_artifact)
     if raw_artifact_path is None:
-        return latest_artifact.coverage.temporal.end
+        return end
     local_artifact_path, path_reason = _resolve_local_artifact_path(raw_artifact_path)
     if local_artifact_path is None:
         logger.warning(
@@ -501,7 +513,7 @@ def _sync_current_end(*, source_dataset: dict[str, Any], latest_artifact: Artifa
             path_reason or "unsupported",
             raw_artifact_path,
         )
-        return latest_artifact.coverage.temporal.end
+        return end
     try:
         committed = read_committed_period_ids(
             local_artifact_path,
@@ -515,9 +527,9 @@ def _sync_current_end(*, source_dataset: dict[str, Any], latest_artifact: Artifa
             str(local_artifact_path),
             exc,
         )
-        return latest_artifact.coverage.temporal.end
+        return end
     if not committed:
-        return latest_artifact.coverage.temporal.end
+        return end
     try:
         return normalize_period_string(
             max(committed, key=parse_period_string_to_datetime),
@@ -531,4 +543,4 @@ def _sync_current_end(*, source_dataset: dict[str, Any], latest_artifact: Artifa
             str(local_artifact_path),
             exc,
         )
-        return latest_artifact.coverage.temporal.end
+        return end
