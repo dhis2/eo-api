@@ -94,4 +94,9 @@ def climatological_normal(data: xr.DataArray, frequency: str = "dayofyear", smoo
         if window > n:
             raise ValueError(f"smoothing_window ({window}) must be <= the number of days ({n})")
         clim = _circular_rolling_mean(clim, window, "dayofyear")
-    return clim
+    # The groupby/smoothing leaves uneven dask chunks along the ordinal axis whose final
+    # chunk can exceed the first (e.g. 30,30,…,36), which Zarr rejects on write. Re-chunk to
+    # one ordinal step per chunk: zarr-safe (uniform), and — mirroring the observed daily
+    # store's per-timestep chunking — it keeps map stepping and compute_anomaly's per-step
+    # `.sel` reads cheap (one chunk per day-of-year/month).
+    return clim.chunk({frequency: 1})
