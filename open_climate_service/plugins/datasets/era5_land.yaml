@@ -314,7 +314,7 @@
   source: Derived (climate_anomaly workflow)
   display:
     colormap: rdbu_r
-    range: [-15.0, 15.0]
+    range: [-3.0, 3.0]
 
 - id: era5land_precipitation_monthly_anomaly_1991_2020
   name: Precipitation monthly anomaly (ERA5-Land, vs 1991–2020 normal)
