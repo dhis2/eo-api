@@ -77,7 +77,6 @@ server = [
     "topozarr>=0.0.91,<0.1",
     "rioxarray>=0.17",
     "portalocker>=3.2.0",
-    "dhis2eo>=1.2.1",
     "openeo-pg-parser-networkx>=2026.3.3",
     # We depend on the base package and hand-pick the implementation deps rather than
     # using the [implementations] extra. The extra pulls the `gdal` Python bindings,
@@ -97,6 +96,10 @@ server = [
     "xvec>=0.3",
     "python-multipart>=0.0.29",
     "xclim>=0.61.1",
+    # ERA5-Land plugin runtime deps — the CDS API client and the netCDF4 engine its
+    # downloads are read with.
+    "ecmwf-datastores-client>=0.4",
+    "netcdf4>=1.7",
 ]
 
 [project.urls]
