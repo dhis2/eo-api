@@ -1504,11 +1504,14 @@ def test_derive_coverage_falls_back_to_reduced_dimensions_attrs() -> None:
     assert coverage.temporal.end == "2018-03-01"
 
 
-def test_recover_temporal_from_attrs_returns_empty_when_no_attrs() -> None:
+def test_recover_temporal_from_attrs_returns_none_when_no_attrs() -> None:
+    # A non-temporal output (e.g. a day-of-year/month climatology) genuinely has no
+    # temporal extent, so the fallback is (None, None) — matching the None coverage
+    # convention and the Optional CoverageTemporal fields used for normals.
     ds = xr.Dataset({"v": (("y", "x"), np.ones((2, 2)))})
     start, end = _recover_temporal_from_attrs(ds)
-    assert start == ""
-    assert end == ""
+    assert start is None
+    assert end is None
 
 
 def test_recover_temporal_from_attrs_reads_from_dataset_attrs() -> None:

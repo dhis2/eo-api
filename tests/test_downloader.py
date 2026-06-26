@@ -301,3 +301,48 @@ def test_write_to_icechunk_store_preserves_native_crs_ignoring_instance_crs(
 
     out = open_icechunk_dataset(str(store))
     assert out.attrs.get("proj:code") == "EPSG:4326"
+
+
+def test_ensure_time_coordinate_chunking_rechunks_appended_store(tmp_path: Path) -> None:
+    # Build a daily store the way streaming ingest does: append one timestep at a time,
+    # which leaves the `t` coordinate chunked at size 1 (one chunk per day).
+    store_path = tmp_path / "daily.icechunk"
+    repo = icechunk.Repository.create(icechunk.local_filesystem_storage(str(store_path)))
+    times = pd.date_range("2020-01-01", periods=40, freq="D")
+
+    session = repo.writable_session("main")
+    xr.Dataset(
+        {"v": (("t", "y", "x"), np.zeros((1, 2, 2), "float32"))},
+        coords={"t": times[:1], "y": [1.0, 2.0], "x": [1.0, 2.0]},
+    ).to_zarr(session.store, mode="w", zarr_format=3, encoding={"t": {"chunks": (1,)}})
+    session.commit("seed")
+    for i in range(1, len(times)):
+        s = repo.writable_session("main")
+        xr.Dataset(
+            {"v": (("t", "y", "x"), np.full((1, 2, 2), i, "float32"))},
+            coords={"t": times[i : i + 1], "y": [1.0, 2.0], "x": [1.0, 2.0]},
+        ).to_zarr(s.store, append_dim="t", zarr_format=3)
+        s.commit(f"append {i}")
+
+    def arr(group: zarr.Group, name: str) -> zarr.Array:
+        node = group[name]
+        assert isinstance(node, zarr.Array)
+        return node
+
+    before = zarr.open_group(repo.readonly_session("main").store, mode="r")
+    assert arr(before, "t").chunks == (1,)  # precondition: one chunk per timestep
+    data_chunks = arr(before, "v").chunks
+
+    changed = downloader.ensure_time_coordinate_chunking(store_path, "t")
+    assert changed is True
+
+    after = zarr.open_group(repo.readonly_session("main").store, mode="r")
+    assert arr(after, "t").chunks == (40,)  # 40 < cap -> a single coordinate chunk
+    assert arr(after, "v").chunks == data_chunks  # data variable untouched
+
+    ds = xr.open_zarr(repo.readonly_session("main").store, consolidated=False)
+    assert list(ds.t.values) == list(times)  # values + datetime decode preserved
+    assert float(ds.v.isel(t=39, y=0, x=0)) == 39.0
+
+    # idempotent: a second call is a no-op
+    assert downloader.ensure_time_coordinate_chunking(store_path, "t") is False

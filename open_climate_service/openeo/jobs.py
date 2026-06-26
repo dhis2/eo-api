@@ -614,6 +614,39 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     ingestion_services.register_artifact_record(record, publish=_publish_raw)
 
 
+def _recover_temporal_from_attrs(ds: Any) -> tuple[str | None, str | None]:
+    """Extract temporal extent from reduce_dimension min/max attrs.
+
+    openeo-processes-dask stores the reduced dimension's value range in
+    ``reduced_dimensions_min_values`` / ``reduced_dimensions_max_values`` on each
+    variable's attrs after ``reduce_dimension``.  Fall back to ``(None, None)`` when not
+    found — a non-temporal output (e.g. a day-of-year/month climatology) genuinely has no
+    temporal extent, matching the ``None`` convention used elsewhere for coverage.
+    """
+    import numpy as np
+
+    _TIME_NAMES = ("t", "time", "valid_time")
+    sources: list[dict[str, Any]] = [ds.attrs]
+    for name in list(ds.data_vars) + list(ds.coords):
+        attrs = getattr(ds[name], "attrs", {})
+        if attrs:
+            sources.append(attrs)
+    for attrs in sources:
+        min_vals = attrs.get("reduced_dimensions_min_values", {})
+        max_vals = attrs.get("reduced_dimensions_max_values", {})
+        if not isinstance(min_vals, dict) or not isinstance(max_vals, dict):
+            continue
+        for tname in _TIME_NAMES:
+            if tname in min_vals and tname in max_vals:
+                try:
+                    t_start = str(np.datetime_as_string(np.datetime64(min_vals[tname]), unit="D"))
+                    t_end = str(np.datetime_as_string(np.datetime64(max_vals[tname]), unit="D"))
+                    return t_start, t_end
+                except Exception:
+                    pass
+    return None, None
+
+
 def _resolve_source_template(options: dict[str, Any]) -> dict[str, Any] | None:
     """Return the source dataset template referenced in save_result options, if any."""
     source_dataset_id = options.get("source_dataset_id")
@@ -812,37 +845,6 @@ def _humanize_identifier(value: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", value)).strip().title()
 
 
-def _recover_temporal_from_attrs(ds: Any) -> tuple[str, str]:
-    """Extract temporal extent from reduce_dimension min/max attrs.
-
-    openeo-processes-dask stores the reduced dimension's value range in
-    ``reduced_dimensions_min_values`` / ``reduced_dimensions_max_values`` on each
-    variable's attrs after ``reduce_dimension``.  Fall back to ("", "") when not found.
-    """
-    import numpy as np
-
-    _TIME_NAMES = ("t", "time", "valid_time")
-    sources: list[dict[str, Any]] = [ds.attrs]
-    for name in list(ds.data_vars) + list(ds.coords):
-        attrs = getattr(ds[name], "attrs", {})
-        if attrs:
-            sources.append(attrs)
-    for attrs in sources:
-        min_vals = attrs.get("reduced_dimensions_min_values", {})
-        max_vals = attrs.get("reduced_dimensions_max_values", {})
-        if not isinstance(min_vals, dict) or not isinstance(max_vals, dict):
-            continue
-        for tname in _TIME_NAMES:
-            if tname in min_vals and tname in max_vals:
-                try:
-                    t_start = str(np.datetime_as_string(np.datetime64(min_vals[tname]), unit="D"))
-                    t_end = str(np.datetime_as_string(np.datetime64(max_vals[tname]), unit="D"))
-                    return t_start, t_end
-                except Exception:
-                    pass
-    return "", ""
-
-
 def _derive_coverage(ds: Any, x_dim: str, y_dim: str, t_dim: str | None) -> Any:
     """Derive ArtifactCoverage from an xr.Dataset's coordinates."""
     import numpy as np
@@ -872,6 +874,8 @@ def _derive_coverage(ds: Any, x_dim: str, y_dim: str, t_dim: str | None) -> Any:
         except Exception:
             pass
 
+    t_start: str | None
+    t_end: str | None
     if t_dim is not None and t_dim in ds.coords and ds.sizes.get(t_dim, 0) > 0:
         # min/max rather than first/last so coverage is correct for a non-monotonic time axis.
         t_values = ds[t_dim].values

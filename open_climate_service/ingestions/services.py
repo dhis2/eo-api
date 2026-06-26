@@ -446,6 +446,17 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
     try:
         already_normalized = "spatial_ref" in ds.coords or "spatial_ref" in ds.variables
         if already_normalized and "x" in ds.sizes and "y" in ds.sizes and not downloader.needs_pyramid(ds):
+            # A flat, already-normalized store needs no read-rewrite — but streaming ingests
+            # append one period at a time, leaving the time coordinate chunked at size 1.
+            # That makes a map client fetch one tiny chunk per timestep to read the axis
+            # (thousands of requests for a multi-year daily store), so re-chunk just the
+            # coordinate here (cheap; data variables untouched).
+            t_dim = next((d for d in ("t", "time", "valid_time") if d in ds.sizes), None)
+            if t_dim is not None:
+                try:
+                    downloader.ensure_time_coordinate_chunking(store_path, t_dim)
+                except Exception:
+                    logger.warning("Time-coordinate re-chunk failed for '%s'", store_path.name, exc_info=True)
             logger.info(
                 "Store '%s' is already GeoZarr-normalized and flat; skipping read-rewrite",
                 store_path.name,

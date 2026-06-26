@@ -77,7 +77,10 @@ class ArtifactCoverage(BaseModel):
 class ArtifactRequestScope(BaseModel):
     """Original request parameters used to create an artifact."""
 
-    start: str = Field(description="Requested start period for the ingestion or sync operation.")
+    start: str | None = Field(
+        default=None,
+        description="Requested start period (None for a non-temporal dataset, e.g. a climatology).",
+    )
     end: str | None = Field(default=None, description="Requested end period for the ingestion or sync operation.")
     bbox: tuple[float, float, float, float] | None = Field(
         default=None,
