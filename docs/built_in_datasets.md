@@ -8,16 +8,16 @@ To ingest a built-in dataset for your configured extent, see the [API reference]
 
 ## CHIRPS v3 — daily precipitation
 
-| Property | Value |
-| --- | --- |
-| **Dataset ID** | `chirps3_precipitation_daily` |
-| **Variable** | `precip` |
-| **Units** | mm |
-| **Period** | Daily |
-| **Spatial coverage** | Global land, 50°S–50°N |
-| **Spatial resolution** | ~5 km |
-| **Record start** | 1981-01-01 |
-| **Source** | [CHIRPS v3](https://www.chc.ucsb.edu/data/chirps3) |
+| Property               | Value                                              |
+| ---------------------- | -------------------------------------------------- |
+| **Dataset ID**         | `chirps3_precipitation_daily`                      |
+| **Variable**           | `precip`                                           |
+| **Units**              | mm                                                 |
+| **Period**             | Daily                                              |
+| **Spatial coverage**   | Global land, 50°S–50°N                             |
+| **Spatial resolution** | ~5 km                                              |
+| **Record start**       | 1981-01-01                                         |
+| **Source**             | [CHIRPS v3](https://www.chc.ucsb.edu/data/chirps3) |
 
 CHIRPS (Climate Hazards Group InfraRed Precipitation with Station data) v3 is a quasi-global daily precipitation dataset merging satellite thermal infrared imagery with station observations. It is widely used for drought monitoring, food security analysis, and WASH planning in low- and middle-income countries.
 
@@ -37,23 +37,41 @@ See **[ERA5-Land datasets](era5_land_datasets.md)** for the full reference, incl
 
 ## WorldPop Global2 — total population (yearly)
 
-| Property | Value |
-| --- | --- |
-| **Dataset ID** | `worldpop_population_yearly` |
-| **Variable** | `pop_total` |
-| **Units** | people |
-| **Period** | Yearly |
-| **Spatial coverage** | Global |
-| **Spatial resolution** | ~100 m |
-| **Record start** | 2015 |
-| **Record end** | 2030 |
-| **Source** | [WorldPop Global2](https://hub.worldpop.org/project/categories?id=3) |
+| Property               | Value                                                                |
+| ---------------------- | -------------------------------------------------------------------- |
+| **Dataset ID**         | `worldpop_population_global2_R2025A_100m`                            |
+| **Variable**           | `pop_total`                                                          |
+| **Units**              | people                                                               |
+| **Period**             | Yearly                                                               |
+| **Spatial coverage**   | Global                                                               |
+| **Spatial resolution** | ~100 m                                                               |
+| **Record start**       | 2015                                                                 |
+| **Record end**         | 2030                                                                 |
+| **Source**             | [WorldPop Global2](https://hub.worldpop.org/project/categories?id=3) |
 
 WorldPop Global2 provides gridded population estimates and projections at 100 m resolution. Each raster year represents estimated residential population counts. Years up to and including the present are backward-modelled estimates; years beyond the present are forward projections.
 
 **Sync behaviour** — population data is released year by year, not as a continuous stream. The API uses a `release`-kind sync that checks each calendar year separately. Future years (projections) are also requestable, since the underlying data covers through 2030.
 
 **Transforms** — none applied; values are stored as received (population counts per pixel).
+
+---
+
+## WorldPop Global2 — population by age and sex (yearly)
+
+| Property               | Value                                                                                     |
+| ---------------------- | ----------------------------------------------------------------------------------------- |
+| **Dataset ID**         | `worldpop_agesex_global2_R2025A_100m`                                                     |
+| **Variable**           | `population` (over `sex` and `age_group` dimensions)                                      |
+| **Units**              | people                                                                                    |
+| **Period**             | Yearly                                                                                    |
+| **Spatial coverage**   | Per-country (set `extent.country_code`)                                                   |
+| **Spatial resolution** | ~100 m                                                                                    |
+| **Record start**       | 2015                                                                                      |
+| **Record end**         | 2030                                                                                      |
+| **Source**             | [WorldPop Global2 age & sex structures](https://hub.worldpop.org/project/categories?id=8) |
+
+Population disaggregated by sex and 5-year age band. Population is the quantity; sex and age are both disaggregation dimensions of it — so WorldPop's ~40 per-(sex, age) GeoTIFFs per country-year are combined into a **single `population` variable** over a `sex` dimension (`female`, `male`) and an ordinal `age_group` dimension (the lower bound of each band: 0, 1, 5, 10, … 90).
 
 ---
 

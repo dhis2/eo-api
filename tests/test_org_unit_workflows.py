@@ -133,3 +133,49 @@ def test_method_selects_reducer(method: str, expected: str) -> None:
     dv = jobs._build_dhis2_json_payload(envelope.data.to_dataframe().reset_index(), envelope.options)["dataValues"]
     ou_a_jan = next(d["value"] for d in dv if d["orgUnit"] == "OU_A" and d["period"] == "202501")
     assert ou_a_jan == expected
+
+
+def test_reduce_by_method_dispatches() -> None:
+    from open_climate_service.plugins.processes.aggregate_spatial import reduce_by_method
+
+    data = np.array([0.0, 1.0, 5.0, 6.0])
+    assert reduce_by_method(data, "mean") == 3.0
+    assert reduce_by_method(data, "sum") == 12.0
+    assert reduce_by_method(data, "min") == 0.0
+    assert reduce_by_method(data, "max") == 6.0
+    assert reduce_by_method(data, "median") == 3.0
+    assert np.isnan(reduce_by_method(np.array([]), "mean"))  # empty geometry → NaN, not a crash
+    with pytest.raises(ValueError, match="Unknown reduce method"):
+        reduce_by_method(data, "bogus")
+
+
+def test_builtin_workflows_use_literal_process_ids() -> None:
+    """openEO requires `process_id` to be a literal string; a `{from_parameter}` process_id
+    is non-portable (standard validators reject it) even though OCS resolves it at runtime.
+    Guard against reintroducing the pattern in any built-in workflow — use a process that
+    takes the choice as an argument (e.g. reduce_by_method) instead."""
+    import importlib.resources
+    import json
+
+    def _non_literal_process_ids(node: Any, path: str = "") -> list[str]:
+        found: list[str] = []
+        if isinstance(node, dict):
+            if isinstance(node.get("process_id"), dict):
+                found.append(path or "<root>")
+            for key, value in node.items():
+                found += _non_literal_process_ids(value, f"{path}.{key}")
+        elif isinstance(node, list):
+            for i, value in enumerate(node):
+                found += _non_literal_process_ids(value, f"{path}[{i}]")
+        return found
+
+    pkg = importlib.resources.files("open_climate_service") / "plugins" / "workflows"
+    checked = 0
+    for resource in pkg.iterdir():
+        if not resource.name.endswith(".json"):
+            continue
+        checked += 1
+        workflow = json.loads(resource.read_text(encoding="utf-8"))
+        offenders = _non_literal_process_ids(workflow)
+        assert not offenders, f"{resource.name} has non-literal process_id(s) at: {offenders}"
+    assert checked > 0  # ensure we actually scanned the packaged workflows
