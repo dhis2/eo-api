@@ -96,6 +96,8 @@ server = [
     "xvec>=0.3",
     "python-multipart>=0.0.29",
     "xclim>=0.61.1",
+    # Climatological normals + anomalies (day-of-year/month means, std, anomaly()).
+    "earthkit-transforms>=0.5.4",
     # ERA5-Land plugin runtime deps — the CDS API client and the netCDF4 engine its
     # downloads are read with.
     "ecmwf-datastores-client>=0.4",
