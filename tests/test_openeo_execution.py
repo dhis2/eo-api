@@ -1297,10 +1297,122 @@ def test_persist_result_rejects_dataset_id_with_path_separators(job_service: Ope
 def test_persist_result_rejects_unknown_dataset_id(
     job_service: OpenEOJobService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from open_climate_service import config as api_config
+
+    monkeypatch.setattr(api_config, "_cache", None)
+    monkeypatch.delenv("CLIMATE_SERVICE_CONFIG", raising=False)
     monkeypatch.setattr("open_climate_service.data_registry.services.datasets.get_dataset", lambda _id: None)
     envelope = SaveResultEnvelope(_small_dataset(), "Zarr", {"dataset_id": "no_such_dataset"})
-    with pytest.raises(ValueError, match="No dataset template found"):
+    with pytest.raises(ValueError, match="plugins_dir is not configured"):
         job_service._persist_result("job-unknown", envelope)
+
+
+def test_persist_result_auto_registers_missing_template(
+    job_service: OpenEOJobService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from open_climate_service import config as api_config
+    from open_climate_service.data_registry.services import datasets as dataset_registry
+
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    config_file = tmp_path / "climate-service.yaml"
+    config_file.write_text(f"plugins_dir: {plugins_dir}\n", encoding="utf-8")
+
+    monkeypatch.setattr(api_config, "_cache", None)
+    monkeypatch.setattr(dataset_registry, "CONFIGS_DIR", None)
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
+    monkeypatch.setattr("open_climate_service.data_manager.services.downloader.DOWNLOAD_DIR", tmp_path)
+    registered: list[Any] = []
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.services.register_artifact_record",
+        lambda record, publish: registered.append((record, publish)) or record,
+    )
+
+    ds = _small_dataset().isel(t=0, drop=True)
+    envelope = SaveResultEnvelope(
+        ds,
+        "Zarr",
+        {
+            "dataset_id": "worldpop_population_change_autogen",
+            "source_dataset_id": "worldpop_population_global2_R2025A_100m",
+            "variable": "pop_change",
+            "publish": False,
+        },
+    )
+
+    result = job_service._persist_result("job-auto-template", envelope)
+
+    assert result == "managed://worldpop_population_change_autogen"
+    template = dataset_registry.get_dataset("worldpop_population_change_autogen")
+    assert template is not None
+    assert template["sync"]["kind"] == "static"
+    assert template["variable"] == "pop_change"
+    assert template["period_type"] == "yearly"
+    assert template["units"] == "people"
+    assert template["display"]["colormap"] == "RdBu"
+    assert template["display"]["range"] == [-1.0, 1.0]
+
+    record, publish_flag = registered[0]
+    assert record.dataset_id == "worldpop_population_change_autogen"
+    assert record.period_type == "yearly"
+    assert publish_flag is False
+
+
+def test_persist_result_reloads_template_after_concurrent_create(
+    job_service: OpenEOJobService, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from open_climate_service import config as api_config
+    from open_climate_service.data_registry.services import datasets as dataset_registry
+
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    config_file = tmp_path / "climate-service.yaml"
+    config_file.write_text(f"plugins_dir: {plugins_dir}\n", encoding="utf-8")
+
+    monkeypatch.setattr(api_config, "_cache", None)
+    monkeypatch.setattr(dataset_registry, "CONFIGS_DIR", None)
+    monkeypatch.setenv("CLIMATE_SERVICE_CONFIG", str(config_file))
+    monkeypatch.setattr("open_climate_service.data_manager.services.downloader.DOWNLOAD_DIR", tmp_path)
+
+    real_get_dataset = dataset_registry.get_dataset
+    real_write_dataset_template = dataset_registry.write_dataset_template
+    get_calls = {"count": 0}
+
+    def _get_dataset(dataset_id: str) -> dict[str, Any] | None:
+        if dataset_id == "worldpop_population_change_autogen":
+            get_calls["count"] += 1
+            if get_calls["count"] == 1:
+                return None
+        return real_get_dataset(dataset_id)
+
+    def _write_dataset_template(template: dict[str, Any], *, overwrite: bool = False) -> Path:
+        real_write_dataset_template(template, overwrite=overwrite)
+        raise FileExistsError("simulated concurrent create")
+
+    monkeypatch.setattr(dataset_registry, "get_dataset", _get_dataset)
+    monkeypatch.setattr(dataset_registry, "write_dataset_template", _write_dataset_template)
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.services.register_artifact_record",
+        lambda record, publish: record,
+    )
+
+    ds = _small_dataset().isel(t=0, drop=True)
+    envelope = SaveResultEnvelope(
+        ds,
+        "Zarr",
+        {
+            "dataset_id": "worldpop_population_change_autogen",
+            "source_dataset_id": "worldpop_population_global2_R2025A_100m",
+            "variable": "pop_change",
+            "publish": False,
+        },
+    )
+
+    result = job_service._persist_result("job-auto-template-race", envelope)
+
+    assert result == "managed://worldpop_population_change_autogen"
+    template = real_get_dataset("worldpop_population_change_autogen")
+    assert template is not None
 
 
 def test_persist_result_rejects_non_boolean_publish_option(

@@ -516,6 +516,9 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         ArtifactRequestScope,
     )
 
+    if not isinstance(ds, xr.Dataset):
+        raise TypeError(f"Managed Zarr write requires an xr.Dataset, got {type(ds).__name__}")
+
     dataset_id = options["dataset_id"]
     if not isinstance(dataset_id, str) or not dataset_id:
         raise ValueError(f"'dataset_id' option must be a non-empty string, got {type(dataset_id).__name__}")
@@ -526,21 +529,6 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
 
     from open_climate_service.data_registry.services import datasets as _reg
 
-    template = _reg.get_dataset(dataset_id)
-    if template is None:
-        raise ValueError(
-            f"No dataset template found for '{dataset_id}'. "
-            "Register the dataset template before writing managed artifacts."
-        )
-
-    # Prefer an explicit option, then the registered template's display name, and
-    # only fall back to the raw id so published collections read as e.g.
-    # "Mosquito hotspots (Rwanda 2018 Q1)" rather than "mosquito_hotspots".
-    dataset_name: str = options.get("dataset_name") or template.get("name") or dataset_id
-
-    if not isinstance(ds, xr.Dataset):
-        raise TypeError(f"Managed Zarr write requires an xr.Dataset, got {type(ds).__name__}")
-
     # Rename the variable in the store to match the user-specified variable name,
     # so the on-disk name matches what is advertised in the STAC collection.
     if options.get("variable") and len(ds.data_vars) == 1:
@@ -548,13 +536,6 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         desired_name = str(options["variable"])
         if current_name != desired_name:
             ds = ds.rename({current_name: desired_name})
-
-    # Stamp CF attributes (units / standard_name / cell_methods) from the template so the
-    # published store is CF-compliant on disk (#280). The template is authoritative for the
-    # fields it declares, so overwrite any placeholder/generic value left on the variable.
-    from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
-
-    apply_cf_metadata(ds, cf_attrs_from_template(template), overwrite=True)
 
     try:
         x_dim, y_dim = get_x_y_dims(ds)
@@ -566,15 +547,36 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     except ValueError:
         t_dim = None
 
-    coverage = _derive_coverage(ds, x_dim, y_dim, t_dim)
     variable = _derive_variable(ds, options)
-    period_type: str | None = options.get("period_type") or (
-        _infer_period_type(ds, t_dim) if t_dim is not None else None
-    )
+    source_template = _resolve_source_template(options)
+    template = _reg.get_dataset(dataset_id)
+    if template is None:
+        try:
+            _reg.write_dataset_template(_derive_managed_dataset_template(ds, options, source_template, t_dim))
+        except FileExistsError:
+            pass
+        template = _reg.get_dataset(dataset_id)
+    if template is None:
+        raise ValueError(f"Auto-registered dataset template for '{dataset_id}' could not be reloaded")
+
+    # Prefer an explicit option, then the registered template's display name, and
+    # only fall back to the raw id so published collections read as e.g.
+    # "Mosquito hotspots (Rwanda 2018 Q1)" rather than "mosquito_hotspots".
+    dataset_name: str = options.get("dataset_name") or template.get("name") or dataset_id
 
     from open_climate_service import config as api_config
 
     crs: str = ds.attrs.get("proj:code") or api_config.get_crs()
+
+    # Stamp CF attributes (units / standard_name / cell_methods) from the template so the
+    # published store is CF-compliant on disk (#280). The template is authoritative for the
+    # fields it declares, so overwrite any placeholder/generic value left on the variable.
+    from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
+
+    apply_cf_metadata(ds, cf_attrs_from_template(template), overwrite=True)
+
+    coverage = _derive_coverage(ds, x_dim, y_dim, t_dim)
+    period_type: str | None = _derive_period_type(ds, options, source_template, t_dim)
     store_path = downloader.DOWNLOAD_DIR / f"{dataset_id}.icechunk"
     store_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -610,6 +612,204 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     if not isinstance(_publish_raw, bool):
         raise ValueError(f"'publish' option must be a boolean, got {type(_publish_raw).__name__!r}: {_publish_raw!r}")
     ingestion_services.register_artifact_record(record, publish=_publish_raw)
+
+
+def _resolve_source_template(options: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the source dataset template referenced in save_result options, if any."""
+    source_dataset_id = options.get("source_dataset_id")
+    if not isinstance(source_dataset_id, str) or not source_dataset_id:
+        return None
+    from open_climate_service.data_registry.services import datasets as _reg
+
+    return _reg.get_dataset(source_dataset_id)
+
+
+def _derive_period_type(
+    ds: Any, options: dict[str, Any], source_template: dict[str, Any] | None, t_dim: str | None
+) -> str | None:
+    """Return period_type from explicit options, inference, or source template fallback."""
+    explicit = options.get("period_type")
+    if isinstance(explicit, str) and explicit:
+        return explicit
+    inferred = _infer_period_type(ds, t_dim) if t_dim is not None else None
+    if inferred is not None:
+        return inferred
+    inherited = source_template.get("period_type") if isinstance(source_template, dict) else None
+    if isinstance(inherited, str) and inherited:
+        return inherited
+    return None
+
+
+def _derive_managed_dataset_template(
+    ds: Any, options: dict[str, Any], source_template: dict[str, Any] | None, t_dim: str | None
+) -> dict[str, Any]:
+    """Synthesize a static dataset template for a managed openEO publish output."""
+    dataset_id = str(options["dataset_id"])
+    variable = _derive_variable(ds, options)
+    output_kind = _derived_output_kind(dataset_id, variable)
+    name = _derive_template_name(dataset_id, options, source_template, output_kind)
+    short_name = _derive_template_short_name(name, options, source_template, output_kind)
+    period_type = _derive_period_type(ds, options, source_template, t_dim)
+    display = _derive_display_config(ds, variable, dataset_id, options, source_template, output_kind)
+
+    template: dict[str, Any] = {
+        "id": dataset_id,
+        "name": name,
+        "short_name": short_name,
+        "variable": variable,
+        "sync": {"kind": "static"},
+        "display": display,
+    }
+    if period_type is not None:
+        template["period_type"] = period_type
+
+    for field in ("units", "resolution", "source", "source_url"):
+        explicit = options.get(field)
+        if isinstance(explicit, str) and explicit:
+            template[field] = explicit
+            continue
+        inherited = source_template.get(field) if isinstance(source_template, dict) else None
+        if isinstance(inherited, str) and inherited:
+            template[field] = inherited
+
+    return template
+
+
+def _derive_template_name(
+    dataset_id: str, options: dict[str, Any], source_template: dict[str, Any] | None, output_kind: str | None
+) -> str:
+    """Return a friendly display name for an auto-derived template."""
+    explicit = options.get("dataset_name")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+
+    inherited = None
+    if isinstance(source_template, dict):
+        inherited = source_template.get("short_name") or source_template.get("name")
+    if isinstance(inherited, str) and inherited.strip() and output_kind is not None:
+        return f"{inherited.strip()} {output_kind.lower()}"
+    return _humanize_identifier(dataset_id)
+
+
+def _derive_template_short_name(
+    name: str, options: dict[str, Any], source_template: dict[str, Any] | None, output_kind: str | None
+) -> str:
+    """Return a short_name for an auto-derived template."""
+    explicit = options.get("short_name")
+    if isinstance(explicit, str) and explicit.strip():
+        return explicit.strip()
+
+    inherited = source_template.get("short_name") if isinstance(source_template, dict) else None
+    if isinstance(inherited, str) and inherited.strip() and output_kind is not None:
+        return f"{inherited.strip()} {output_kind.lower()}"
+    return name
+
+
+def _derive_display_config(
+    ds: Any,
+    variable: str,
+    dataset_id: str,
+    options: dict[str, Any],
+    source_template: dict[str, Any] | None,
+    output_kind: str | None,
+) -> dict[str, Any]:
+    """Return display metadata for an auto-derived template."""
+    explicit = _explicit_display_overrides(options)
+    source_display = source_template.get("display") if isinstance(source_template, dict) else None
+    display: dict[str, Any] = {}
+
+    if isinstance(explicit.get("colormap"), str):
+        display["colormap"] = explicit["colormap"]
+    if isinstance(explicit.get("range"), list) and len(explicit["range"]) == 2:
+        display["range"] = [float(explicit["range"][0]), float(explicit["range"][1])]
+    if explicit.get("nodata") is not None:
+        display["nodata"] = float(explicit["nodata"])
+
+    signed_output = output_kind in {"Change", "Anomaly", "Difference", "Delta"}
+    if signed_output:
+        display.setdefault("colormap", "RdBu")
+        if "range" not in display:
+            data_min, data_max = _data_range(ds, variable)
+            bound = max(abs(data_min), abs(data_max))
+            if bound == 0:
+                bound = 1.0
+            display["range"] = [-bound, bound]
+    else:
+        if isinstance(source_display, dict):
+            colormap = source_display.get("colormap")
+            value_range = source_display.get("range")
+            nodata = source_display.get("nodata")
+            if "colormap" not in display and isinstance(colormap, str):
+                display["colormap"] = colormap
+            if "range" not in display and isinstance(value_range, list) and len(value_range) == 2:
+                display["range"] = [float(value_range[0]), float(value_range[1])]
+            if "nodata" not in display and nodata is not None:
+                display["nodata"] = float(nodata)
+        display.setdefault("colormap", "viridis")
+        if "range" not in display:
+            data_min, data_max = _data_range(ds, variable)
+            display["range"] = _normalize_range(data_min, data_max)
+
+    return display
+
+
+def _explicit_display_overrides(options: dict[str, Any]) -> dict[str, Any]:
+    """Extract display overrides from save_result options."""
+    display: dict[str, Any] = {}
+    nested = options.get("display")
+    if isinstance(nested, dict):
+        display.update(nested)
+    for key in ("colormap", "range", "nodata"):
+        if key in options:
+            display[key] = options[key]
+    return display
+
+
+def _data_range(ds: Any, variable: str) -> tuple[float, float]:
+    """Return finite min/max for one variable, falling back to (0, 1)."""
+    import numpy as np
+
+    array = ds[variable].astype("float64")
+    min_value = array.min(skipna=True)
+    max_value = array.max(skipna=True)
+    if hasattr(min_value, "compute"):
+        min_value = min_value.compute()
+    if hasattr(max_value, "compute"):
+        max_value = max_value.compute()
+    low = float(np.asarray(min_value.values))
+    high = float(np.asarray(max_value.values))
+    if not np.isfinite(low) or not np.isfinite(high):
+        return 0.0, 1.0
+    return low, high
+
+
+def _normalize_range(data_min: float, data_max: float) -> list[float]:
+    """Return a non-degenerate display range."""
+    if data_min == data_max:
+        if data_min == 0:
+            return [0.0, 1.0]
+        pad = abs(data_min) * 0.1 or 1.0
+        return [data_min - pad, data_max + pad]
+    return [data_min, data_max]
+
+
+def _derived_output_kind(dataset_id: str, variable: str) -> str | None:
+    """Classify a derived output from its id/variable name for display/name defaults."""
+    haystack = f"{dataset_id} {variable}".lower()
+    for token, label in (
+        ("anomaly", "Anomaly"),
+        ("difference", "Difference"),
+        ("change", "Change"),
+        ("delta", "Delta"),
+    ):
+        if token in haystack:
+            return label
+    return None
+
+
+def _humanize_identifier(value: str) -> str:
+    """Convert an identifier like `worldpop_population_change` into title case."""
+    return re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", value)).strip().title()
 
 
 def _recover_temporal_from_attrs(ds: Any) -> tuple[str, str]:
