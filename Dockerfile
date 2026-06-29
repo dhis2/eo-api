@@ -46,6 +46,6 @@ USER ocs
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# exec form (JSON) so uvicorn receives signals directly; `exec` replaces the
-# shell that expands ${PORT} so no extra process sits between init and uvicorn.
-CMD ["sh", "-c", "exec uvicorn open_climate_service.main:app --host 0.0.0.0 --port ${PORT}"]
+# exec form (JSON) so uvicorn is PID 1 and receives signals directly, with no
+# shell process between init and uvicorn. Port is the fixed 8000 set above.
+CMD ["uvicorn", "open_climate_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
