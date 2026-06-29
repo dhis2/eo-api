@@ -8,8 +8,8 @@ import pytest
 import xarray as xr
 
 from open_climate_service.client import (
-    ClimateService,
     _FALLBACK_BASE_URL,
+    ClimateService,
     _id_from_href,
     list_datasets,
     open_dataset,
