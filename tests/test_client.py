@@ -138,7 +138,7 @@ def test_open_dataset_uses_default_base_url() -> None:
         with patch("xarray.open_zarr", return_value=MagicMock()):
             open_dataset("any_dataset")
 
-    mock_get.assert_called_once_with("http://127.0.0.1:8000/stac/collections/any_dataset", timeout=30)
+    mock_get.assert_called_once_with("http://127.0.0.1:9000/stac/collections/any_dataset", timeout=30)
 
 
 def test_open_dataset_uses_env_var_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
