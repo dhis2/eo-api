@@ -12,7 +12,7 @@ Adjust BASE_URL if the API is not on the default local address.
 
 import openeo
 
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "http://127.0.0.1:9000"
 
 
 def main() -> None:

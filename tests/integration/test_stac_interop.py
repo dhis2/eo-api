@@ -16,7 +16,7 @@ Manual setup example:
 3. ``pip install pytest httpx openeo``
 4. start the Open Climate Service separately, e.g. ``make run``
 5. run:
-   ``RUN_STAC_INTEROP=1 STAC_BASE_URL=http://127.0.0.1:8000 pytest --noconftest tests/integration/test_stac_interop.py``
+   ``RUN_STAC_INTEROP=1 STAC_BASE_URL=http://127.0.0.1:9000 pytest --noconftest tests/integration/test_stac_interop.py``
 """
 
 import os
@@ -31,7 +31,7 @@ def test_openeo_can_load_stac_collection() -> None:
         pytest.skip("Set RUN_STAC_INTEROP=1 to enable live STAC interoperability checks")
 
     openeo = pytest.importorskip("openeo")
-    base_url = os.getenv("STAC_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+    base_url = os.getenv("STAC_BASE_URL", "http://127.0.0.1:9000").rstrip("/")
     dataset_id = os.getenv("STAC_DATASET_ID")
 
     catalog_url = f"{base_url}/stac/catalog.json"

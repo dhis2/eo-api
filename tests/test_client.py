@@ -8,6 +8,7 @@ import pytest
 import xarray as xr
 
 from open_climate_service.client import (
+    _FALLBACK_BASE_URL,
     ClimateService,
     _id_from_href,
     list_datasets,
@@ -138,17 +139,19 @@ def test_open_dataset_uses_default_base_url() -> None:
         with patch("xarray.open_zarr", return_value=MagicMock()):
             open_dataset("any_dataset")
 
-    mock_get.assert_called_once_with("http://127.0.0.1:8000/stac/collections/any_dataset", timeout=30)
+    mock_get.assert_called_once_with(f"{_FALLBACK_BASE_URL}/stac/collections/any_dataset", timeout=30)
 
 
 def test_open_dataset_uses_env_var_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CLIMATE_SERVICE_BASE_URL", "http://env-host:9000")
+    # Arbitrary host:port — the point is that the env var is honored verbatim,
+    # independent of the default base URL or port.
+    monkeypatch.setenv("CLIMATE_SERVICE_BASE_URL", "http://env-host:4321")
     collection = _make_collection("/dev/null")
     with patch("open_climate_service.client.httpx.get", return_value=_make_response(collection)) as mock_get:
         with patch("xarray.open_zarr", return_value=MagicMock()):
             open_dataset("any_dataset")
 
-    mock_get.assert_called_once_with("http://env-host:9000/stac/collections/any_dataset", timeout=30)
+    mock_get.assert_called_once_with("http://env-host:4321/stac/collections/any_dataset", timeout=30)
 
 
 # ── lazy xarray import ─────────────────────────────────────────────────────────

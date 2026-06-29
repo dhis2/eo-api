@@ -38,7 +38,7 @@ RUN mkdir -p /app/data/pygeoapi /app/data/artifacts && \
 
 ENV PYGEOAPI_CONFIG=/app/data/pygeoapi/pygeoapi-config.yml
 ENV PYGEOAPI_OPENAPI=/app/data/pygeoapi/pygeoapi-openapi.yml
-ENV PORT=8000
+ENV PORT=9000
 ENV PATH="/app/.venv/bin:$PATH"
 
 USER ocs
@@ -46,6 +46,7 @@ USER ocs
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# exec form (JSON) so uvicorn is PID 1 and receives signals directly, with no
-# shell process between init and uvicorn. Port is the fixed 8000 set above.
-CMD ["uvicorn", "open_climate_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# exec form (JSON) so the server is PID 1 and receives signals directly, with no
+# shell process between init and uvicorn. The climate-service entry point reads
+# HOST and PORT from the environment (PORT defaults to 9000, set above).
+CMD ["climate-service"]

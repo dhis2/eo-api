@@ -14,8 +14,8 @@ sync-gdal: ## Pin gdal override to the installed system libgdal version, then sy
 		rm -f pyproject.toml.bak && \
 		uv sync --all-extras
 
-run: ## Start the app with uvicorn
-	uv run uvicorn open_climate_service.main:app --reload --reload-include "*.html" --reload-include "*.yaml" --reload-include "*.yml"
+run: ## Start the app with uvicorn (honors PORT, default 9000)
+	uv run uvicorn open_climate_service.main:app --port $${PORT:-9000} --reload --reload-include "*.html" --reload-include "*.yaml" --reload-include "*.yml"
 
 lint: ## Check linting, formatting, and types (no autofix)
 	uv run ruff check .

@@ -8,7 +8,7 @@ import json
 
 from open_climate_service import ClimateService
 
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "http://127.0.0.1:9000"
 
 
 def main() -> None:

@@ -76,6 +76,9 @@ server = [
     "geozarr-toolkit==0.1.*",
     "topozarr>=0.0.91,<0.1",
     "rioxarray>=0.17",
+    # Directly imported (shared/time.py, streaming, openeo). Capped to 2.x; pandas
+    # 3.0 is a breaking major and not yet validated against this stack.
+    "pandas>=2.3,<3",
     "portalocker>=3.2.0",
     "openeo-pg-parser-networkx>=2026.3.3",
     # We depend on the base package and hand-pick the implementation deps rather than
