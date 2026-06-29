@@ -38,7 +38,7 @@ key: <your-cds-api-key>
 Once authenticated, ingest ERA5-Land daily temperature:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/ingestions \
+curl -s -X POST http://127.0.0.1:9000/ingestions \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "era5land_temperature_daily",

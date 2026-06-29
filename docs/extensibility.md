@@ -122,7 +122,7 @@ Calling the workflow from any openEO client:
 ```python
 import openeo
 
-conn = openeo.connect("http://your-instance:8000")
+conn = openeo.connect("http://your-instance:9000")
 job = conn.execute_batch_job({
     "process_graph": {
         "result": {

@@ -19,7 +19,7 @@ Browse the full list from any connected client:
 ```python
 import openeo
 
-conn = openeo.connect("http://your-instance:8000")
+conn = openeo.connect("http://your-instance:9000")
 processes = conn.list_processes()
 print([p.id for p in processes])
 ```
@@ -44,7 +44,7 @@ SPI is the primary drought monitoring index. The `window` parameter selects the 
 ```python
 import openeo
 
-conn = openeo.connect("http://your-instance:8000")
+conn = openeo.connect("http://your-instance:9000")
 
 precip = conn.load_collection(
     "chirps_rainfall_daily",

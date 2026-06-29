@@ -48,7 +48,7 @@ Run the `aggregate_to_dhis2_json` workflow with `ClimateService.execute()`. It l
 ```python
 from open_climate_service import ClimateService
 
-service = ClimateService("http://127.0.0.1:8000")
+service = ClimateService("http://127.0.0.1:9000")
 
 data_value_set = service.execute(
     {

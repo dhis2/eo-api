@@ -109,7 +109,7 @@ install: ## Install dependencies with uv
 
 run: ## Start the API with uvicorn
 	set -a && . ./.env && set +a && \
-		uv run uvicorn open_climate_service.main:app --reload --reload-include "*.yaml" --reload-include "*.yml" --port 8000
+		uv run uvicorn open_climate_service.main:app --reload --reload-include "*.yaml" --reload-include "*.yml" --port 9000
 ```
 
 ## Step 4: Configure the instance
@@ -171,7 +171,7 @@ make install
 make run
 ```
 
-Visit `http://127.0.0.1:8000` to confirm the service is running. From there, open
+Visit `http://127.0.0.1:9000` to confirm the service is running. From there, open
 `/manage` to ingest data and `/map` to view it — see [Using the web interface](web_interface.md).
 The `/extent` endpoint should return your configured bounding box.
 
