@@ -1,0 +1,15 @@
+# CODEOWNERS
+# Docker / Compose infrastructure is owned by the DevOps team.
+# Pattern syntax: https://docs.github.com/articles/about-code-owners
+
+# Docker build files (root only)
+/Dockerfile*            @dhis2/devops
+
+# Docker Compose stacks (compose.yml, compose.ghcr.yml)
+/compose.*              @dhis2/devops
+
+# Docker build context
+/.dockerignore          @dhis2/devops
+
+# Docker image CI workflow
+/.github/workflows/docker.yml   @dhis2/devops
