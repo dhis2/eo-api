@@ -20,7 +20,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         build-essential cython3 \
         libgeos-dev libproj-dev libeccodes-dev
 
-RUN groupadd --system ocs && useradd --system --gid ocs --create-home ocs
+RUN groupadd --gid 999 ocs && \
+    useradd --create-home --shell /usr/sbin/nologin --uid 999 --gid 999 ocs
 
 WORKDIR /app
 
