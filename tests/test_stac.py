@@ -677,3 +677,67 @@ def test_build_collection_with_xstac_reads_normalised_zarr_coordinates(tmp_path:
     assert cube_dims["longitude"]["axis"] == "x"
     assert cube_dims["latitude"]["axis"] == "y"
     assert cube_dims["time"]["type"] == "temporal"
+
+
+def test_build_collection_emits_crs_render_hints_for_projected_store(tmp_path: Path) -> None:
+    """Projected (non-built-in) stores get proj:wkt2 + open_climate_service:proj4 so map
+    clients can reproject without a runtime epsg.io lookup."""
+    zarr_path = tmp_path / "senorge_temperature_daily.zarr"
+    ds = xr.Dataset(
+        {"tg": (["time", "y", "x"], np.ones((2, 3, 3), dtype="float32"))},
+        coords={
+            "time": pd.date_range("2026-01-01", periods=2, freq="D"),
+            "y": [7000000.0, 6999000.0, 6998000.0],
+            "x": [100000.0, 101000.0, 102000.0],
+        },
+        attrs={"proj:code": "EPSG:32633"},
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
+
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ZARR, path=str(zarr_path))
+    template = pystac.Collection(
+        id="senorge_temperature_daily",
+        description="test",
+        extent=pystac.Extent(
+            spatial=pystac.SpatialExtent([[100000.0, 6998000.0, 102000.0, 7000000.0]]),
+            temporal=pystac.TemporalExtent([[datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)]]),
+        ),
+    )
+
+    payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
+
+    assert payload["proj:code"] == "EPSG:32633"
+    proj4 = payload["open_climate_service:proj4"]
+    assert "proj=utm" in proj4 and "zone=33" in proj4
+    assert "PROJCRS" in payload["proj:wkt2"] or "PROJCS" in payload["proj:wkt2"]
+
+
+def test_build_collection_omits_crs_render_hints_for_wgs84(tmp_path: Path) -> None:
+    """Built-in CRSes (EPSG:4326) resolve on the client from their code, so no hint is emitted."""
+    zarr_path = tmp_path / "era5land_temperature_daily.zarr"
+    ds = xr.Dataset(
+        {"t2m": (["time", "latitude", "longitude"], np.ones((2, 3, 3), dtype="float32"))},
+        coords={
+            "time": pd.date_range("2026-01-01", periods=2, freq="D"),
+            "latitude": [4.0, 3.0, 2.0],
+            "longitude": [1.0, 2.0, 3.0],
+        },
+        attrs={"proj:code": "EPSG:4326"},
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
+
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ZARR, path=str(zarr_path))
+    template = pystac.Collection(
+        id="era5land_temperature_daily",
+        description="test",
+        extent=pystac.Extent(
+            spatial=pystac.SpatialExtent([[1.0, 2.0, 3.0, 4.0]]),
+            temporal=pystac.TemporalExtent([[datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)]]),
+        ),
+    )
+
+    payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
+
+    assert payload["proj:code"] == "EPSG:4326"
+    assert "open_climate_service:proj4" not in payload
+    assert "proj:wkt2" not in payload

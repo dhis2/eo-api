@@ -211,6 +211,55 @@ def _build_collection_template(
     return template
 
 
+# CRSes that proj4js (the map client's reprojector) resolves from the authority code
+# alone; any other CRS needs a full definition surfaced in the collection metadata.
+_BUILTIN_CRS_CODES = frozenset({"EPSG:4326", "OGC:CRS84", "CRS84", "EPSG:3857"})
+
+
+def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_crs: str) -> None:
+    """Surface CRS render hints on the collection for projected (non-built-in) stores.
+
+    Map clients reproject Zarr on the fly with proj4js, which resolves only the
+    built-in ``EPSG:4326`` / ``EPSG:3857`` from their code — any other CRS (e.g.
+    seNorge's UTM33, ``EPSG:32633``) needs a full definition, or the client has to
+    fetch one at render time (an external epsg.io lookup). Publishing the definition
+    in STAC removes that runtime dependency.
+
+    Two fields are emitted:
+
+    * ``proj:wkt2`` — the STAC Projection-extension standard, lossless CRS
+      representation. It is the same information GeoZarr already carries in the CF
+      ``spatial_ref`` grid-mapping's ``crs_wkt`` attribute.
+    * ``open_climate_service:proj4`` — a proj4 string for direct consumption by
+      proj4js. proj4 is intentionally *not* a STAC-standard field (PROJ treats proj4
+      strings as lossy), so it lives under our namespace rather than ``proj:``.
+    """
+    if store_crs.upper() in _BUILTIN_CRS_CODES:
+        return
+    try:
+        import warnings
+
+        from pyproj import CRS
+
+        # Prefer the CRS the data was actually written with (the CF grid-mapping WKT)
+        # over re-deriving from the code, when the store carries it.
+        wkt: str | None = None
+        spatial_ref = ds.get("spatial_ref")
+        if spatial_ref is not None:
+            wkt = spatial_ref.attrs.get("crs_wkt") or spatial_ref.attrs.get("spatial_ref")
+        crs = CRS.from_wkt(wkt) if wkt else CRS.from_user_input(store_crs)
+
+        template.extra_fields["proj:wkt2"] = crs.to_wkt()
+        with warnings.catch_warnings():
+            # to_proj4() warns that proj4 is lossy; that's acceptable for a render hint.
+            warnings.simplefilter("ignore")
+            proj4 = crs.to_proj4()
+        if proj4:
+            template.extra_fields["open_climate_service:proj4"] = proj4.strip()
+    except Exception:
+        logger.warning("Could not derive CRS render hints for '%s'", store_crs, exc_info=True)
+
+
 def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.Collection) -> dict[str, Any]:
     cached_payload = _xstac_collection_cache.get(artifact.artifact_id)
     if cached_payload is not None:
@@ -233,6 +282,7 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
         store_crs = ds.attrs.get("proj:code")
         if store_crs:
             template.extra_fields["proj:code"] = store_crs
+            _add_crs_render_hints(template=template, ds=ds, store_crs=store_crs)
         x_dimension, y_dimension = get_x_y_dims(ds)
         try:
             time_dimension: str | None = get_time_dim(ds)

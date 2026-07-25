@@ -527,14 +527,17 @@
         // ZarrLayer resolves only its built-in CRSes (EPSG:4326 / EPSG:3857) from the
         // code alone; every other CRS — e.g. seNorge's UTM33 (EPSG:32633) — needs an
         // explicit proj4 definition, or it is treated as WGS84 degrees and lands in the
-        // wrong place. Fetch the proj4 string from epsg.io for those. See ZarrLayerOptions
-        // `crs` docs: "built-in projections (EPSG:4326 or EPSG:3857). For any other CRS,
-        // provide a matching proj4 definition."
+        // wrong place. See ZarrLayerOptions `crs` docs: "built-in projections (EPSG:4326
+        // or EPSG:3857). For any other CRS, provide a matching proj4 definition."
+        //
+        // Prefer the proj4 string published in the STAC collection
+        // (open_climate_service:proj4) so we don't depend on an external epsg.io lookup at
+        // render time; fall back to epsg.io only for older stores that predate the field.
         const nativeCrs = collection["proj:code"] ?? "EPSG:4326";
         const BUILTIN_CRS = new Set(["EPSG:4326", "OGC:CRS84", "CRS84", "EPSG:3857"]);
         const isBuiltinCrs = BUILTIN_CRS.has(nativeCrs.toUpperCase());
-        let proj4String = null;
-        if (!isBuiltinCrs) {
+        let proj4String = collection["open_climate_service:proj4"] ?? null;
+        if (!isBuiltinCrs && !proj4String) {
           try {
             const match = nativeCrs.match(/(\d+)$/);
             const epsgId = match?.[1];
