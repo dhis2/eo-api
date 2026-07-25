@@ -233,8 +233,8 @@
     </div>
 
     <script type="module">
-      import { ZarrLayer } from "https://esm.sh/@carbonplan/zarr-layer";
-      import chroma from "https://esm.sh/chroma-js";
+      import { ZarrLayer } from "https://esm.sh/@carbonplan/zarr-layer@0.6.1";
+      import chroma from "https://esm.sh/chroma-js@3.2.0";
 
       // Suffix _r means the scale is reversed (matplotlib convention).
       // chroma-js resolves ColorBrewer/D3 scale names case-insensitively.
@@ -522,13 +522,17 @@
         selector = {};
         for (const d of dimStates) selector[d.key] = d.index;
 
-        // For projected-CRS stores, pass crs + proj4 string so ZarrLayer
-        // reprojects natively instead of treating coordinates as WGS84 degrees.
+        // ZarrLayer resolves only its built-in CRSes (EPSG:4326 / EPSG:3857) from the
+        // code alone; every other CRS — e.g. seNorge's UTM33 (EPSG:32633) — needs an
+        // explicit proj4 definition, or it is treated as WGS84 degrees and lands in the
+        // wrong place. Fetch the proj4 string from epsg.io for those. See ZarrLayerOptions
+        // `crs` docs: "built-in projections (EPSG:4326 or EPSG:3857). For any other CRS,
+        // provide a matching proj4 definition."
         const nativeCrs = collection["proj:code"] ?? "EPSG:4326";
-        const WGS84 = new Set(["EPSG:4326", "OGC:CRS84", "CRS84"]);
-        const isWgs84 = WGS84.has(nativeCrs.toUpperCase());
+        const BUILTIN_CRS = new Set(["EPSG:4326", "OGC:CRS84", "CRS84", "EPSG:3857"]);
+        const isBuiltinCrs = BUILTIN_CRS.has(nativeCrs.toUpperCase());
         let proj4String = null;
-        if (!isWgs84) {
+        if (!isBuiltinCrs) {
           try {
             const match = nativeCrs.match(/(\d+)$/);
             const epsgId = match?.[1];
