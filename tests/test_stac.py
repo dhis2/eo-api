@@ -741,3 +741,35 @@ def test_build_collection_omits_crs_render_hints_for_wgs84(tmp_path: Path) -> No
     assert payload["proj:code"] == "EPSG:4326"
     assert "open_climate_service:proj4" not in payload
     assert "proj:wkt2" not in payload
+
+
+def test_build_collection_normalizes_crs84_alias_to_epsg4326(tmp_path: Path) -> None:
+    """A CRS84 alias in the store is emitted as canonical EPSG:4326 (and treated as built-in),
+    so the map client never receives an alias ZarrLayer can't resolve."""
+    zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
+    ds = xr.Dataset(
+        {"precip": (["time", "latitude", "longitude"], np.ones((2, 3, 3), dtype="float32"))},
+        coords={
+            "time": pd.date_range("2026-01-01", periods=2, freq="D"),
+            "latitude": [4.0, 3.0, 2.0],
+            "longitude": [1.0, 2.0, 3.0],
+        },
+        attrs={"proj:code": "OGC:CRS84"},
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
+
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ZARR, path=str(zarr_path))
+    template = pystac.Collection(
+        id="chirps3_precipitation_daily",
+        description="test",
+        extent=pystac.Extent(
+            spatial=pystac.SpatialExtent([[1.0, 2.0, 3.0, 4.0]]),
+            temporal=pystac.TemporalExtent([[datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)]]),
+        ),
+    )
+
+    payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
+
+    assert payload["proj:code"] == "EPSG:4326"  # normalized from OGC:CRS84
+    assert "open_climate_service:proj4" not in payload  # built-in → no hint
+    assert "proj:wkt2" not in payload

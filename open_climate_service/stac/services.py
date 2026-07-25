@@ -213,7 +213,20 @@ def _build_collection_template(
 
 # CRSes that proj4js (the map client's reprojector) resolves from the authority code
 # alone; any other CRS needs a full definition surfaced in the collection metadata.
-_BUILTIN_CRS_CODES = frozenset({"EPSG:4326", "OGC:CRS84", "CRS84", "EPSG:3857"})
+# CRS84 aliases are normalized to EPSG:4326 before this check (see _canonical_crs_code).
+_BUILTIN_CRS_CODES = frozenset({"EPSG:4326", "EPSG:3857"})
+
+
+def _canonical_crs_code(code: str) -> str:
+    """Collapse CRS84 geographic aliases to the canonical ``EPSG:4326``.
+
+    ``proj:code`` is written as ``EPSG:<n>`` by the ingest path, but a CRS84 alias
+    (``CRS84``, ``OGC:CRS84``, or a CRS84 URI) could arrive from an external store.
+    proj4js — the map client's reprojector — only resolves ``EPSG:4326`` / ``EPSG:3857``
+    from a code, so mapping the alias to ``EPSG:4326`` here lets every downstream
+    consumer work with a single canonical code.
+    """
+    return "EPSG:4326" if code.strip().upper().endswith("CRS84") else code
 
 
 def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_crs: str) -> None:
@@ -281,6 +294,7 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
         # store data in WGS84 (e.g. CHIRPS3) should not inherit the instance UTM CRS.
         store_crs = ds.attrs.get("proj:code")
         if store_crs:
+            store_crs = _canonical_crs_code(store_crs)
             template.extra_fields["proj:code"] = store_crs
             _add_crs_render_hints(template=template, ds=ds, store_crs=store_crs)
         x_dimension, y_dimension = get_x_y_dims(ds)
