@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -224,9 +225,10 @@ def _canonical_crs_code(code: str) -> str:
     (``CRS84``, ``OGC:CRS84``, or a CRS84 URI) could arrive from an external store.
     proj4js — the map client's reprojector — only resolves ``EPSG:4326`` / ``EPSG:3857``
     from a code, so mapping the alias to ``EPSG:4326`` here lets every downstream
-    consumer work with a single canonical code.
+    consumer work with a single canonical code. Strips separators first so the short
+    OGC form ``CRS:84`` is matched as well as ``CRS84`` / ``OGC:CRS84`` / CRS84 URIs.
     """
-    return "EPSG:4326" if code.strip().upper().endswith("CRS84") else code
+    return "EPSG:4326" if re.sub(r"[^A-Z0-9]", "", code.upper()).endswith("CRS84") else code
 
 
 def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_crs: str) -> None:
@@ -246,6 +248,9 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
     * ``open_climate_service:proj4`` — a proj4 string for direct consumption by
       proj4js. proj4 is intentionally *not* a STAC-standard field (PROJ treats proj4
       strings as lossy), so it lives under our namespace rather than ``proj:``.
+      zarr-layer only accepts a built-in ``crs`` code or a ``proj4`` string today; once
+      carbonplan/zarr-layer#61 lands (auto-resolving any EPSG code) this proj4 hint
+      becomes unnecessary and only ``proj:wkt2`` need remain, for other STAC clients.
     """
     if store_crs.upper() in _BUILTIN_CRS_CODES:
         return
@@ -262,7 +267,9 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
             wkt = spatial_ref.attrs.get("crs_wkt") or spatial_ref.attrs.get("spatial_ref")
         crs = CRS.from_wkt(wkt) if wkt else CRS.from_user_input(store_crs)
 
-        template.extra_fields["proj:wkt2"] = crs.to_wkt()
+        # Force WKT2 explicitly — pyproj's to_wkt() default can vary by version and could
+        # emit WKT1 (PROJCS); the STAC Projection extension defines proj:wkt2 as WKT2.
+        template.extra_fields["proj:wkt2"] = crs.to_wkt(version="WKT2_2019")
         with warnings.catch_warnings():
             # to_proj4() warns that proj4 is lossy; that's acceptable for a render hint.
             warnings.simplefilter("ignore")

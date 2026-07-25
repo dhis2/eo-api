@@ -709,7 +709,7 @@ def test_build_collection_emits_crs_render_hints_for_projected_store(tmp_path: P
     assert payload["proj:code"] == "EPSG:32633"
     proj4 = payload["open_climate_service:proj4"]
     assert "proj=utm" in proj4 and "zone=33" in proj4
-    assert "PROJCRS" in payload["proj:wkt2"] or "PROJCS" in payload["proj:wkt2"]
+    assert payload["proj:wkt2"].startswith("PROJCRS")  # WKT2, not WKT1 (PROJCS)
 
 
 def test_build_collection_omits_crs_render_hints_for_wgs84(tmp_path: Path) -> None:
@@ -773,3 +773,54 @@ def test_build_collection_normalizes_crs84_alias_to_epsg4326(tmp_path: Path) -> 
     assert payload["proj:code"] == "EPSG:4326"  # normalized from OGC:CRS84
     assert "open_climate_service:proj4" not in payload  # built-in → no hint
     assert "proj:wkt2" not in payload
+
+
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        ("CRS84", "EPSG:4326"),
+        ("OGC:CRS84", "EPSG:4326"),
+        ("CRS:84", "EPSG:4326"),  # short OGC form (separators stripped)
+        ("urn:ogc:def:crs:OGC:1.3:CRS84", "EPSG:4326"),
+        ("EPSG:4326", "EPSG:4326"),
+        ("EPSG:32633", "EPSG:32633"),  # projected code passes through unchanged
+    ],
+)
+def test_canonical_crs_code(code: str, expected: str) -> None:
+    assert stac_services._canonical_crs_code(code) == expected
+
+
+def test_build_collection_crs_render_hints_use_store_wkt(tmp_path: Path) -> None:
+    """When the store carries a CF grid-mapping WKT (spatial_ref/crs_wkt), the hints derive
+    from it (the CRS.from_wkt branch), and proj:wkt2 is emitted as WKT2."""
+    from pyproj import CRS as PyCRS
+
+    wkt = PyCRS.from_epsg(32633).to_wkt(version="WKT2_2019")
+    zarr_path = tmp_path / "senorge_temperature_daily.zarr"
+    ds = xr.Dataset(
+        {"tg": (["time", "y", "x"], np.ones((2, 3, 3), dtype="float32"))},
+        coords={
+            "time": pd.date_range("2026-01-01", periods=2, freq="D"),
+            "y": [7000000.0, 6999000.0, 6998000.0],
+            "x": [100000.0, 101000.0, 102000.0],
+            "spatial_ref": ((), 0, {"crs_wkt": wkt, "spatial_ref": wkt}),
+        },
+        attrs={"proj:code": "EPSG:32633"},
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
+
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ZARR, path=str(zarr_path))
+    template = pystac.Collection(
+        id="senorge_temperature_daily",
+        description="test",
+        extent=pystac.Extent(
+            spatial=pystac.SpatialExtent([[100000.0, 6998000.0, 102000.0, 7000000.0]]),
+            temporal=pystac.TemporalExtent([[datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)]]),
+        ),
+    )
+
+    payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
+
+    proj4 = payload["open_climate_service:proj4"]
+    assert "proj=utm" in proj4 and "zone=33" in proj4
+    assert payload["proj:wkt2"].startswith("PROJCRS")

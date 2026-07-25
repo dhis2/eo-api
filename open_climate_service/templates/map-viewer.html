@@ -537,10 +537,11 @@
         // (open_climate_service:proj4) so we don't depend on an external epsg.io lookup at
         // render time; fall back to epsg.io only for older stores that predate the field.
         let nativeCrs = collection["proj:code"] ?? "EPSG:4326";
-        // CRS84 aliases (CRS84, OGC:CRS84, or a CRS84 URI) are geographic WGS84; ZarrLayer
-        // only recognizes EPSG:4326 / EPSG:3857 by code, so normalize to EPSG:4326 before
-        // both the built-in check and passing `crs` into new ZarrLayer.
-        if (/CRS84$/i.test(nativeCrs)) nativeCrs = "EPSG:4326";
+        // CRS84 aliases (CRS84, OGC:CRS84, CRS:84, or a CRS84 URI) are geographic WGS84;
+        // ZarrLayer only recognizes EPSG:4326 / EPSG:3857 by code, so normalize to EPSG:4326
+        // before both the built-in check and passing `crs` into new ZarrLayer. Separators
+        // are stripped first so the short OGC form CRS:84 is matched too.
+        if (nativeCrs.toUpperCase().replace(/[^A-Z0-9]/g, "").endsWith("CRS84")) nativeCrs = "EPSG:4326";
         const BUILTIN_CRS = new Set(["EPSG:4326", "EPSG:3857"]);
         const isBuiltinCrs = BUILTIN_CRS.has(nativeCrs.toUpperCase());
         let proj4String = collection["open_climate_service:proj4"] ?? null;
