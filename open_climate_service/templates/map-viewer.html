@@ -232,9 +232,12 @@
     </div>
 
     <script type="module">
-      // MapLibre 6 is ESM-only (no UMD `dist/maplibre-gl.js`), so import it here as a
-      // namespace rather than relying on a global from a <script src> tag.
-      import * as maplibregl from "https://esm.sh/maplibre-gl@6.0.0";
+      // MapLibre 6 is ESM-only (no UMD `dist/maplibre-gl.js`), so import it as a
+      // namespace. Load the official dist `.mjs` from unpkg — NOT esm.sh: MapLibre's
+      // worker is a real sibling URL (`./maplibre-gl-worker.mjs`) resolved from
+      // import.meta.url, and esm.sh's transformed build doesn't serve it (404), which
+      // blanks the map. unpkg serves the worker + shared chunk siblings with CORS.
+      import * as maplibregl from "https://unpkg.com/maplibre-gl@6.0.0/dist/maplibre-gl.mjs";
       import { ZarrLayer } from "https://esm.sh/@carbonplan/zarr-layer@0.6.1";
       import chroma from "https://esm.sh/chroma-js@3.2.0";
 
