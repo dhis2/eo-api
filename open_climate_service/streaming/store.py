@@ -18,7 +18,6 @@ from typing import Any
 
 from geozarr_toolkit import create_geozarr_attrs
 
-from open_climate_service.shared.crs import crs_to_proj4, is_builtin_crs
 from open_climate_service.streaming.protocol import GridSpec
 
 logger = logging.getLogger(__name__)
@@ -116,18 +115,12 @@ def write_geozarr_attrs(store: Any, *, spec: GridSpec, bbox: list[float]) -> Non
     )
     crs_code = f"EPSG:{spec.crs}"
     attrs["proj:code"] = crs_code
+    # Native-CRS extent, in the GeoZarr `spatial:bbox` convention. Direct-Zarr clients
+    # (GDAL/QGIS, zarr-layer) read the CRS from the CF grid-mapping (`crs_wkt`) / `proj:`
+    # convention that create_geozarr_attrs already writes, and the extent from here or the
+    # coordinate arrays — no non-standard `proj4`/`bounds` attrs required. The STAC hints
+    # (open_climate_service:proj4, proj:bbox) in stac/services.py serve the map viewer.
     attrs["spatial:bbox"] = bbox
-    # Direct-Zarr clients (GeoLibre's native panel, GDAL/QGIS) that never see OCS's STAC
-    # need the CRS embedded in the store to place a projected grid. proj:code isn't enough
-    # for those clients — surface a proj4 string (the STAC counterpart is emitted in
-    # stac/services.py) plus the native-CRS bounds so they auto-reproject without input.
-    if not is_builtin_crs(crs_code):
-        # The native-CRS bounds are useful on their own (a client needs them to place the
-        # grid), so write them for any projected store even if proj4 derivation fails.
-        attrs["bounds"] = list(bbox)
-        proj4 = crs_to_proj4(crs_code)
-        if proj4:
-            attrs["proj4"] = proj4
     attrs.update(spec.attrs)
 
     root = zarr.open_group(store, mode="r+")

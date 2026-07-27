@@ -264,11 +264,11 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
     except Exception:
         logger.warning("Could not derive CRS render hints for '%s'", store_crs, exc_info=True)
 
-    # proj:bbox — the native-CRS extent. Prefer the value the ingest orchestrator
-    # writes to the store root (``attrs["bounds"]``); fall back to the x/y coordinate
-    # arrays (cell centres) for stores written before that attr existed.
+    # proj:bbox — the native-CRS extent. Prefer the GeoZarr ``spatial:bbox`` the store
+    # root already carries; fall back to the x/y coordinate arrays (cell centres) for
+    # stores that lack it.
     try:
-        bbox = ds.attrs.get("bounds")
+        bbox = ds.attrs.get("spatial:bbox")
         if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
             x_dim, y_dim = get_x_y_dims(ds)
             xs, ys = ds[x_dim].values, ds[y_dim].values

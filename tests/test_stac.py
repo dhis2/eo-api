@@ -710,7 +710,7 @@ def test_build_collection_emits_crs_render_hints_for_projected_store(tmp_path: P
     proj4 = payload["open_climate_service:proj4"]
     assert "proj=utm" in proj4 and "zone=33" in proj4
     assert payload["proj:wkt2"].startswith("PROJCRS")  # WKT2, not WKT1 (PROJCS)
-    # proj:bbox derived from the x/y coordinate arrays (no attrs["bounds"] on this store)
+    # proj:bbox derived from the x/y coordinate arrays (no spatial:bbox on this store)
     assert payload["proj:bbox"] == [100000.0, 6998000.0, 102000.0, 7000000.0]
 
 
@@ -746,9 +746,9 @@ def test_build_collection_omits_crs_render_hints_for_wgs84(tmp_path: Path) -> No
     assert "proj:bbox" not in payload
 
 
-def test_build_collection_proj_bbox_prefers_store_bounds_attr(tmp_path: Path) -> None:
-    """When the store root carries attrs["bounds"] (native-CRS extent written by the
-    ingest orchestrator), proj:bbox uses it verbatim rather than re-deriving from coords."""
+def test_build_collection_proj_bbox_prefers_store_spatial_bbox_attr(tmp_path: Path) -> None:
+    """When the store root carries the GeoZarr ``spatial:bbox`` (native-CRS extent),
+    proj:bbox uses it verbatim rather than re-deriving from coords."""
     zarr_path = tmp_path / "senorge_temperature_daily.zarr"
     ds = xr.Dataset(
         {"tg": (["time", "y", "x"], np.ones((2, 3, 3), dtype="float32"))},
@@ -758,7 +758,7 @@ def test_build_collection_proj_bbox_prefers_store_bounds_attr(tmp_path: Path) ->
             "x": [100000.0, 101000.0, 102000.0],
         },
         # Half-pixel-expanded edges differ from the coord centres above.
-        attrs={"proj:code": "EPSG:32633", "bounds": [99500.0, 6997500.0, 102500.0, 7000500.0]},
+        attrs={"proj:code": "EPSG:32633", "spatial:bbox": [99500.0, 6997500.0, 102500.0, 7000500.0]},
     )
     ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
 

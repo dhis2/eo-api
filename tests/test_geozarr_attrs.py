@@ -1,9 +1,10 @@
-"""Store-level CRS attributes written by ``write_geozarr_attrs``.
+"""Store-level CRS/extent attributes written by ``write_geozarr_attrs``.
 
-Direct-Zarr clients (GeoLibre's native Zarr panel, GDAL/QGIS) never see OCS's STAC,
-so a projected store must embed a ``proj4`` string + native-CRS ``bounds`` in its root
-attributes to auto-reproject. This is the store-side counterpart of the STAC render
-hints in ``stac/services.py``.
+The store conveys its CRS through the CF grid-mapping (``crs_wkt``) / GeoZarr ``proj:``
+convention that ``create_geozarr_attrs`` writes, and its native-CRS extent through the
+GeoZarr ``spatial:bbox`` root attribute. No non-standard ``proj4`` / ``bounds`` attrs are
+written — those duplicated the above and nothing consumed them (map clients read the STAC
+hints in ``stac/services.py``; GDAL/QGIS read ``crs_wkt``).
 """
 
 from __future__ import annotations
@@ -25,7 +26,9 @@ def _init_group(path: Path) -> str:
     return store
 
 
-def test_write_geozarr_attrs_adds_proj4_and_bounds_for_projected(tmp_path: Path) -> None:
+def test_write_geozarr_attrs_writes_standard_extent_not_custom_attrs(tmp_path: Path) -> None:
+    """A projected store carries proj:code + the GeoZarr spatial:bbox, and no bespoke
+    proj4/bounds attrs (which nothing reads and which duplicate crs_wkt / spatial:bbox)."""
     store = _init_group(tmp_path)
     spec = GridSpec(shape=(3, 3), crs=32633, dtype=np.dtype("float32"), x_dim="x", y_dim="y")
     bbox = [-74500.0, 6450500.0, 1119500.0, 7999500.0]  # native UTM33 metres
@@ -34,20 +37,22 @@ def test_write_geozarr_attrs_adds_proj4_and_bounds_for_projected(tmp_path: Path)
 
     attrs = dict(zarr.open_group(store, mode="r").attrs)
     assert attrs["proj:code"] == "EPSG:32633"
-    proj4 = str(attrs["proj4"])
-    assert "proj=utm" in proj4 and "zone=33" in proj4
-    assert attrs["bounds"] == bbox  # native-CRS [xMin, yMin, xMax, yMax] for the client
+    assert attrs["spatial:bbox"] == bbox  # native-CRS extent, GeoZarr convention
+    assert "proj4" not in attrs
+    assert "bounds" not in attrs
 
 
-def test_write_geozarr_attrs_omits_proj4_for_wgs84(tmp_path: Path) -> None:
+def test_write_geozarr_attrs_wgs84_extent(tmp_path: Path) -> None:
     store = _init_group(tmp_path)
+    bbox = [-13.5, 6.9, -10.1, 10.0]
     spec = GridSpec(shape=(3, 3), crs=4326, dtype=np.dtype("float32"), x_dim="x", y_dim="y")
 
-    write_geozarr_attrs(store, spec=spec, bbox=[-13.5, 6.9, -10.1, 10.0])
+    write_geozarr_attrs(store, spec=spec, bbox=bbox)
 
     attrs = dict(zarr.open_group(store, mode="r").attrs)
     assert attrs["proj:code"] == "EPSG:4326"
-    assert "proj4" not in attrs  # built-in → client resolves from the code
+    assert attrs["spatial:bbox"] == bbox
+    assert "proj4" not in attrs
     assert "bounds" not in attrs
 
 
@@ -74,20 +79,3 @@ def test_crs_to_proj4() -> None:
     proj4 = crs_to_proj4("EPSG:32633")
     assert proj4 is not None and "proj=utm" in proj4 and "zone=33" in proj4
     assert crs_to_proj4("not-a-crs") is None
-
-
-def test_write_geozarr_attrs_writes_bounds_even_if_proj4_unavailable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Native-CRS bounds are written for any projected store, even when proj4 derivation
-    fails — a direct-Zarr client still needs bounds to place the grid."""
-    monkeypatch.setattr("open_climate_service.streaming.store.crs_to_proj4", lambda _: None)
-    store = _init_group(tmp_path)
-    spec = GridSpec(shape=(3, 3), crs=32633, dtype=np.dtype("float32"), x_dim="x", y_dim="y")
-    bbox = [-74500.0, 6450500.0, 1119500.0, 7999500.0]
-
-    write_geozarr_attrs(store, spec=spec, bbox=bbox)
-
-    attrs = dict(zarr.open_group(store, mode="r").attrs)
-    assert attrs["bounds"] == bbox
-    assert "proj4" not in attrs
