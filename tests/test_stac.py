@@ -787,7 +787,9 @@ def test_build_collection_normalizes_crs84_alias_to_epsg4326(tmp_path: Path) -> 
     ],
 )
 def test_canonical_crs_code(code: str, expected: str) -> None:
-    assert stac_services._canonical_crs_code(code) == expected
+    from open_climate_service.shared.crs import canonical_crs_code
+
+    assert canonical_crs_code(code) == expected
 
 
 def test_build_collection_crs_render_hints_use_store_wkt(tmp_path: Path) -> None:

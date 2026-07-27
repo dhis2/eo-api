@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -20,6 +19,7 @@ from open_climate_service.data_manager.services.utils import get_time_dim, get_x
 from open_climate_service.data_registry.services import datasets as registry_datasets
 from open_climate_service.ingestions import services as ingestion_services
 from open_climate_service.ingestions.schemas import ArtifactFormat, ArtifactRecord
+from open_climate_service.shared.crs import canonical_crs_code, is_builtin_crs
 from open_climate_service.shared.time import (
     parse_period_string_to_datetime,
     period_type_to_iso_step,
@@ -212,25 +212,6 @@ def _build_collection_template(
     return template
 
 
-# CRSes that proj4js (the map client's reprojector) resolves from the authority code
-# alone; any other CRS needs a full definition surfaced in the collection metadata.
-# CRS84 aliases are normalized to EPSG:4326 before this check (see _canonical_crs_code).
-_BUILTIN_CRS_CODES = frozenset({"EPSG:4326", "EPSG:3857"})
-
-
-def _canonical_crs_code(code: str) -> str:
-    """Collapse CRS84 geographic aliases to the canonical ``EPSG:4326``.
-
-    ``proj:code`` is written as ``EPSG:<n>`` by the ingest path, but a CRS84 alias
-    (``CRS84``, ``OGC:CRS84``, or a CRS84 URI) could arrive from an external store.
-    proj4js — the map client's reprojector — only resolves ``EPSG:4326`` / ``EPSG:3857``
-    from a code, so mapping the alias to ``EPSG:4326`` here lets every downstream
-    consumer work with a single canonical code. Strips separators first so the short
-    OGC form ``CRS:84`` is matched as well as ``CRS84`` / ``OGC:CRS84`` / CRS84 URIs.
-    """
-    return "EPSG:4326" if re.sub(r"[^A-Z0-9]", "", code.upper()).endswith("CRS84") else code
-
-
 def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_crs: str) -> None:
     """Surface CRS render hints on the collection for projected (non-built-in) stores.
 
@@ -252,7 +233,7 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
       carbonplan/zarr-layer#61 lands (auto-resolving any EPSG code) this proj4 hint
       becomes unnecessary and only ``proj:wkt2`` need remain, for other STAC clients.
     """
-    if store_crs.upper() in _BUILTIN_CRS_CODES:
+    if is_builtin_crs(store_crs):
         return
     try:
         import warnings
@@ -301,7 +282,7 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
         # store data in WGS84 (e.g. CHIRPS3) should not inherit the instance UTM CRS.
         store_crs = ds.attrs.get("proj:code")
         if store_crs:
-            store_crs = _canonical_crs_code(store_crs)
+            store_crs = canonical_crs_code(store_crs)
             template.extra_fields["proj:code"] = store_crs
             _add_crs_render_hints(template=template, ds=ds, store_crs=store_crs)
         x_dimension, y_dimension = get_x_y_dims(ds)

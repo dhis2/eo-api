@@ -18,6 +18,7 @@ from typing import Any
 
 from geozarr_toolkit import create_geozarr_attrs
 
+from open_climate_service.shared.crs import crs_to_proj4, is_builtin_crs
 from open_climate_service.streaming.protocol import GridSpec
 
 logger = logging.getLogger(__name__)
@@ -113,8 +114,18 @@ def write_geozarr_attrs(store: Any, *, spec: GridSpec, bbox: list[float]) -> Non
         bbox=bbox,
         shape=(spec.shape[1], spec.shape[0]),
     )
-    attrs["proj:code"] = f"EPSG:{spec.crs}"
+    crs_code = f"EPSG:{spec.crs}"
+    attrs["proj:code"] = crs_code
     attrs["spatial:bbox"] = bbox
+    # Direct-Zarr clients (GeoLibre's native panel, GDAL/QGIS) that never see OCS's STAC
+    # need the CRS embedded in the store to place a projected grid. proj:code isn't enough
+    # for those clients — surface a proj4 string (the STAC counterpart is emitted in
+    # stac/services.py) plus the native-CRS bounds so they auto-reproject without input.
+    if not is_builtin_crs(crs_code):
+        proj4 = crs_to_proj4(crs_code)
+        if proj4:
+            attrs["proj4"] = proj4
+            attrs["bounds"] = list(bbox)
     attrs.update(spec.attrs)
 
     root = zarr.open_group(store, mode="r+")
