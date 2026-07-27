@@ -53,14 +53,41 @@ def test_write_geozarr_attrs_omits_proj4_for_wgs84(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "code,is_builtin",
-    [("EPSG:4326", True), ("EPSG:3857", True), ("CRS84", True), ("CRS:84", True), ("EPSG:32633", False)],
+    [
+        ("EPSG:4326", True),
+        ("EPSG:3857", True),
+        ("CRS84", True),
+        ("CRS:84", True),
+        ("EPSG:32633", False),
+        (4326, True),  # bare EPSG int normalizes to EPSG:4326
+        (32633, False),
+    ],
 )
-def test_is_builtin_crs(code: str, is_builtin: bool) -> None:
+def test_is_builtin_crs(code: str | int, is_builtin: bool) -> None:
     assert is_builtin_crs(code) is is_builtin
 
 
 def test_crs_to_proj4() -> None:
     assert crs_to_proj4("EPSG:4326") is None  # built-in → no proj4 hint
+    assert crs_to_proj4(4326) is None  # int form too
+    assert crs_to_proj4("OGC:CRS84") is None  # CRS84 alias is built-in despite to_epsg()==None
     proj4 = crs_to_proj4("EPSG:32633")
     assert proj4 is not None and "proj=utm" in proj4 and "zone=33" in proj4
     assert crs_to_proj4("not-a-crs") is None
+
+
+def test_write_geozarr_attrs_writes_bounds_even_if_proj4_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Native-CRS bounds are written for any projected store, even when proj4 derivation
+    fails — a direct-Zarr client still needs bounds to place the grid."""
+    monkeypatch.setattr("open_climate_service.streaming.store.crs_to_proj4", lambda _: None)
+    store = _init_group(tmp_path)
+    spec = GridSpec(shape=(3, 3), crs=32633, dtype=np.dtype("float32"), x_dim="x", y_dim="y")
+    bbox = [-74500.0, 6450500.0, 1119500.0, 7999500.0]
+
+    write_geozarr_attrs(store, spec=spec, bbox=bbox)
+
+    attrs = dict(zarr.open_group(store, mode="r").attrs)
+    assert attrs["bounds"] == bbox
+    assert "proj4" not in attrs

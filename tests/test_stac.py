@@ -818,9 +818,12 @@ def test_build_collection_normalizes_crs84_alias_to_epsg4326(tmp_path: Path) -> 
         ("urn:ogc:def:crs:OGC:1.3:CRS84", "EPSG:4326"),
         ("EPSG:4326", "EPSG:4326"),
         ("EPSG:32633", "EPSG:32633"),  # projected code passes through unchanged
+        (4326, "EPSG:4326"),  # bare EPSG int is prefixed so is_builtin_crs(4326) holds
+        ("4326", "EPSG:4326"),  # ...and the bare-number string form too
+        (32633, "EPSG:32633"),
     ],
 )
-def test_canonical_crs_code(code: str, expected: str) -> None:
+def test_canonical_crs_code(code: str | int, expected: str) -> None:
     from open_climate_service.shared.crs import canonical_crs_code
 
     assert canonical_crs_code(code) == expected

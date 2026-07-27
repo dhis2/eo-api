@@ -122,10 +122,12 @@ def write_geozarr_attrs(store: Any, *, spec: GridSpec, bbox: list[float]) -> Non
     # for those clients — surface a proj4 string (the STAC counterpart is emitted in
     # stac/services.py) plus the native-CRS bounds so they auto-reproject without input.
     if not is_builtin_crs(crs_code):
+        # The native-CRS bounds are useful on their own (a client needs them to place the
+        # grid), so write them for any projected store even if proj4 derivation fails.
+        attrs["bounds"] = list(bbox)
         proj4 = crs_to_proj4(crs_code)
         if proj4:
             attrs["proj4"] = proj4
-            attrs["bounds"] = list(bbox)
     attrs.update(spec.attrs)
 
     root = zarr.open_group(store, mode="r+")

@@ -28,9 +28,13 @@ def canonical_crs_code(code: str | int) -> str:
     URI) is geographic WGS84, but map reprojectors resolve only ``EPSG:4326`` /
     ``EPSG:3857`` from a code — so mapping the alias to ``EPSG:4326`` lets every consumer
     work with one canonical code. Separators are stripped before matching so ``CRS:84`` is
-    caught too; any non-CRS84 input is returned unchanged (as a string).
+    caught too. A bare EPSG number (the int ``4326`` or the string ``"4326"``) is prefixed
+    to ``EPSG:4326`` so downstream checks like :func:`is_builtin_crs` see a full code; any
+    other input is returned unchanged (as a string).
     """
-    s = str(code)
+    s = str(code).strip()
+    if s.isdigit():
+        return f"EPSG:{s}"
     return "EPSG:4326" if re.sub(r"[^A-Z0-9]", "", s.upper()).endswith("CRS84") else s
 
 
@@ -50,6 +54,11 @@ def crs_to_proj4(crs_input: object) -> str | None:
     it is only a client render hint; ``proj:code`` / WKT stay the canonical CRS.
     """
     import warnings
+
+    # A CRS84 alias passed as a code/int is built-in even though pyproj's to_epsg()
+    # may return None for it, so short-circuit on is_builtin_crs before parsing.
+    if isinstance(crs_input, (str, int)) and is_builtin_crs(crs_input):
+        return None
 
     try:
         from pyproj import CRS
