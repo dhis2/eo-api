@@ -221,7 +221,7 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
     fetch one at render time (an external epsg.io lookup). Publishing the definition
     in STAC removes that runtime dependency.
 
-    Two fields are emitted:
+    Three fields are emitted:
 
     * ``proj:wkt2`` — the STAC Projection-extension standard, lossless CRS
       representation. It is the same information GeoZarr already carries in the CF
@@ -232,6 +232,10 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
       zarr-layer only accepts a built-in ``crs`` code or a ``proj4`` string today; once
       carbonplan/zarr-layer#61 lands (auto-resolving any EPSG code) this proj4 hint
       becomes unnecessary and only ``proj:wkt2`` need remain, for other STAC clients.
+    * ``proj:bbox`` — the data extent in the store's native CRS. Without it, a client
+      reprojecting the Zarr must fetch the x/y coordinate arrays at render time to
+      derive bounds (zarr-layer's "proj4 provided without explicit bounds" warning);
+      publishing it lets the client pass explicit bounds and skip that round-trip.
     """
     if is_builtin_crs(store_crs):
         return
@@ -259,6 +263,19 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
             template.extra_fields["open_climate_service:proj4"] = proj4.strip()
     except Exception:
         logger.warning("Could not derive CRS render hints for '%s'", store_crs, exc_info=True)
+
+    # proj:bbox — the native-CRS extent. Prefer the value the ingest orchestrator
+    # writes to the store root (``attrs["bounds"]``); fall back to the x/y coordinate
+    # arrays (cell centres) for stores written before that attr existed.
+    try:
+        bbox = ds.attrs.get("bounds")
+        if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
+            x_dim, y_dim = get_x_y_dims(ds)
+            xs, ys = ds[x_dim].values, ds[y_dim].values
+            bbox = [xs.min(), ys.min(), xs.max(), ys.max()]
+        template.extra_fields["proj:bbox"] = [float(v) for v in bbox]
+    except Exception:
+        logger.warning("Could not derive proj:bbox for '%s'", store_crs, exc_info=True)
 
 
 def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.Collection) -> dict[str, Any]:
