@@ -8,6 +8,8 @@ hints in ``stac/services.py``.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import zarr
@@ -17,13 +19,13 @@ from open_climate_service.streaming.protocol import GridSpec
 from open_climate_service.streaming.store import write_geozarr_attrs
 
 
-def _init_group(path) -> str:
+def _init_group(path: Path) -> str:
     store = str(path / "s.zarr")
     zarr.open_group(store, mode="w", zarr_format=3)
     return store
 
 
-def test_write_geozarr_attrs_adds_proj4_and_bounds_for_projected(tmp_path) -> None:
+def test_write_geozarr_attrs_adds_proj4_and_bounds_for_projected(tmp_path: Path) -> None:
     store = _init_group(tmp_path)
     spec = GridSpec(shape=(3, 3), crs=32633, dtype=np.dtype("float32"), x_dim="x", y_dim="y")
     bbox = [-74500.0, 6450500.0, 1119500.0, 7999500.0]  # native UTM33 metres
@@ -32,11 +34,12 @@ def test_write_geozarr_attrs_adds_proj4_and_bounds_for_projected(tmp_path) -> No
 
     attrs = dict(zarr.open_group(store, mode="r").attrs)
     assert attrs["proj:code"] == "EPSG:32633"
-    assert "proj=utm" in attrs["proj4"] and "zone=33" in attrs["proj4"]
+    proj4 = str(attrs["proj4"])
+    assert "proj=utm" in proj4 and "zone=33" in proj4
     assert attrs["bounds"] == bbox  # native-CRS [xMin, yMin, xMax, yMax] for the client
 
 
-def test_write_geozarr_attrs_omits_proj4_for_wgs84(tmp_path) -> None:
+def test_write_geozarr_attrs_omits_proj4_for_wgs84(tmp_path: Path) -> None:
     store = _init_group(tmp_path)
     spec = GridSpec(shape=(3, 3), crs=4326, dtype=np.dtype("float32"), x_dim="x", y_dim="y")
 
