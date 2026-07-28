@@ -144,7 +144,9 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
         collection_payload,
         resolve_iso_period_step(source_dataset) or period_type_to_iso_step(source_dataset.get("period_type")),
     )
-    _override_spatial_extent_from_artifact(collection_payload, artifact)
+    # Spatial extent comes from the live store (set in _build_collection_with_xstac),
+    # not the artifact coverage — see _wgs84_extent_from_store. Temporal still tracks the
+    # artifact's materialized coverage.
     _override_temporal_extent_from_artifact(collection_payload, artifact)
     _sanitize_variable_attrs(collection_payload)
     return collection_payload
@@ -278,6 +280,29 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
         logger.warning("Could not derive proj:bbox for '%s'", store_crs, exc_info=True)
 
 
+def _wgs84_extent_from_store(ds: xr.Dataset, store_crs: str, x_dim: str, y_dim: str) -> list[float] | None:
+    """Return the store's spatial extent as WGS84 ``[west, south, east, north]``.
+
+    STAC collections must report their spatial extent in WGS84. Deriving it live from the
+    published store (the same coordinates ``cube:dimensions`` reads) keeps the two
+    consistent and avoids the cached ``coverage`` record, which can go stale or hold a
+    native-CRS (metre) bbox for projected stores.
+    """
+    try:
+        xmin, xmax = float(ds[x_dim].min()), float(ds[x_dim].max())
+        ymin, ymax = float(ds[y_dim].min()), float(ds[y_dim].max())
+        if canonical_crs_code(store_crs) == "EPSG:4326":
+            return [xmin, ymin, xmax, ymax]
+        from pyproj import Transformer
+
+        transformer = Transformer.from_crs(store_crs, "EPSG:4326", always_xy=True)
+        west, south, east, north = transformer.transform_bounds(xmin, ymin, xmax, ymax)
+        return [west, south, east, north]
+    except Exception:
+        logger.warning("Could not derive WGS84 extent from store for '%s'", store_crs, exc_info=True)
+        return None
+
+
 def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.Collection) -> dict[str, Any]:
     cached_payload = _xstac_collection_cache.get(artifact.artifact_id)
     if cached_payload is not None:
@@ -340,6 +365,11 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
         ordinal_dims = _build_ordinal_dimensions(ds, x_dimension, y_dimension, time_dimension)
         if ordinal_dims:
             payload.setdefault("cube:dimensions", {}).update(ordinal_dims)
+        # WGS84 spatial extent from the live store — consistent with cube:dimensions and
+        # immune to a stale/native-CRS cached coverage record (see _wgs84_extent_from_store).
+        extent_bbox = _wgs84_extent_from_store(ds, store_crs or "EPSG:4326", x_dimension, y_dimension)
+        if extent_bbox is not None:
+            payload.setdefault("extent", {}).setdefault("spatial", {})["bbox"] = [extent_bbox]
         _cache_xstac_collection_payload(artifact.artifact_id, payload)
         return deepcopy(payload)
     except HTTPException:
@@ -528,11 +558,6 @@ def _round_spatial_steps(collection: dict[str, Any]) -> None:
         if isinstance(step, int | float):
             value["step"] = round(float(step), SPATIAL_STEP_DECIMALS)
             dimensions[key] = value
-
-
-def _override_spatial_extent_from_artifact(collection: dict[str, Any], artifact: ArtifactRecord) -> None:
-    spatial = artifact.coverage.spatial_wgs84 or artifact.coverage.spatial
-    collection["extent"]["spatial"]["bbox"] = [[spatial.xmin, spatial.ymin, spatial.xmax, spatial.ymax]]
 
 
 def _override_temporal_extent_from_artifact(collection: dict[str, Any], artifact: ArtifactRecord) -> None:

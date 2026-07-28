@@ -712,6 +712,16 @@ def test_build_collection_emits_crs_render_hints_for_projected_store(tmp_path: P
     assert payload["proj:wkt2"].startswith("PROJCRS")  # WKT2, not WKT1 (PROJCS)
     # proj:bbox derived from the x/y coordinate arrays (no spatial:bbox on this store)
     assert payload["proj:bbox"] == [100000.0, 6998000.0, 102000.0, 7000000.0]
+    # extent.spatial.bbox is reprojected to WGS84 from the store — not the native metres
+    from pyproj import Transformer
+
+    expected_wgs84 = list(
+        Transformer.from_crs("EPSG:32633", "EPSG:4326", always_xy=True).transform_bounds(
+            100000.0, 6998000.0, 102000.0, 7000000.0
+        )
+    )
+    assert payload["extent"]["spatial"]["bbox"][0] == pytest.approx(expected_wgs84)
+    assert payload["extent"]["spatial"]["bbox"][0] != [100000.0, 6998000.0, 102000.0, 7000000.0]
 
 
 def test_build_collection_omits_crs_render_hints_for_wgs84(tmp_path: Path) -> None:
@@ -744,6 +754,37 @@ def test_build_collection_omits_crs_render_hints_for_wgs84(tmp_path: Path) -> No
     assert "open_climate_service:proj4" not in payload
     assert "proj:wkt2" not in payload
     assert "proj:bbox" not in payload
+
+
+def test_build_collection_spatial_extent_derives_from_store_not_coverage(tmp_path: Path) -> None:
+    """The collection's spatial extent is read live from the store, so a stale or degenerate
+    coverage/template extent (the worldpop/chirps bug) never leaks into STAC."""
+    zarr_path = tmp_path / "worldpop_population_yearly.zarr"
+    ds = xr.Dataset(
+        {"pop": (["time", "latitude", "longitude"], np.ones((1, 3, 3), dtype="float32"))},
+        coords={
+            "time": pd.date_range("2020-01-01", periods=1, freq="YS"),
+            "latitude": [60.0, 59.0, 58.0],
+            "longitude": [4.0, 5.0, 6.0],
+        },
+        attrs={"proj:code": "EPSG:4326"},
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
+
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ZARR, path=str(zarr_path))
+    template = pystac.Collection(
+        id="worldpop_population_yearly",
+        description="test",
+        extent=pystac.Extent(
+            # A degenerate/stale coverage bbox — must NOT reach the payload.
+            spatial=pystac.SpatialExtent([[10.5113, 0.0005, 10.5115, 0.0006]]),
+            temporal=pystac.TemporalExtent([[datetime(2020, 1, 1, tzinfo=UTC), datetime(2020, 1, 1, tzinfo=UTC)]]),
+        ),
+    )
+
+    payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
+
+    assert payload["extent"]["spatial"]["bbox"] == [[4.0, 58.0, 6.0, 60.0]]
 
 
 def test_build_collection_proj_bbox_prefers_store_spatial_bbox_attr(tmp_path: Path) -> None:
