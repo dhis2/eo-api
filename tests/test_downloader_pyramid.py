@@ -19,7 +19,9 @@ pytest.importorskip("rioxarray")
 zarr = pytest.importorskip("zarr")
 
 from open_climate_service.data_manager.services.downloader import (  # noqa: E402
+    _coarsen_native,
     needs_pyramid,
+    resampling_method_from_template,
     write_to_icechunk_store,
 )
 
@@ -62,3 +64,75 @@ def test_write_to_icechunk_store_builds_pyramid(tmp_path: Path) -> None:
     with xr.open_zarr(store, group="0", consolidated=False, zarr_format=3) as lvl0:
         assert "hotspot" in lvl0.data_vars
         assert lvl0.sizes["y"] == 2100 and lvl0.sizes["x"] == 2100
+
+
+def test_resampling_method_from_template() -> None:
+    assert resampling_method_from_template(None) == "mean"
+    assert resampling_method_from_template({}) == "mean"
+    assert resampling_method_from_template({"display": {"colormap": "reds"}}) == "mean"
+    assert resampling_method_from_template({"display": {"resampling": "mode"}}) == "mode"
+    assert resampling_method_from_template({"display": {"resampling": "MAX"}}) == "max"
+    # Unrecognised values fall back to mean rather than being passed downstream.
+    assert resampling_method_from_template({"display": {"resampling": "bilinear"}}) == "mean"
+
+
+def _categorical_block_da():
+    # 4x4 class-code grid. Each 2x2 block has a clear majority that differs from its
+    # top-left cell, so mode and nearest give distinguishable results (and mean would
+    # invent codes that don't exist, e.g. mean(99,10,10,10)=32.25).
+    data = np.array(
+        [
+            [99, 10, 20, 20],
+            [10, 10, 20, 30],
+            [30, 30, 40, 41],
+            [30, 31, 40, 40],
+        ],
+        dtype="uint8",
+    )
+    return xr.DataArray(
+        data,
+        dims=("y", "x"),
+        coords={"y": np.arange(4.0), "x": np.arange(4.0)},
+    )
+
+
+def test_coarsen_native_mode_picks_block_majority() -> None:
+    out = _coarsen_native(_categorical_block_da(), "x", "y", 2, "mode").transpose("y", "x")
+    np.testing.assert_array_equal(out.values, np.array([[10, 20], [30, 40]], dtype="uint8"))
+
+
+def test_coarsen_native_nearest_takes_top_left() -> None:
+    out = _coarsen_native(_categorical_block_da(), "x", "y", 2, "nearest").transpose("y", "x")
+    # Top-left cell of each 2x2 block: 99/20/30/40.
+    np.testing.assert_array_equal(out.values, np.array([[99, 20], [30, 40]], dtype="uint8"))
+
+
+def _categorical_pyramid_cube():
+    # Pyramid-sized grid of a few land-cover-style class codes (no 0 background).
+    ny = nx = 2100
+    codes = np.array([10, 20, 30, 40, 50], dtype="uint8")
+    rng = np.random.default_rng(0)
+    data = codes[rng.integers(0, len(codes), size=(ny, nx))]
+    return xr.Dataset(
+        {"landcover": (("y", "x"), data)},
+        coords={"y": np.linspace(-2.9, -1.0, ny), "x": np.linspace(28.8, 30.9, nx)},
+    ), set(int(c) for c in codes)
+
+
+def test_write_to_icechunk_store_mode_keeps_class_codes(tmp_path: Path) -> None:
+    import icechunk
+
+    ds, codes = _categorical_pyramid_cube()
+    assert needs_pyramid(ds)
+
+    store_path = tmp_path / "landcover.icechunk"
+    write_to_icechunk_store(ds, store_path, t_dim=None, crs="EPSG:4326", pyramid_method="mode")
+
+    repo = icechunk.Repository.open(icechunk.local_filesystem_storage(str(store_path)))
+    store = repo.readonly_session("main").store
+
+    # A coarsened level must contain only real class codes — never an averaged value
+    # (which is exactly what the previous hardcoded "mean" produced for categorical data).
+    with xr.open_zarr(store, group="1", consolidated=False, zarr_format=3) as lvl1:
+        values = np.unique(lvl1["landcover"].values)
+    assert set(int(v) for v in values) <= codes
