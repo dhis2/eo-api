@@ -93,7 +93,7 @@ def _mode_reduce(values: Any, axis: Any = None, **_kwargs: Any) -> Any:
     coarsened cell keeps a real class code instead of an average. NaNs are ignored.
     """
     import numpy as np
-    from scipy import stats
+    from scipy import stats  # type: ignore[import-untyped]
 
     if axis is None:
         axes: tuple[int, ...] = tuple(range(values.ndim))
@@ -117,7 +117,7 @@ def _coarsen_native(da: xr.DataArray, x_dim: str, y_dim: str, factor: int, metho
     repeatedly halving, so the output drops straight into the level's existing array.
     """
     window = {x_dim: factor, y_dim: factor}
-    coarsen = da.coarsen(window, boundary="trim")  # type: ignore[arg-type]
+    coarsen = da.coarsen(window, boundary="trim")
     if method == "nearest":
         # Decimation: keep the top-left cell of each window (a real, unaltered value).
         constructed = coarsen.construct({x_dim: (x_dim, "_ocs_wx"), y_dim: (y_dim, "_ocs_wy")})
