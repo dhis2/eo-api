@@ -20,6 +20,7 @@ zarr = pytest.importorskip("zarr")
 
 from open_climate_service.data_manager.services.downloader import (  # noqa: E402
     _coarsen_native,
+    _normalize_resampling_method,
     needs_pyramid,
     resampling_method_from_template,
     write_to_icechunk_store,
@@ -76,6 +77,17 @@ def test_resampling_method_from_template() -> None:
     assert resampling_method_from_template({"ingestion": {"resampling": "bilinear"}}) == "mean"
     # A display-block value is ignored — resampling is an ingestion concern.
     assert resampling_method_from_template({"display": {"resampling": "mode"}}) == "mean"
+
+
+def test_normalize_resampling_method() -> None:
+    # Case/whitespace are normalized, and unknown or missing values fall back to mean —
+    # so a direct write_to_icechunk_store(pyramid_method=...) caller can't smuggle an
+    # invalid CoarseningMethod through to topozarr.
+    assert _normalize_resampling_method("MAX") == "max"
+    assert _normalize_resampling_method("  mean ") == "mean"
+    assert _normalize_resampling_method("Mode") == "mode"
+    assert _normalize_resampling_method(None) == "mean"
+    assert _normalize_resampling_method("bilinear") == "mean"
 
 
 def _categorical_block_da():

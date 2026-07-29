@@ -59,6 +59,27 @@ _RESAMPLING_METHODS = _COMPOSABLE_METHODS | _NATIVE_RESAMPLE_METHODS
 _DEFAULT_RESAMPLING = "mean"
 
 
+def _normalize_resampling_method(raw: object) -> str:
+    """Trim/lower-case a resampling method and validate it against the supported set.
+
+    Unknown or missing values fall back to ``mean`` (the safe default for continuous
+    data) with a warning, so neither a mistyped template value nor a stray direct call
+    reaches topozarr as an invalid ``CoarseningMethod``.
+    """
+    if raw is None:
+        return _DEFAULT_RESAMPLING
+    method = str(raw).strip().lower()
+    if method not in _RESAMPLING_METHODS:
+        logger.warning(
+            "Unknown resampling method %r (expected one of %s); using %r",
+            raw,
+            sorted(_RESAMPLING_METHODS),
+            _DEFAULT_RESAMPLING,
+        )
+        return _DEFAULT_RESAMPLING
+    return method
+
+
 def resampling_method_from_template(template: dict[str, Any] | None) -> str:
     """Pyramid coarsening method from a dataset template's ``ingestion.resampling`` field.
 
@@ -72,18 +93,7 @@ def resampling_method_from_template(template: dict[str, Any] | None) -> str:
     """
     ingestion = (template or {}).get("ingestion")
     raw = ingestion.get("resampling") if isinstance(ingestion, dict) else None
-    if raw is None:
-        return _DEFAULT_RESAMPLING
-    method = str(raw).strip().lower()
-    if method not in _RESAMPLING_METHODS:
-        logger.warning(
-            "Unknown ingestion.resampling %r (expected one of %s); using %r",
-            raw,
-            sorted(_RESAMPLING_METHODS),
-            _DEFAULT_RESAMPLING,
-        )
-        return _DEFAULT_RESAMPLING
-    return method
+    return _normalize_resampling_method(raw)
 
 
 def _mode_reduce(values: Any, axis: Any = None, **_kwargs: Any) -> Any:
@@ -334,6 +344,9 @@ def write_to_icechunk_store(
 
         # topozarr.create_pyramid requires fully materialised numpy arrays.
         ds = ds.load()
+        # Validate/normalize here too, so a direct caller passing e.g. "MAX" or a mistyped
+        # value never reaches topozarr as an invalid CoarseningMethod (falls back to mean).
+        pyramid_method = _normalize_resampling_method(pyramid_method)
         # topozarr only offers composable coarsening (mean/max/min/sum). For categorical
         # methods (mode/nearest) it writes valid structure with a placeholder here, then we
         # overwrite the coarsened levels from native below (see #293).
