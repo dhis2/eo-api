@@ -180,6 +180,16 @@ Multiple templates can share the same plugin class and differ only in `params`:
       variable: total_precipitation
 ```
 
+#### Pyramid resampling for categorical layers
+
+Layers larger than ~2048×2048 are stored as a multiscale pyramid so the map stays fast when zoomed out. Coarser levels are aggregated from the full-resolution data, and `ingestion.resampling` controls how:
+
+- **Continuous data** (temperature, precipitation, NDVI, …) — leave the default `mean`.
+- **Binary masks** (0/1 presence) — use `max` ("present anywhere in the block"). Averaging turns a mask into meaningless fractions.
+- **Multi-class categorical** (land-cover class codes, etc.) — use `mode` (majority class). `mean` would average class codes into a *different, non-existent* class (e.g. `mean(10, 80) = 45`).
+
+`mean`/`max`/`min`/`sum` are computed by [topozarr](https://github.com/carbonplan/topozarr); `mode` and `nearest` are resampled from the native resolution by Open Climate Service, because they can't be built level-from-level (a first-class `mode`/`nearest` in topozarr is requested in [carbonplan/topozarr#26](https://github.com/carbonplan/topozarr/issues/26)).
+
 **Spatial and temporal extents** — declares what the source dataset covers. Used to validate ingest requests before hitting the provider:
 
 ```yaml
@@ -213,16 +223,6 @@ them requires re-ingesting the dataset:
 | `display.colormap` | No       | Colormap name for map rendering (e.g. `blues`, `rdbu_r`) |
 | `display.range`    | No       | `[min, max]` display range for the colormap              |
 | `display.nodata`   | No       | No-data / fill value                                     |
-
-### Pyramid resampling for categorical layers
-
-Layers larger than ~2048×2048 are stored as a multiscale pyramid so the map stays fast when zoomed out. Coarser levels are aggregated from the full-resolution data, and the method matters:
-
-- **Continuous data** (temperature, precipitation, NDVI, …) — leave the default `mean`.
-- **Binary masks** (0/1 presence) — use `max` ("present anywhere in the block"). Averaging turns a mask into meaningless fractions.
-- **Multi-class categorical** (land-cover class codes, etc.) — use `mode` (majority class). `mean` would average class codes into a *different, non-existent* class (e.g. `mean(10, 80) = 45`).
-
-`mean`/`max`/`min`/`sum` are computed by [topozarr](https://github.com/carbonplan/topozarr); `mode` and `nearest` are resampled from the native resolution by Open Climate Service, because they can't be built level-from-level (a first-class `mode`/`nearest` in topozarr is requested in [carbonplan/topozarr#26](https://github.com/carbonplan/topozarr/issues/26)).
 
 ## Step 3: Point the instance at your plugins directory
 
