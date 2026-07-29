@@ -60,21 +60,24 @@ _DEFAULT_RESAMPLING = "mean"
 
 
 def resampling_method_from_template(template: dict[str, Any] | None) -> str:
-    """Pyramid coarsening method from a dataset template's ``display.resampling`` field.
+    """Pyramid coarsening method from a dataset template's ``ingestion.resampling`` field.
+
+    It lives under ``ingestion`` rather than ``display`` because it changes the *stored*
+    pyramid data (how coarse levels are aggregated), not how the layer is rendered.
 
     Defaults to ``mean`` — correct for continuous data (temperature, precipitation, …).
     Categorical layers should declare ``mode`` (multi-class, e.g. land-cover class codes)
     or ``max`` (binary presence masks); ``mean`` averages class codes into meaningless
     values at coarse zoom. An unrecognised value falls back to ``mean`` with a warning.
     """
-    display = (template or {}).get("display")
-    raw = display.get("resampling") if isinstance(display, dict) else None
+    ingestion = (template or {}).get("ingestion")
+    raw = ingestion.get("resampling") if isinstance(ingestion, dict) else None
     if raw is None:
         return _DEFAULT_RESAMPLING
     method = str(raw).strip().lower()
     if method not in _RESAMPLING_METHODS:
         logger.warning(
-            "Unknown display.resampling %r (expected one of %s); using %r",
+            "Unknown ingestion.resampling %r (expected one of %s); using %r",
             raw,
             sorted(_RESAMPLING_METHODS),
             _DEFAULT_RESAMPLING,

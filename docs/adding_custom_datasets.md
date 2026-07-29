@@ -162,6 +162,7 @@ from the dimension's metadata, so there's nothing extra to configure.
 | ------------------ | -------- | ------------------------------------------------------------------------------------------------ |
 | `ingestion.plugin` | Yes      | Dotted path to the streaming plugin class                                                        |
 | `ingestion.params` | No       | Extra keyword arguments forwarded to `fetch_period` as `**params`, and to the plugin constructor |
+| `ingestion.resampling` | No   | Pyramid coarsening for large layers: `mean` (default; continuous data), `max`/`min`/`sum`, or `mode`/`nearest` for categorical data — see below |
 
 Multiple templates can share the same plugin class and differ only in `params`:
 
@@ -212,7 +213,6 @@ them requires re-ingesting the dataset:
 | `display.colormap` | No       | Colormap name for map rendering (e.g. `blues`, `rdbu_r`) |
 | `display.range`    | No       | `[min, max]` display range for the colormap              |
 | `display.nodata`   | No       | No-data / fill value                                     |
-| `display.resampling` | No     | Pyramid coarsening for large layers: `mean` (default; continuous data), `max`/`min`/`sum`, or `mode`/`nearest` for categorical data — see below |
 
 ### Pyramid resampling for categorical layers
 

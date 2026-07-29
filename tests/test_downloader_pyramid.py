@@ -69,11 +69,13 @@ def test_write_to_icechunk_store_builds_pyramid(tmp_path: Path) -> None:
 def test_resampling_method_from_template() -> None:
     assert resampling_method_from_template(None) == "mean"
     assert resampling_method_from_template({}) == "mean"
-    assert resampling_method_from_template({"display": {"colormap": "reds"}}) == "mean"
-    assert resampling_method_from_template({"display": {"resampling": "mode"}}) == "mode"
-    assert resampling_method_from_template({"display": {"resampling": "MAX"}}) == "max"
+    assert resampling_method_from_template({"ingestion": {"plugin": "x"}}) == "mean"
+    assert resampling_method_from_template({"ingestion": {"resampling": "mode"}}) == "mode"
+    assert resampling_method_from_template({"ingestion": {"resampling": "MAX"}}) == "max"
     # Unrecognised values fall back to mean rather than being passed downstream.
-    assert resampling_method_from_template({"display": {"resampling": "bilinear"}}) == "mean"
+    assert resampling_method_from_template({"ingestion": {"resampling": "bilinear"}}) == "mean"
+    # A display-block value is ignored — resampling is an ingestion concern.
+    assert resampling_method_from_template({"display": {"resampling": "mode"}}) == "mean"
 
 
 def _categorical_block_da():
