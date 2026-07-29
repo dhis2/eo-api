@@ -677,3 +677,233 @@ def test_build_collection_with_xstac_reads_normalised_zarr_coordinates(tmp_path:
     assert cube_dims["longitude"]["axis"] == "x"
     assert cube_dims["latitude"]["axis"] == "y"
     assert cube_dims["time"]["type"] == "temporal"
+
+
+def test_build_collection_emits_crs_render_hints_for_projected_store(tmp_path: Path) -> None:
+    """Projected (non-built-in) stores get proj:wkt2 + open_climate_service:proj4 so map
+    clients can reproject without a runtime epsg.io lookup."""
+    zarr_path = tmp_path / "senorge_temperature_daily.zarr"
+    ds = xr.Dataset(
+        {"tg": (["time", "y", "x"], np.ones((2, 3, 3), dtype="float32"))},
+        coords={
+            "time": pd.date_range("2026-01-01", periods=2, freq="D"),
+            "y": [7000000.0, 6999000.0, 6998000.0],
+            "x": [100000.0, 101000.0, 102000.0],
+        },
+        attrs={"proj:code": "EPSG:32633"},
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
+
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ZARR, path=str(zarr_path))
+    template = pystac.Collection(
+        id="senorge_temperature_daily",
+        description="test",
+        extent=pystac.Extent(
+            spatial=pystac.SpatialExtent([[100000.0, 6998000.0, 102000.0, 7000000.0]]),
+            temporal=pystac.TemporalExtent([[datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)]]),
+        ),
+    )
+
+    payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
+
+    assert payload["proj:code"] == "EPSG:32633"
+    proj4 = payload["open_climate_service:proj4"]
+    assert "proj=utm" in proj4 and "zone=33" in proj4
+    assert payload["proj:wkt2"].startswith("PROJCRS")  # WKT2, not WKT1 (PROJCS)
+    # proj:projjson — same CRS as a PROJJSON object (EPSG:32633 = UTM zone 33N)
+    assert payload["proj:projjson"]["type"] == "ProjectedCRS"
+    assert payload["proj:projjson"]["id"] == {"authority": "EPSG", "code": 32633}
+    # proj:bbox derived from the x/y coordinate arrays (no spatial:bbox on this store)
+    assert payload["proj:bbox"] == [100000.0, 6998000.0, 102000.0, 7000000.0]
+    # extent.spatial.bbox is reprojected to WGS84 from the store — not the native metres
+    from pyproj import Transformer
+
+    expected_wgs84 = list(
+        Transformer.from_crs("EPSG:32633", "EPSG:4326", always_xy=True).transform_bounds(
+            100000.0, 6998000.0, 102000.0, 7000000.0
+        )
+    )
+    assert payload["extent"]["spatial"]["bbox"][0] == pytest.approx(expected_wgs84)
+    assert payload["extent"]["spatial"]["bbox"][0] != [100000.0, 6998000.0, 102000.0, 7000000.0]
+
+
+def test_build_collection_omits_crs_render_hints_for_wgs84(tmp_path: Path) -> None:
+    """Built-in CRSes (EPSG:4326) resolve on the client from their code, so no hint is emitted."""
+    zarr_path = tmp_path / "era5land_temperature_daily.zarr"
+    ds = xr.Dataset(
+        {"t2m": (["time", "latitude", "longitude"], np.ones((2, 3, 3), dtype="float32"))},
+        coords={
+            "time": pd.date_range("2026-01-01", periods=2, freq="D"),
+            "latitude": [4.0, 3.0, 2.0],
+            "longitude": [1.0, 2.0, 3.0],
+        },
+        attrs={"proj:code": "EPSG:4326"},
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
+
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ZARR, path=str(zarr_path))
+    template = pystac.Collection(
+        id="era5land_temperature_daily",
+        description="test",
+        extent=pystac.Extent(
+            spatial=pystac.SpatialExtent([[1.0, 2.0, 3.0, 4.0]]),
+            temporal=pystac.TemporalExtent([[datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)]]),
+        ),
+    )
+
+    payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
+
+    assert payload["proj:code"] == "EPSG:4326"
+    assert "open_climate_service:proj4" not in payload
+    assert "proj:wkt2" not in payload
+    assert "proj:bbox" not in payload
+
+
+def test_build_collection_spatial_extent_derives_from_store_not_coverage(tmp_path: Path) -> None:
+    """The collection's spatial extent is read live from the store, so a stale or degenerate
+    coverage/template extent (the worldpop/chirps bug) never leaks into STAC."""
+    zarr_path = tmp_path / "worldpop_population_yearly.zarr"
+    ds = xr.Dataset(
+        {"pop": (["time", "latitude", "longitude"], np.ones((1, 3, 3), dtype="float32"))},
+        coords={
+            "time": pd.date_range("2020-01-01", periods=1, freq="YS"),
+            "latitude": [60.0, 59.0, 58.0],
+            "longitude": [4.0, 5.0, 6.0],
+        },
+        attrs={"proj:code": "EPSG:4326"},
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
+
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ZARR, path=str(zarr_path))
+    template = pystac.Collection(
+        id="worldpop_population_yearly",
+        description="test",
+        extent=pystac.Extent(
+            # A degenerate/stale coverage bbox — must NOT reach the payload.
+            spatial=pystac.SpatialExtent([[10.5113, 0.0005, 10.5115, 0.0006]]),
+            temporal=pystac.TemporalExtent([[datetime(2020, 1, 1, tzinfo=UTC), datetime(2020, 1, 1, tzinfo=UTC)]]),
+        ),
+    )
+
+    payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
+
+    assert payload["extent"]["spatial"]["bbox"] == [[4.0, 58.0, 6.0, 60.0]]
+
+
+def test_build_collection_proj_bbox_prefers_store_spatial_bbox_attr(tmp_path: Path) -> None:
+    """When the store root carries the GeoZarr ``spatial:bbox`` (native-CRS extent),
+    proj:bbox uses it verbatim rather than re-deriving from coords."""
+    zarr_path = tmp_path / "senorge_temperature_daily.zarr"
+    ds = xr.Dataset(
+        {"tg": (["time", "y", "x"], np.ones((2, 3, 3), dtype="float32"))},
+        coords={
+            "time": pd.date_range("2026-01-01", periods=2, freq="D"),
+            "y": [7000000.0, 6999000.0, 6998000.0],
+            "x": [100000.0, 101000.0, 102000.0],
+        },
+        # Half-pixel-expanded edges differ from the coord centres above.
+        attrs={"proj:code": "EPSG:32633", "spatial:bbox": [99500.0, 6997500.0, 102500.0, 7000500.0]},
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
+
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ZARR, path=str(zarr_path))
+    template = pystac.Collection(
+        id="senorge_temperature_daily",
+        description="test",
+        extent=pystac.Extent(
+            spatial=pystac.SpatialExtent([[100000.0, 6998000.0, 102000.0, 7000000.0]]),
+            temporal=pystac.TemporalExtent([[datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)]]),
+        ),
+    )
+
+    payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
+
+    assert payload["proj:bbox"] == [99500.0, 6997500.0, 102500.0, 7000500.0]
+
+
+def test_build_collection_normalizes_crs84_alias_to_epsg4326(tmp_path: Path) -> None:
+    """A CRS84 alias in the store is emitted as canonical EPSG:4326 (and treated as built-in),
+    so the map client never receives an alias ZarrLayer can't resolve."""
+    zarr_path = tmp_path / "chirps3_precipitation_daily.zarr"
+    ds = xr.Dataset(
+        {"precip": (["time", "latitude", "longitude"], np.ones((2, 3, 3), dtype="float32"))},
+        coords={
+            "time": pd.date_range("2026-01-01", periods=2, freq="D"),
+            "latitude": [4.0, 3.0, 2.0],
+            "longitude": [1.0, 2.0, 3.0],
+        },
+        attrs={"proj:code": "OGC:CRS84"},
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
+
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ZARR, path=str(zarr_path))
+    template = pystac.Collection(
+        id="chirps3_precipitation_daily",
+        description="test",
+        extent=pystac.Extent(
+            spatial=pystac.SpatialExtent([[1.0, 2.0, 3.0, 4.0]]),
+            temporal=pystac.TemporalExtent([[datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)]]),
+        ),
+    )
+
+    payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
+
+    assert payload["proj:code"] == "EPSG:4326"  # normalized from OGC:CRS84
+    assert "open_climate_service:proj4" not in payload  # built-in → no hint
+    assert "proj:wkt2" not in payload
+
+
+@pytest.mark.parametrize(
+    "code,expected",
+    [
+        ("CRS84", "EPSG:4326"),
+        ("OGC:CRS84", "EPSG:4326"),
+        ("CRS:84", "EPSG:4326"),  # short OGC form (separators stripped)
+        ("urn:ogc:def:crs:OGC:1.3:CRS84", "EPSG:4326"),
+        ("EPSG:4326", "EPSG:4326"),
+        ("EPSG:32633", "EPSG:32633"),  # projected code passes through unchanged
+        (4326, "EPSG:4326"),  # bare EPSG int is prefixed so is_builtin_crs(4326) holds
+        ("4326", "EPSG:4326"),  # ...and the bare-number string form too
+        (32633, "EPSG:32633"),
+    ],
+)
+def test_canonical_crs_code(code: str | int, expected: str) -> None:
+    from open_climate_service.shared.crs import canonical_crs_code
+
+    assert canonical_crs_code(code) == expected
+
+
+def test_build_collection_crs_render_hints_use_store_wkt(tmp_path: Path) -> None:
+    """When the store carries a CF grid-mapping WKT (spatial_ref/crs_wkt), the hints derive
+    from it (the CRS.from_wkt branch), and proj:wkt2 is emitted as WKT2."""
+    from pyproj import CRS as PyCRS
+
+    wkt = PyCRS.from_epsg(32633).to_wkt(version="WKT2_2019")
+    zarr_path = tmp_path / "senorge_temperature_daily.zarr"
+    ds = xr.Dataset(
+        {"tg": (["time", "y", "x"], np.ones((2, 3, 3), dtype="float32"))},
+        coords={
+            "time": pd.date_range("2026-01-01", periods=2, freq="D"),
+            "y": [7000000.0, 6999000.0, 6998000.0],
+            "x": [100000.0, 101000.0, 102000.0],
+            "spatial_ref": ((), 0, {"crs_wkt": wkt, "spatial_ref": wkt}),
+        },
+        attrs={"proj:code": "EPSG:32633"},
+    )
+    ds.to_zarr(str(zarr_path), mode="w", consolidated=True)
+
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ZARR, path=str(zarr_path))
+    template = pystac.Collection(
+        id="senorge_temperature_daily",
+        description="test",
+        extent=pystac.Extent(
+            spatial=pystac.SpatialExtent([[100000.0, 6998000.0, 102000.0, 7000000.0]]),
+            temporal=pystac.TemporalExtent([[datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 2, tzinfo=UTC)]]),
+        ),
+    )
+
+    payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
+
+    proj4 = payload["open_climate_service:proj4"]
+    assert "proj=utm" in proj4 and "zone=33" in proj4
+    assert payload["proj:wkt2"].startswith("PROJCRS")

@@ -6,7 +6,7 @@ Adjust BASE_URL if the API is not running on the default local address.
 
 from open_climate_service import ClimateService
 
-BASE_URL = "http://127.0.0.1:8000"
+BASE_URL = "http://127.0.0.1:9000"
 
 
 def main() -> None:

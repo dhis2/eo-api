@@ -235,7 +235,7 @@ Since `plugins_dir` is added to `sys.path`, the plugin class at `datasets.enacts
 Once the API is running with `CLIMATE_SERVICE_CONFIG` pointing to your updated config:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/ingestions \
+curl -s -X POST http://127.0.0.1:9000/ingestions \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "enacts_rainfall_daily",
@@ -248,5 +248,5 @@ curl -s -X POST http://127.0.0.1:8000/ingestions \
 Verify it appears in the STAC catalog:
 
 ```bash
-curl -s http://127.0.0.1:8000/stac/catalog.json | jq '.links[] | select(.rel == "child")'
+curl -s http://127.0.0.1:9000/stac/catalog.json | jq '.links[] | select(.rel == "child")'
 ```

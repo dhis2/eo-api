@@ -2,7 +2,7 @@
 
 Every Open Climate Service instance ships with a small built-in web interface — no
 separate application to install. Once the instance is running, open its root URL
-(`http://127.0.0.1:8000` by default) and the landing page links to everything below.
+(`http://127.0.0.1:9000` by default) and the landing page links to everything below.
 
 | Page           | URL       | What it does                                                                         |
 | -------------- | --------- | ------------------------------------------------------------------------------------ |

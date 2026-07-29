@@ -39,7 +39,7 @@ Concretely it means:
 ```python
 import openeo
 
-conn = openeo.connect("http://127.0.0.1:8000")
+conn = openeo.connect("http://127.0.0.1:9000")
 print(conn.capabilities().api_version())  # 1.2.0
 ```
 
@@ -96,7 +96,7 @@ print(type(result))
 Equivalent with curl:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/result \
+curl -s -X POST http://127.0.0.1:9000/result \
   -H "Content-Type: application/json" \
   -d '{
     "process": {
@@ -143,18 +143,18 @@ REST equivalent:
 
 ```bash
 # 1 — create
-curl -s -X POST http://127.0.0.1:8000/jobs \
+curl -s -X POST http://127.0.0.1:9000/jobs \
   -H "Content-Type: application/json" \
   -d '{"process": {"process_graph": {...}}, "title": "my-job"}'
 
 # 2 — start
-curl -s -X POST http://127.0.0.1:8000/jobs/{job_id}/results
+curl -s -X POST http://127.0.0.1:9000/jobs/{job_id}/results
 
 # 3 — poll
-curl -s http://127.0.0.1:8000/jobs/{job_id}
+curl -s http://127.0.0.1:9000/jobs/{job_id}
 
 # 4 — download result
-curl -s http://127.0.0.1:8000/jobs/{job_id}/results
+curl -s http://127.0.0.1:9000/jobs/{job_id}/results
 ```
 
 Completed batch jobs write their output to disk and expose it as an asset link at `GET /jobs/{id}/results/{filename}`. The output format is controlled by the `format` argument of `save_result` — see [Export formats](#export-formats) below.
@@ -203,7 +203,7 @@ For aggregating a dataset to DHIS2 org units and producing `DHIS2JSON` or `CHAPC
 
 ```bash
 # Monthly precipitation totals as NetCDF
-curl -X POST http://127.0.0.1:8000/result \
+curl -X POST http://127.0.0.1:9000/result \
   -H "Content-Type: application/json" \
   -d '{
     "process": {
@@ -224,7 +224,7 @@ UDPs are named, parameterized process graphs stored server-side. They let you de
 
 ```bash
 # Store a UDP
-curl -s -X PUT http://127.0.0.1:8000/process_graphs/pop_millions \
+curl -s -X PUT http://127.0.0.1:9000/process_graphs/pop_millions \
   -H "Content-Type: application/json" \
   -d '{
     "summary": "Load WorldPop population in millions",
@@ -263,7 +263,7 @@ curl -s -X PUT http://127.0.0.1:8000/process_graphs/pop_millions \
   }'
 
 # Invoke it from another process graph
-curl -s -X POST http://127.0.0.1:8000/result \
+curl -s -X POST http://127.0.0.1:9000/result \
   -H "Content-Type: application/json" \
   -d '{
     "process": {

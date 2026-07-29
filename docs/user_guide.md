@@ -1,6 +1,6 @@
 # User Guide
 
-This guide shows how to discover and access data from a running Open Climate Service instance. It assumes the API is running locally at `http://127.0.0.1:8000` and that at least one dataset has been ingested and published.
+This guide shows how to discover and access data from a running Open Climate Service instance. It assumes the API is running locally at `http://127.0.0.1:9000` and that at least one dataset has been ingested and published.
 
 For configuring a new instance for your country, see the [instance guide](instance_guide.md). To browse datasets visually instead of through code, use the built-in [map viewer](web_interface.md#the-map-viewer-map). For the full ingestion and sync API reference, see [managed_data_api_guide.md](managed_data_api_guide.md).
 
@@ -9,14 +9,14 @@ For configuring a new instance for your country, see the [instance guide](instan
 The STAC catalog is the starting point for data discovery. It lists all published GeoZarr datasets as STAC Collections.
 
 ```bash
-curl -s http://127.0.0.1:8000/stac/catalog.json | jq
+curl -s http://127.0.0.1:9000/stac/catalog.json | jq
 ```
 
 Each entry in `links` with `"rel": "child"` points to one dataset collection. Use the `href` from the catalog to fetch it:
 
 ```bash
 # Replace {dataset_id} with any id from the catalog above, e.g. chirps3_precipitation_daily
-curl -s http://127.0.0.1:8000/stac/collections/{dataset_id} | jq
+curl -s http://127.0.0.1:9000/stac/collections/{dataset_id} | jq
 ```
 
 The `assets.zarr` field contains everything needed to open the dataset:
@@ -25,7 +25,7 @@ The `assets.zarr` field contains everything needed to open the dataset:
 {
   "assets": {
     "zarr": {
-      "href": "http://127.0.0.1:8000/zarr/chirps3_precipitation_daily",
+      "href": "http://127.0.0.1:9000/zarr/chirps3_precipitation_daily",
       "xarray:open_kwargs": { "consolidated": true }
     }
   }
@@ -45,7 +45,7 @@ pip install open-climate-service[xarray]    # + open published datasets as xarra
 ```python
 from open_climate_service import ClimateService
 
-service = ClimateService("http://127.0.0.1:8000")
+service = ClimateService("http://127.0.0.1:9000")
 
 # Discover published datasets (STAC catalog)
 for link in service.datasets():
@@ -81,14 +81,14 @@ data_value_set = service.execute(
 ```python
 from open_climate_service import ClimateService
 
-service = ClimateService("http://127.0.0.1:8000")
+service = ClimateService("http://127.0.0.1:9000")
 
 datasets = service.datasets()
 ds = service.open_dataset(datasets[0]["id"])  # open whichever dataset is published first
 print(ds)
 ```
 
-The `base_url` defaults to the `CLIMATE_SERVICE_BASE_URL` environment variable (falling back to `http://127.0.0.1:8000`), so module-level functions work without any argument when the env var is set:
+The `base_url` defaults to the `CLIMATE_SERVICE_BASE_URL` environment variable (falling back to `http://127.0.0.1:9000`), so module-level functions work without any argument when the env var is set:
 
 ```python
 from open_climate_service.client import list_datasets, open_dataset  # reads CLIMATE_SERVICE_BASE_URL

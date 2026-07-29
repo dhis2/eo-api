@@ -4,8 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Map viewer — {{ name }}</title>
-    <link href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet" />
-    <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@6.0.0/dist/maplibre-gl.css" rel="stylesheet" />
     <style>
       *,
       *::before,
@@ -233,8 +232,14 @@
     </div>
 
     <script type="module">
-      import { ZarrLayer } from "https://esm.sh/@carbonplan/zarr-layer";
-      import chroma from "https://esm.sh/chroma-js";
+      // MapLibre 6 is ESM-only (no UMD `dist/maplibre-gl.js`), so import it as a
+      // namespace. Load the official dist `.mjs` from unpkg — NOT esm.sh: MapLibre's
+      // worker is a real sibling URL (`./maplibre-gl-worker.mjs`) resolved from
+      // import.meta.url, and esm.sh's transformed build doesn't serve it (404), which
+      // blanks the map. unpkg serves the worker + shared chunk siblings with CORS.
+      import * as maplibregl from "https://unpkg.com/maplibre-gl@6.0.0/dist/maplibre-gl.mjs";
+      import { ZarrLayer } from "https://esm.sh/@carbonplan/zarr-layer@0.6.1";
+      import chroma from "https://esm.sh/chroma-js@3.2.0";
 
       // Suffix _r means the scale is reversed (matplotlib convention).
       // chroma-js resolves ColorBrewer/D3 scale names case-insensitively.
@@ -522,13 +527,25 @@
         selector = {};
         for (const d of dimStates) selector[d.key] = d.index;
 
-        // For projected-CRS stores, pass crs + proj4 string so ZarrLayer
-        // reprojects natively instead of treating coordinates as WGS84 degrees.
-        const nativeCrs = collection["proj:code"] ?? "EPSG:4326";
-        const WGS84 = new Set(["EPSG:4326", "OGC:CRS84", "CRS84"]);
-        const isWgs84 = WGS84.has(nativeCrs.toUpperCase());
-        let proj4String = null;
-        if (!isWgs84) {
+        // ZarrLayer resolves only its built-in CRSes (EPSG:4326 / EPSG:3857) from the
+        // code alone; every other CRS — e.g. seNorge's UTM33 (EPSG:32633) — needs an
+        // explicit proj4 definition, or it is treated as WGS84 degrees and lands in the
+        // wrong place. See ZarrLayerOptions `crs` docs: "built-in projections (EPSG:4326
+        // or EPSG:3857). For any other CRS, provide a matching proj4 definition."
+        //
+        // Prefer the proj4 string published in the STAC collection
+        // (open_climate_service:proj4) so we don't depend on an external epsg.io lookup at
+        // render time; fall back to epsg.io only for older stores that predate the field.
+        let nativeCrs = collection["proj:code"] ?? "EPSG:4326";
+        // CRS84 aliases (CRS84, OGC:CRS84, CRS:84, or a CRS84 URI) are geographic WGS84;
+        // ZarrLayer only recognizes EPSG:4326 / EPSG:3857 by code, so normalize to EPSG:4326
+        // before both the built-in check and passing `crs` into new ZarrLayer. Separators
+        // are stripped first so the short OGC form CRS:84 is matched too.
+        if (nativeCrs.toUpperCase().replace(/[^A-Z0-9]/g, "").endsWith("CRS84")) nativeCrs = "EPSG:4326";
+        const BUILTIN_CRS = new Set(["EPSG:4326", "EPSG:3857"]);
+        const isBuiltinCrs = BUILTIN_CRS.has(nativeCrs.toUpperCase());
+        let proj4String = collection["open_climate_service:proj4"] ?? null;
+        if (!isBuiltinCrs && !proj4String) {
           try {
             const match = nativeCrs.match(/(\d+)$/);
             const epsgId = match?.[1];
@@ -584,10 +601,7 @@
             k !== variable &&
             k !== collection.id
         );
-        const units =
-          renders["open_climate_service:units"] ??
-          collection["cube:variables"]?.[variable]?.unit ??
-          "";
+        const units = collection["cube:variables"]?.[variable]?.unit ?? "";
         metaSource.textContent = source ?? "—";
         metaUnits.textContent = units || "—";
         datasetMeta.classList.remove("hidden");

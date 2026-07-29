@@ -42,7 +42,7 @@ import httpx
 if TYPE_CHECKING:
     import xarray as xr
 
-_FALLBACK_BASE_URL = "http://127.0.0.1:8000"
+_FALLBACK_BASE_URL = "http://127.0.0.1:9000"
 _DEFAULT_TIMEOUT = 30.0
 # Synchronous process graphs (POST /result) can run for minutes — allow more headroom.
 _RESULT_TIMEOUT = 300.0
@@ -124,11 +124,11 @@ class ClimateService:
     Maintains a persistent HTTP connection for efficient repeated calls. Use as a
     context manager to ensure the connection is closed::
 
-        with ClimateService("http://localhost:8000") as service:
+        with ClimateService("http://localhost:9000") as service:
             datasets = service.datasets()
 
     Args:
-        base_url: Base URL of the running Open Climate Service (e.g. ``http://localhost:8000``).
+        base_url: Base URL of the running Open Climate Service (e.g. ``http://localhost:9000``).
         timeout: Default HTTP request timeout in seconds (default: 30).
     """
 
@@ -216,7 +216,7 @@ def list_datasets(base_url: str | None = None) -> list[dict]:
 
     Each entry is a STAC child link dict with at least ``id``, ``title``, and ``href``.
     ``base_url`` defaults to the ``CLIMATE_SERVICE_BASE_URL`` environment variable,
-    falling back to ``http://127.0.0.1:8000``.
+    falling back to ``http://127.0.0.1:9000``.
     """
     url = (base_url or _default_base_url()).rstrip("/")
     response = httpx.get(f"{url}/stac/catalog.json", timeout=_DEFAULT_TIMEOUT)
@@ -230,7 +230,7 @@ def open_dataset(dataset_id: str, *, base_url: str | None = None) -> xr.Dataset:
     Fetches the STAC collection for ``dataset_id``, reads the Zarr asset metadata, and
     returns the opened dataset. Requires the ``xarray`` extra. ``base_url`` defaults to
     the ``CLIMATE_SERVICE_BASE_URL`` environment variable, falling back to
-    ``http://127.0.0.1:8000``.
+    ``http://127.0.0.1:9000``.
     """
     url = (base_url or _default_base_url()).rstrip("/")
     response = httpx.get(f"{url}/stac/collections/{dataset_id}", timeout=_DEFAULT_TIMEOUT)

@@ -43,7 +43,7 @@ The configured extent is setup-time Open Climate Service configuration. It is re
 Example:
 
 ```bash
-curl -s http://127.0.0.1:8000/extent | jq
+curl -s http://127.0.0.1:9000/extent | jq
 ```
 
 Example response:
@@ -76,7 +76,7 @@ Raw `bbox` and `country_code` are not part of the public ingestion payload — t
 ### Example: CHIRPS3
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/ingestions \
+curl -s -X POST http://127.0.0.1:9000/ingestions \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "chirps3_precipitation_daily",
@@ -90,7 +90,7 @@ curl -s -X POST http://127.0.0.1:8000/ingestions \
 ### Example: WorldPop
 
 ```bash
-curl -s -X POST http://127.0.0.1:8000/ingestions \
+curl -s -X POST http://127.0.0.1:9000/ingestions \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "worldpop_population_global2_R2025A_100m",
@@ -172,7 +172,7 @@ What this means:
 Example:
 
 ```bash
-curl -s http://127.0.0.1:8000/ingestions | jq
+curl -s http://127.0.0.1:9000/ingestions | jq
 ```
 
 What this means:
@@ -210,7 +210,7 @@ Example error response:
 Example:
 
 ```bash
-curl -s http://127.0.0.1:8000/datasets | jq
+curl -s http://127.0.0.1:9000/datasets | jq
 ```
 
 Example response:
@@ -278,7 +278,7 @@ What this means:
 Example:
 
 ```bash
-curl -s http://127.0.0.1:8000/datasets/chirps3_precipitation_daily | jq
+curl -s http://127.0.0.1:9000/datasets/chirps3_precipitation_daily | jq
 ```
 
 What this adds beyond the list response:
@@ -296,7 +296,7 @@ The detailed dataset response is where version history belongs. The ingestion re
 Examples:
 
 ```bash
-curl -s http://127.0.0.1:8000/zarr/chirps3_precipitation_daily/zarr.json | jq
+curl -s http://127.0.0.1:9000/zarr/chirps3_precipitation_daily/zarr.json | jq
 ```
 
 `/zarr/{dataset_id}` is the store prefix; the root metadata is at `/zarr/{dataset_id}/zarr.json`.
@@ -309,7 +309,7 @@ curl -s http://127.0.0.1:8000/zarr/chirps3_precipitation_daily/zarr.json | jq
 import icechunk, xarray as xr
 
 repo = icechunk.Repository.open(
-    icechunk.http_storage("http://127.0.0.1:8000/icechunk/chirps3_precipitation_daily")
+    icechunk.http_storage("http://127.0.0.1:9000/icechunk/chirps3_precipitation_daily")
 )
 ds = xr.open_zarr(repo.readonly_session("main").store, zarr_format=3, consolidated=False)
 ```
@@ -338,8 +338,8 @@ Published Zarr-backed datasets are exposed through `/stac` for discovery.
 STAC examples:
 
 ```bash
-curl -s "http://127.0.0.1:8000/stac/catalog.json" | jq
-curl -s "http://127.0.0.1:8000/stac/collections/chirps3_precipitation_daily" | jq
+curl -s "http://127.0.0.1:9000/stac/catalog.json" | jq
+curl -s "http://127.0.0.1:9000/stac/collections/chirps3_precipitation_daily" | jq
 ```
 
 What this means:
@@ -383,32 +383,32 @@ Configured availability policies:
 Example dry-run plan:
 
 ```bash
-curl -s "http://127.0.0.1:8000/sync/chirps3_precipitation_daily/plan?end=2024-02-10" | jq
+curl -s "http://127.0.0.1:9000/sync/chirps3_precipitation_daily/plan?end=2024-02-10" | jq
 ```
 
 Example execution:
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/sync/chirps3_precipitation_daily" \
+curl -s -X POST "http://127.0.0.1:9000/sync/chirps3_precipitation_daily" \
   -H "Content-Type: application/json" \
   -d '{"end":"2024-02-10","publish":true}' | jq
 ```
 
 ## Manual Test Sequence
 
-These commands assume the API is running on `http://127.0.0.1:8000` and that
+These commands assume the API is running on `http://127.0.0.1:9000` and that
 `jq` is available.
 
 ### 1. Confirm configured extent
 
 ```bash
-curl -s "http://127.0.0.1:8000/extent" | jq
+curl -s "http://127.0.0.1:9000/extent" | jq
 ```
 
 ### 2. Create an initial CHIRPS3 managed dataset
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/ingestions" \
+curl -s -X POST "http://127.0.0.1:9000/ingestions" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "chirps3_precipitation_daily",
@@ -427,15 +427,15 @@ Expected:
 ### 3. Inspect the managed dataset and publication
 
 ```bash
-curl -s "http://127.0.0.1:8000/datasets/chirps3_precipitation_daily" | jq
-curl -s "http://127.0.0.1:8000/stac/collections/chirps3_precipitation_daily" | jq
-curl -s "http://127.0.0.1:8000/zarr/chirps3_precipitation_daily" | jq
+curl -s "http://127.0.0.1:9000/datasets/chirps3_precipitation_daily" | jq
+curl -s "http://127.0.0.1:9000/stac/collections/chirps3_precipitation_daily" | jq
+curl -s "http://127.0.0.1:9000/zarr/chirps3_precipitation_daily" | jq
 ```
 
 ### 4. Dry-run a CHIRPS3 append sync
 
 ```bash
-curl -s "http://127.0.0.1:8000/sync/chirps3_precipitation_daily/plan?end=2024-02-10" | jq
+curl -s "http://127.0.0.1:9000/sync/chirps3_precipitation_daily/plan?end=2024-02-10" | jq
 ```
 
 Expected planning response:
@@ -479,7 +479,7 @@ If CHIRPS3 currently has complete released data through `2026-03-31` and you ask
 for:
 
 ```bash
-curl -s "http://127.0.0.1:8000/sync/chirps3_precipitation_daily/plan?end=2026-04-21" | jq
+curl -s "http://127.0.0.1:9000/sync/chirps3_precipitation_daily/plan?end=2026-04-21" | jq
 ```
 
 Expected:
@@ -491,7 +491,7 @@ Expected:
 ### 5. Execute the CHIRPS3 sync
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/sync/chirps3_precipitation_daily" \
+curl -s -X POST "http://127.0.0.1:9000/sync/chirps3_precipitation_daily" \
   -H "Content-Type: application/json" \
   -d '{
     "end": "2024-02-10",
@@ -514,7 +514,7 @@ Expected:
 You can then extend the same managed dataset again:
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/sync/chirps3_precipitation_daily" \
+curl -s -X POST "http://127.0.0.1:9000/sync/chirps3_precipitation_daily" \
   -H "Content-Type: application/json" \
   -d '{
     "end": "2024-02-20",
@@ -535,7 +535,7 @@ Expected:
 Run the same plan again with the current end:
 
 ```bash
-curl -s "http://127.0.0.1:8000/sync/chirps3_precipitation_daily/plan?end=2024-02-20" | jq
+curl -s "http://127.0.0.1:9000/sync/chirps3_precipitation_daily/plan?end=2024-02-20" | jq
 ```
 
 Expected:
@@ -549,7 +549,7 @@ Expected:
 Create an initial WorldPop managed dataset:
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/ingestions" \
+curl -s -X POST "http://127.0.0.1:9000/ingestions" \
   -H "Content-Type: application/json" \
   -d '{
     "dataset_id": "worldpop_population_global2_R2025A_100m",
@@ -562,7 +562,7 @@ curl -s -X POST "http://127.0.0.1:8000/ingestions" \
 Plan a later release:
 
 ```bash
-curl -s "http://127.0.0.1:8000/sync/worldpop_population_global2_R2025A_100m/plan?end=2021" | jq
+curl -s "http://127.0.0.1:9000/sync/worldpop_population_global2_R2025A_100m/plan?end=2021" | jq
 ```
 
 Expected:
@@ -575,7 +575,7 @@ Expected:
 Execute the release sync:
 
 ```bash
-curl -s -X POST "http://127.0.0.1:8000/sync/worldpop_population_global2_R2025A_100m" \
+curl -s -X POST "http://127.0.0.1:9000/sync/worldpop_population_global2_R2025A_100m" \
   -H "Content-Type: application/json" \
   -d '{
     "end": "2021",

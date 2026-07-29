@@ -113,7 +113,13 @@ def write_geozarr_attrs(store: Any, *, spec: GridSpec, bbox: list[float]) -> Non
         bbox=bbox,
         shape=(spec.shape[1], spec.shape[0]),
     )
-    attrs["proj:code"] = f"EPSG:{spec.crs}"
+    crs_code = f"EPSG:{spec.crs}"
+    attrs["proj:code"] = crs_code
+    # Native-CRS extent, in the GeoZarr `spatial:bbox` convention. Direct-Zarr clients
+    # (GDAL/QGIS, zarr-layer) read the CRS from the CF grid-mapping (`crs_wkt`) / `proj:`
+    # convention that create_geozarr_attrs already writes, and the extent from here or the
+    # coordinate arrays — no non-standard `proj4`/`bounds` attrs required. The STAC hints
+    # (open_climate_service:proj4, proj:bbox) in stac/services.py serve the map viewer.
     attrs["spatial:bbox"] = bbox
     attrs.update(spec.attrs)
 

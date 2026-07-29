@@ -30,7 +30,7 @@ from dhis2_client.settings import ClientSettings
 from open_climate_service import ClimateService
 
 # --- Open Climate Service ---------------------------------------------------
-OCS_BASE_URL = "http://127.0.0.1:8000"
+OCS_BASE_URL = "http://127.0.0.1:9000"
 DATASET_ID = "era5land_temperature_monthly"  # a published collection (see /datasets)
 TEMPORAL_EXTENT = ["2025-01-01", "2025-12-31"]
 METHOD = "mean"  # mean (default), min, max, or sum

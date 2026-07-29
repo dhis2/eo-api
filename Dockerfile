@@ -20,7 +20,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         build-essential cython3 \
         libgeos-dev libproj-dev libeccodes-dev
 
-RUN groupadd --system ocs && useradd --system --gid ocs --create-home ocs
+RUN groupadd --gid 999 ocs && \
+    useradd --create-home --shell /usr/sbin/nologin --uid 999 --gid 999 ocs
 
 WORKDIR /app
 
@@ -38,7 +39,7 @@ RUN mkdir -p /app/data/pygeoapi /app/data/artifacts && \
 
 ENV PYGEOAPI_CONFIG=/app/data/pygeoapi/pygeoapi-config.yml
 ENV PYGEOAPI_OPENAPI=/app/data/pygeoapi/pygeoapi-openapi.yml
-ENV PORT=8000
+ENV PORT=9000
 ENV PATH="/app/.venv/bin:$PATH"
 
 USER ocs
@@ -46,6 +47,7 @@ USER ocs
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# exec form (JSON) so uvicorn receives signals directly; `exec` replaces the
-# shell that expands ${PORT} so no extra process sits between init and uvicorn.
-CMD ["sh", "-c", "exec uvicorn open_climate_service.main:app --host 0.0.0.0 --port ${PORT}"]
+# exec form (JSON) so the server is PID 1 and receives signals directly, with no
+# shell process between init and uvicorn. The climate-service entry point reads
+# HOST and PORT from the environment (PORT defaults to 9000, set above).
+CMD ["climate-service"]

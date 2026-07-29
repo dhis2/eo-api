@@ -19,6 +19,7 @@ from open_climate_service.data_manager.services.utils import get_time_dim, get_x
 from open_climate_service.data_registry.services import datasets as registry_datasets
 from open_climate_service.ingestions import services as ingestion_services
 from open_climate_service.ingestions.schemas import ArtifactFormat, ArtifactRecord
+from open_climate_service.shared.crs import canonical_crs_code, is_builtin_crs
 from open_climate_service.shared.time import (
     parse_period_string_to_datetime,
     period_type_to_iso_step,
@@ -143,7 +144,9 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
         collection_payload,
         resolve_iso_period_step(source_dataset) or period_type_to_iso_step(source_dataset.get("period_type")),
     )
-    _override_spatial_extent_from_artifact(collection_payload, artifact)
+    # Spatial extent comes from the live store (set in _build_collection_with_xstac),
+    # not the artifact coverage — see _wgs84_extent_from_store. Temporal still tracks the
+    # artifact's materialized coverage.
     _override_temporal_extent_from_artifact(collection_payload, artifact)
     _sanitize_variable_attrs(collection_payload)
     return collection_payload
@@ -211,6 +214,103 @@ def _build_collection_template(
     return template
 
 
+def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_crs: str) -> None:
+    """Surface CRS render hints on the collection for projected (non-built-in) stores.
+
+    Map clients reproject Zarr on the fly with proj4js, which resolves only the
+    built-in ``EPSG:4326`` / ``EPSG:3857`` from their code — any other CRS (e.g.
+    seNorge's UTM33, ``EPSG:32633``) needs a full definition, or the client has to
+    fetch one at render time (an external epsg.io lookup). Publishing the definition
+    in STAC removes that runtime dependency.
+
+    Four fields are emitted:
+
+    * ``proj:wkt2`` — the STAC Projection-extension standard, lossless CRS
+      representation. It is the same information GeoZarr already carries in the CF
+      ``spatial_ref`` grid-mapping's ``crs_wkt`` attribute.
+    * ``proj:projjson`` — the same CRS as PROJJSON. Also a STAC Projection-extension
+      standard (and the GeoZarr ``proj:`` convention), but a JSON object a JS/STAC
+      client can consume directly instead of parsing WKT2 — the convention-aligned
+      sibling of the namespaced proj4 hint below.
+    * ``open_climate_service:proj4`` — a proj4 string for direct consumption by
+      proj4js. proj4 is intentionally *not* a STAC-standard field (PROJ treats proj4
+      strings as lossy), so it lives under our namespace rather than ``proj:``.
+      zarr-layer only accepts a built-in ``crs`` code or a ``proj4`` string today; once
+      carbonplan/zarr-layer#61 lands (auto-resolving any EPSG code) this proj4 hint
+      becomes unnecessary and only ``proj:wkt2`` need remain, for other STAC clients.
+    * ``proj:bbox`` — the data extent in the store's native CRS. Without it, a client
+      reprojecting the Zarr must fetch the x/y coordinate arrays at render time to
+      derive bounds (zarr-layer's "proj4 provided without explicit bounds" warning);
+      publishing it lets the client pass explicit bounds and skip that round-trip.
+    """
+    if is_builtin_crs(store_crs):
+        return
+    try:
+        import warnings
+
+        from pyproj import CRS
+
+        # Prefer the CRS the data was actually written with (the CF grid-mapping WKT)
+        # over re-deriving from the code, when the store carries it.
+        wkt: str | None = None
+        spatial_ref = ds.get("spatial_ref")
+        if spatial_ref is not None:
+            wkt = spatial_ref.attrs.get("crs_wkt") or spatial_ref.attrs.get("spatial_ref")
+        crs = CRS.from_wkt(wkt) if wkt else CRS.from_user_input(store_crs)
+
+        # Force WKT2 explicitly — pyproj's to_wkt() default can vary by version and could
+        # emit WKT1 (PROJCS); the STAC Projection extension defines proj:wkt2 as WKT2.
+        template.extra_fields["proj:wkt2"] = crs.to_wkt(version="WKT2_2019")
+        # PROJJSON alongside it — the same CRS as a JSON object, cheaper for JS/STAC
+        # clients than parsing WKT2. Cheap to emit next to the WKT2 above.
+        template.extra_fields["proj:projjson"] = crs.to_json_dict()
+        with warnings.catch_warnings():
+            # to_proj4() warns that proj4 is lossy; that's acceptable for a render hint.
+            warnings.simplefilter("ignore")
+            proj4 = crs.to_proj4()
+        if proj4:
+            template.extra_fields["open_climate_service:proj4"] = proj4.strip()
+    except Exception:
+        logger.warning("Could not derive CRS render hints for '%s'", store_crs, exc_info=True)
+
+    # proj:bbox — the native-CRS extent. Prefer the GeoZarr ``spatial:bbox`` the store
+    # root already carries; fall back to the x/y coordinate arrays for stores that lack it.
+    try:
+        bbox = ds.attrs.get("spatial:bbox")
+        if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
+            x_dim, y_dim = get_x_y_dims(ds)
+            xs, ys = ds[x_dim].values, ds[y_dim].values
+            # Coordinates are cell centres, so this bbox sits a half-pixel inside the
+            # true data edge — acceptable for a render/placement hint.
+            bbox = [xs.min(), ys.min(), xs.max(), ys.max()]
+        template.extra_fields["proj:bbox"] = [float(v) for v in bbox]
+    except Exception:
+        logger.warning("Could not derive proj:bbox for '%s'", store_crs, exc_info=True)
+
+
+def _wgs84_extent_from_store(ds: xr.Dataset, store_crs: str, x_dim: str, y_dim: str) -> list[float] | None:
+    """Return the store's spatial extent as WGS84 ``[west, south, east, north]``.
+
+    STAC collections must report their spatial extent in WGS84. Deriving it live from the
+    published store (the same coordinates ``cube:dimensions`` reads) keeps the two
+    consistent and avoids the cached ``coverage`` record, which can go stale or hold a
+    native-CRS (metre) bbox for projected stores.
+    """
+    try:
+        xmin, xmax = float(ds[x_dim].min()), float(ds[x_dim].max())
+        ymin, ymax = float(ds[y_dim].min()), float(ds[y_dim].max())
+        if canonical_crs_code(store_crs) == "EPSG:4326":
+            return [xmin, ymin, xmax, ymax]
+        from pyproj import Transformer
+
+        transformer = Transformer.from_crs(store_crs, "EPSG:4326", always_xy=True)
+        west, south, east, north = transformer.transform_bounds(xmin, ymin, xmax, ymax)
+        return [west, south, east, north]
+    except Exception:
+        logger.warning("Could not derive WGS84 extent from store for '%s'", store_crs, exc_info=True)
+        return None
+
+
 def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.Collection) -> dict[str, Any]:
     cached_payload = _xstac_collection_cache.get(artifact.artifact_id)
     if cached_payload is not None:
@@ -232,7 +332,9 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
         # store data in WGS84 (e.g. CHIRPS3) should not inherit the instance UTM CRS.
         store_crs = ds.attrs.get("proj:code")
         if store_crs:
+            store_crs = canonical_crs_code(store_crs)
             template.extra_fields["proj:code"] = store_crs
+            _add_crs_render_hints(template=template, ds=ds, store_crs=store_crs)
         x_dimension, y_dimension = get_x_y_dims(ds)
         try:
             time_dimension: str | None = get_time_dim(ds)
@@ -271,6 +373,11 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
         ordinal_dims = _build_ordinal_dimensions(ds, x_dimension, y_dimension, time_dimension)
         if ordinal_dims:
             payload.setdefault("cube:dimensions", {}).update(ordinal_dims)
+        # WGS84 spatial extent from the live store — consistent with cube:dimensions and
+        # immune to a stale/native-CRS cached coverage record (see _wgs84_extent_from_store).
+        extent_bbox = _wgs84_extent_from_store(ds, store_crs or "EPSG:4326", x_dimension, y_dimension)
+        if extent_bbox is not None:
+            payload.setdefault("extent", {}).setdefault("spatial", {})["bbox"] = [extent_bbox]
         _cache_xstac_collection_payload(artifact.artifact_id, payload)
         return deepcopy(payload)
     except HTTPException:
@@ -461,11 +568,6 @@ def _round_spatial_steps(collection: dict[str, Any]) -> None:
             dimensions[key] = value
 
 
-def _override_spatial_extent_from_artifact(collection: dict[str, Any], artifact: ArtifactRecord) -> None:
-    spatial = artifact.coverage.spatial_wgs84 or artifact.coverage.spatial
-    collection["extent"]["spatial"]["bbox"] = [[spatial.xmin, spatial.ymin, spatial.xmax, spatial.ymax]]
-
-
 def _override_temporal_extent_from_artifact(collection: dict[str, Any], artifact: ArtifactRecord) -> None:
     temporal = artifact.coverage.temporal
 
@@ -586,9 +688,8 @@ def _build_renders(artifact: ArtifactRecord, source_dataset: dict[str, Any]) -> 
     nodata = display.get("nodata")
     if nodata is not None:
         render["nodata"] = float(nodata)
-    units = source_dataset.get("units")
-    if isinstance(units, str):
-        render["open_climate_service:units"] = units
+    # Units aren't duplicated here: they're published on the datacube-standard
+    # ``cube:variables[<var>].unit``, which clients read instead.
     return {"default": render}
 
 
