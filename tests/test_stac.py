@@ -710,6 +710,9 @@ def test_build_collection_emits_crs_render_hints_for_projected_store(tmp_path: P
     proj4 = payload["open_climate_service:proj4"]
     assert "proj=utm" in proj4 and "zone=33" in proj4
     assert payload["proj:wkt2"].startswith("PROJCRS")  # WKT2, not WKT1 (PROJCS)
+    # proj:projjson — same CRS as a PROJJSON object (EPSG:32633 = UTM zone 33N)
+    assert payload["proj:projjson"]["type"] == "ProjectedCRS"
+    assert payload["proj:projjson"]["id"] == {"authority": "EPSG", "code": 32633}
     # proj:bbox derived from the x/y coordinate arrays (no spatial:bbox on this store)
     assert payload["proj:bbox"] == [100000.0, 6998000.0, 102000.0, 7000000.0]
     # extent.spatial.bbox is reprojected to WGS84 from the store — not the native metres

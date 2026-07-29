@@ -601,10 +601,7 @@
             k !== variable &&
             k !== collection.id
         );
-        const units =
-          renders["open_climate_service:units"] ??
-          collection["cube:variables"]?.[variable]?.unit ??
-          "";
+        const units = collection["cube:variables"]?.[variable]?.unit ?? "";
         metaSource.textContent = source ?? "—";
         metaUnits.textContent = units || "—";
         datasetMeta.classList.remove("hidden");

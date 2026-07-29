@@ -223,11 +223,15 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
     fetch one at render time (an external epsg.io lookup). Publishing the definition
     in STAC removes that runtime dependency.
 
-    Three fields are emitted:
+    Four fields are emitted:
 
     * ``proj:wkt2`` — the STAC Projection-extension standard, lossless CRS
       representation. It is the same information GeoZarr already carries in the CF
       ``spatial_ref`` grid-mapping's ``crs_wkt`` attribute.
+    * ``proj:projjson`` — the same CRS as PROJJSON. Also a STAC Projection-extension
+      standard (and the GeoZarr ``proj:`` convention), but a JSON object a JS/STAC
+      client can consume directly instead of parsing WKT2 — the convention-aligned
+      sibling of the namespaced proj4 hint below.
     * ``open_climate_service:proj4`` — a proj4 string for direct consumption by
       proj4js. proj4 is intentionally *not* a STAC-standard field (PROJ treats proj4
       strings as lossy), so it lives under our namespace rather than ``proj:``.
@@ -257,6 +261,9 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
         # Force WKT2 explicitly — pyproj's to_wkt() default can vary by version and could
         # emit WKT1 (PROJCS); the STAC Projection extension defines proj:wkt2 as WKT2.
         template.extra_fields["proj:wkt2"] = crs.to_wkt(version="WKT2_2019")
+        # PROJJSON alongside it — the same CRS as a JSON object, cheaper for JS/STAC
+        # clients than parsing WKT2. Cheap to emit next to the WKT2 above.
+        template.extra_fields["proj:projjson"] = crs.to_json_dict()
         with warnings.catch_warnings():
             # to_proj4() warns that proj4 is lossy; that's acceptable for a render hint.
             warnings.simplefilter("ignore")
@@ -267,13 +274,14 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
         logger.warning("Could not derive CRS render hints for '%s'", store_crs, exc_info=True)
 
     # proj:bbox — the native-CRS extent. Prefer the GeoZarr ``spatial:bbox`` the store
-    # root already carries; fall back to the x/y coordinate arrays (cell centres) for
-    # stores that lack it.
+    # root already carries; fall back to the x/y coordinate arrays for stores that lack it.
     try:
         bbox = ds.attrs.get("spatial:bbox")
         if not (isinstance(bbox, (list, tuple)) and len(bbox) == 4):
             x_dim, y_dim = get_x_y_dims(ds)
             xs, ys = ds[x_dim].values, ds[y_dim].values
+            # Coordinates are cell centres, so this bbox sits a half-pixel inside the
+            # true data edge — acceptable for a render/placement hint.
             bbox = [xs.min(), ys.min(), xs.max(), ys.max()]
         template.extra_fields["proj:bbox"] = [float(v) for v in bbox]
     except Exception:
@@ -680,9 +688,8 @@ def _build_renders(artifact: ArtifactRecord, source_dataset: dict[str, Any]) -> 
     nodata = display.get("nodata")
     if nodata is not None:
         render["nodata"] = float(nodata)
-    units = source_dataset.get("units")
-    if isinstance(units, str):
-        render["open_climate_service:units"] = units
+    # Units aren't duplicated here: they're published on the datacube-standard
+    # ``cube:variables[<var>].unit``, which clients read instead.
     return {"default": render}
 
 
