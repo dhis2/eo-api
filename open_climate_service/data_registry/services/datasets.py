@@ -19,10 +19,6 @@ CONFIGS_DIR: Path | None = None
 SUPPORTED_SYNC_KINDS = {"temporal", "release", "static"}
 SUPPORTED_SYNC_EXECUTIONS = {"append", "rematerialize"}
 
-# Installable community plugins declare an entry point in this group pointing at their
-# top-level import package; OCS loads that package's datasets/*.yaml templates (#118).
-PLUGIN_ENTRY_POINT_GROUP = "open_climate_service.plugins"
-
 
 def list_datasets() -> list[dict[str, Any]]:
     """Load all dataset templates and return a flat list.
@@ -175,34 +171,28 @@ def _load_builtin_datasets() -> list[dict[str, Any]]:
 def _load_entry_point_datasets() -> list[tuple[str, dict[str, Any]]]:
     """Load dataset templates contributed by installed plugin packages (#118).
 
-    Each installed package that declares an ``open_climate_service.plugins`` entry
-    point exposes its top-level import package as the entry-point value; its
-    ``datasets/*.yaml`` templates are loaded here. The package's Python — the
-    ``ingestion.plugin`` class, transforms, processes — is importable by dotted path
+    A plugin's ``datasets/*.yaml`` templates are loaded here; the package's Python —
+    the ``ingestion.plugin`` class and any transforms — is importable by dotted path
     because the package is installed, so no ``sys.path`` handling is needed.
 
     Returns ``(plugin_name, template)`` pairs so the caller can report conflicts.
     """
-    from importlib.metadata import entry_points
+    from open_climate_service.plugin_discovery import iter_plugin_subdirs
 
     results: list[tuple[str, dict[str, Any]]] = []
-    for entry_point in entry_points(group=PLUGIN_ENTRY_POINT_GROUP):
+    for plugin_name, _package, datasets_res in iter_plugin_subdirs("datasets"):
         try:
-            # entry_point.module is the package path (before any ":attr" suffix).
-            datasets_res = importlib.resources.files(entry_point.module) / "datasets"
-            if not datasets_res.is_dir():
-                continue
             for resource in datasets_res.iterdir():
                 if not resource.name.endswith((".yaml", ".yml")):
                     continue
                 file_datasets = yaml.safe_load(resource.read_text(encoding="utf-8"))
                 if not isinstance(file_datasets, list):
-                    raise ValueError(f"{entry_point.name} ({resource.name}) must contain a list of dataset templates")
+                    raise ValueError(f"{plugin_name} ({resource.name}) must contain a list of dataset templates")
                 for dataset in file_datasets:
-                    _validate_dataset_template(dataset, source=f"plugin '{entry_point.name}' ({resource.name})")
-                    results.append((entry_point.name, dataset))
+                    _validate_dataset_template(dataset, source=f"plugin '{plugin_name}' ({resource.name})")
+                    results.append((plugin_name, dataset))
         except Exception:
-            logger.exception("Error loading dataset templates from plugin '%s'", entry_point.name)
+            logger.exception("Error loading dataset templates from plugin '%s'", plugin_name)
             raise
     return results
 

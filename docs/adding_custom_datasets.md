@@ -271,14 +271,21 @@ The `plugins_dir` above is ideal for instance-specific customisation. To make a 
 
 ### Package layout
 
-Mirror the `plugins_dir` layout inside an importable package:
+Mirror the `plugins_dir` layout inside an importable package. A plugin can ship any
+combination of the three extension points — **datasets, processes, and workflows are all
+auto-discovered** when the package is installed:
 
 ```
-open_climate_service_myplugin/
+osc_myplugin/
   __init__.py
-  myplugin.py            # your BaseDatasetPlugin subclass
   datasets/
+    __init__.py
+    myplugin.py          # your BaseDatasetPlugin subclass
     myplugin.yaml        # dataset templates
+  processes/             # optional: @process-decorated callables
+    my_process.py
+  workflows/             # optional: openEO UDP JSON graphs
+    my_workflow.json
 ```
 
 ### Declare the entry point
@@ -307,8 +314,10 @@ uv add open-climate-service-myplugin
 ```
 
 OCS auto-discovers every installed package in the `open_climate_service.plugins` group and loads
-its `datasets/*.yaml` templates. The plugin's Python (the ingestion class, any transforms or
-processes) is importable by dotted path because the package is installed.
+its `datasets/*.yaml` templates, its `processes/` (`@process`-decorated callables), and its
+`workflows/*.json` (openEO UDPs). The ingestion class and any transforms are importable by dotted
+path because the package is installed. Each extension point follows the same precedence as datasets
+— built-in < installed plugins < instance `plugins_dir`.
 
 ### Naming and precedence
 
