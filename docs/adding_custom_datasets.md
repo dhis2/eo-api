@@ -271,18 +271,20 @@ The `plugins_dir` above is ideal for instance-specific customisation. To make a 
 
 ### Package layout
 
-Mirror the `plugins_dir` layout inside an importable package. A plugin can ship any
-combination of the three extension points — **datasets, processes, and workflows are all
-auto-discovered** when the package is installed:
+An importable package can ship any combination of the three extension points — **datasets,
+processes, and workflows are all auto-discovered** when the package is installed. `datasets/`
+and `processes/` hold importable Python, so each needs an `__init__.py` (`workflows/` is plain
+JSON and does not):
 
 ```
-osc_myplugin/
+osc_example_plugin/
   __init__.py
   datasets/
     __init__.py
-    myplugin.py          # your BaseDatasetPlugin subclass
-    myplugin.yaml        # dataset templates
+    example.py           # your BaseDatasetPlugin subclass
+    example.yaml         # dataset templates
   processes/             # optional: @process-decorated callables
+    __init__.py
     my_process.py
   workflows/             # optional: openEO UDP JSON graphs
     my_workflow.json
@@ -294,15 +296,15 @@ In the package's `pyproject.toml`, point the entry point at the top-level packag
 
 ```toml
 [project.entry-points."open_climate_service.plugins"]
-myplugin = "open_climate_service_myplugin"
+example = "osc_example_plugin"
 ```
 
-The `ingestion.plugin` in the template YAML uses the package's **full dotted path** (not a
+The `ingestion.plugin` in the template YAML uses the class's **full dotted path** (not a
 `plugins_dir`-relative one), since the package is installed on `PYTHONPATH`:
 
 ```yaml
 ingestion:
-  plugin: open_climate_service_myplugin.myplugin.MyPlugin
+  plugin: osc_example_plugin.datasets.example.ExamplePlugin
 ```
 
 ### Install and discover
@@ -310,7 +312,7 @@ ingestion:
 An operator installs the package — nothing else:
 
 ```bash
-uv add open-climate-service-myplugin
+uv add osc-example-plugin
 ```
 
 OCS auto-discovers every installed package in the `open_climate_service.plugins` group and loads
@@ -321,11 +323,11 @@ path because the package is installed. Each extension point follows the same pre
 
 ### Naming and precedence
 
-- **Distribution name:** `open-climate-service-<name>-plugin`; **import package:**
-  `open_climate_service_<name>_plugin`.
+- **Distribution name:** `osc-<name>-plugin`; **import package:** `osc_<name>_plugin` (e.g.
+  `osc-senorge-plugin` / `osc_senorge_plugin`).
 - **Precedence** (increasing): built-in datasets → installed plugins → the instance `plugins_dir`.
   So `plugins_dir` always wins on an id conflict, letting an operator override an installed plugin
-  locally. Overrides are logged at load time.
+  locally. Dataset overrides are logged at load time.
 
 The [seNorge plugin](https://github.com/dhis2/open-climate-service-senorge-plugin) is the reference
 implementation.

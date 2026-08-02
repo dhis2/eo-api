@@ -70,7 +70,10 @@ def list_datasets() -> list[dict[str, Any]]:
         datasets_subdir = root / "datasets"
         if datasets_subdir.is_dir():
             for dataset in _load_from_dir(datasets_subdir):
-                merged[dataset["id"]] = dataset
+                ds_id = dataset["id"]
+                if ds_id in merged:
+                    logger.info("plugins_dir template '%s' overrides an existing dataset template", ds_id)
+                merged[ds_id] = dataset
 
     return list(merged.values())
 
