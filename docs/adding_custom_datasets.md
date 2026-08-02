@@ -265,69 +265,9 @@ curl -s http://127.0.0.1:9000/stac/catalog.json | jq '.links[] | select(.rel == 
 ## Distributing a plugin as an installable package
 
 The `plugins_dir` above is ideal for instance-specific customisation. To make a plugin
-**reusable across instances** — installable from PyPI or GitHub with no manual path wiring
-([#118](https://github.com/dhis2/open-climate-service/issues/118)) — package it and declare an
-`open_climate_service.plugins` entry point.
-
-### Package layout
-
-An importable package can ship any combination of the three extension points — **datasets,
-processes, and workflows are all auto-discovered** when the package is installed. `datasets/`
-and `processes/` hold importable Python, so each needs an `__init__.py` (`workflows/` is plain
-JSON and does not):
-
-```
-osc_example_plugin/
-  __init__.py
-  datasets/
-    __init__.py
-    example.py           # your BaseDatasetPlugin subclass
-    example.yaml         # dataset templates
-  processes/             # optional: @process-decorated callables
-    __init__.py
-    my_process.py
-  workflows/             # optional: openEO UDP JSON graphs
-    my_workflow.json
-```
-
-### Declare the entry point
-
-In the package's `pyproject.toml`, point the entry point at the top-level package:
-
-```toml
-[project.entry-points."open_climate_service.plugins"]
-example = "osc_example_plugin"
-```
-
-The `ingestion.plugin` in the template YAML uses the class's **full dotted path** (not a
-`plugins_dir`-relative one), since the package is installed on `PYTHONPATH`:
-
-```yaml
-ingestion:
-  plugin: osc_example_plugin.datasets.example.ExamplePlugin
-```
-
-### Install and discover
-
-An operator installs the package — nothing else:
-
-```bash
-uv add osc-example-plugin
-```
-
-OCS auto-discovers every installed package in the `open_climate_service.plugins` group and loads
-its `datasets/*.yaml` templates, its `processes/` (`@process`-decorated callables), and its
-`workflows/*.json` (openEO UDPs). The ingestion class and any transforms are importable by dotted
-path because the package is installed. Each extension point follows the same precedence as datasets
-— built-in < installed plugins < instance `plugins_dir`.
-
-### Naming and precedence
-
-- **Distribution name:** `osc-<name>-plugin`; **import package:** `osc_<name>_plugin` (e.g.
-  `osc-senorge-plugin` / `osc_senorge_plugin`).
-- **Precedence** (increasing): built-in datasets → installed plugins → the instance `plugins_dir`.
-  So `plugins_dir` always wins on an id conflict, letting an operator override an installed plugin
-  locally. Dataset overrides are logged at load time.
+**reusable across instances** — packaged and installed with `uv add`, no path wiring — see the
+[Installable plugins](installable_plugins.md) guide. The layout mirrors `plugins_dir`, so migrating
+is mostly moving the files into a package and declaring one entry point.
 
 The [seNorge plugin](https://github.com/dhis2/open-climate-service-senorge-plugin) is the reference
 implementation.
