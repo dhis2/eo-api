@@ -261,3 +261,62 @@ Verify it appears in the STAC catalog:
 ```bash
 curl -s http://127.0.0.1:9000/stac/catalog.json | jq '.links[] | select(.rel == "child")'
 ```
+
+## Distributing a plugin as an installable package
+
+The `plugins_dir` above is ideal for instance-specific customisation. To make a plugin
+**reusable across instances** — installable from PyPI or GitHub with no manual path wiring
+([#118](https://github.com/dhis2/open-climate-service/issues/118)) — package it and declare an
+`open_climate_service.plugins` entry point.
+
+### Package layout
+
+Mirror the `plugins_dir` layout inside an importable package:
+
+```
+open_climate_service_myplugin/
+  __init__.py
+  myplugin.py            # your BaseDatasetPlugin subclass
+  datasets/
+    myplugin.yaml        # dataset templates
+```
+
+### Declare the entry point
+
+In the package's `pyproject.toml`, point the entry point at the top-level package:
+
+```toml
+[project.entry-points."open_climate_service.plugins"]
+myplugin = "open_climate_service_myplugin"
+```
+
+The `ingestion.plugin` in the template YAML uses the package's **full dotted path** (not a
+`plugins_dir`-relative one), since the package is installed on `PYTHONPATH`:
+
+```yaml
+ingestion:
+  plugin: open_climate_service_myplugin.myplugin.MyPlugin
+```
+
+### Install and discover
+
+An operator installs the package — nothing else:
+
+```bash
+uv add open-climate-service-myplugin
+```
+
+OCS auto-discovers every installed package in the `open_climate_service.plugins` group and loads
+its `datasets/*.yaml` templates. The plugin's Python (the ingestion class, any transforms or
+processes) is importable by dotted path because the package is installed.
+
+### Naming and precedence
+
+- **Distribution name:** `open-climate-service-<name>-plugin`; **import package:**
+  `open_climate_service_<name>_plugin`.
+- **Precedence** (increasing): built-in datasets → installed plugins → the instance `plugins_dir`.
+  So `plugins_dir` always wins on an id conflict, letting an operator override an installed plugin
+  locally. Overrides are logged at load time.
+
+The [seNorge plugin](https://github.com/dhis2/open-climate-service-senorge-plugin) is the reference
+implementation.
