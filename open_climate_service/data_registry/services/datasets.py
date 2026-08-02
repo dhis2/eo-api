@@ -197,9 +197,7 @@ def _load_entry_point_datasets() -> list[tuple[str, dict[str, Any]]]:
                     continue
                 file_datasets = yaml.safe_load(resource.read_text(encoding="utf-8"))
                 if not isinstance(file_datasets, list):
-                    raise ValueError(
-                        f"{entry_point.name} ({resource.name}) must contain a list of dataset templates"
-                    )
+                    raise ValueError(f"{entry_point.name} ({resource.name}) must contain a list of dataset templates")
                 for dataset in file_datasets:
                     _validate_dataset_template(dataset, source=f"plugin '{entry_point.name}' ({resource.name})")
                     results.append((entry_point.name, dataset))

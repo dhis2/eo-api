@@ -268,8 +268,14 @@ def test_entry_point_plugin_dataset_is_discovered(monkeypatch: pytest.MonkeyPatc
 def test_entry_point_plugin_overrides_builtin(monkeypatch: pytest.MonkeyPatch) -> None:
     """A plugin template with a built-in id overrides the built-in one."""
     monkeypatch.setattr(datasets, "CONFIGS_DIR", None)
-    monkeypatch.setattr(datasets, "_load_builtin_datasets", lambda: [{"id": "x", "name": "builtin", "sync": {"kind": "static"}}])
-    monkeypatch.setattr(datasets, "_load_entry_point_datasets", lambda: [("p", {"id": "x", "name": "plugin", "sync": {"kind": "static"}})])
+    monkeypatch.setattr(
+        datasets, "_load_builtin_datasets", lambda: [{"id": "x", "name": "builtin", "sync": {"kind": "static"}}]
+    )
+    monkeypatch.setattr(
+        datasets,
+        "_load_entry_point_datasets",
+        lambda: [("p", {"id": "x", "name": "plugin", "sync": {"kind": "static"}})],
+    )
     monkeypatch.setattr(api_config, "get_config", lambda: {})
     result = {d["id"]: d for d in datasets.list_datasets()}
     assert result["x"]["name"] == "plugin"
@@ -282,7 +288,11 @@ def test_plugins_dir_overrides_entry_point_plugin(monkeypatch: pytest.MonkeyPatc
     (datasets_dir / "x.yaml").write_text("- id: x\n  name: plugins_dir\n  sync:\n    kind: static\n", encoding="utf-8")
     monkeypatch.setattr(datasets, "CONFIGS_DIR", None)
     monkeypatch.setattr(datasets, "_load_builtin_datasets", lambda: [])
-    monkeypatch.setattr(datasets, "_load_entry_point_datasets", lambda: [("p", {"id": "x", "name": "plugin", "sync": {"kind": "static"}})])
+    monkeypatch.setattr(
+        datasets,
+        "_load_entry_point_datasets",
+        lambda: [("p", {"id": "x", "name": "plugin", "sync": {"kind": "static"}})],
+    )
     monkeypatch.setattr(api_config, "get_config", lambda: {"plugins_dir": str(tmp_path)})
     monkeypatch.setattr(api_config, "get_config_path", lambda: tmp_path / "climate-service.yaml")
     result = {d["id"]: d for d in datasets.list_datasets()}
