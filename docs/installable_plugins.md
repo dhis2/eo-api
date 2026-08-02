@@ -72,9 +72,9 @@ uv add osc-example-plugin
 
 OCS auto-discovers every installed package in the `open_climate_service.plugins` group and loads
 its `datasets/*.yaml` templates, its `processes/` (`@process`-decorated callables), and its
-`workflows/*.json` (openEO UDPs). The ingestion class and any transforms are importable by dotted
-path because the package is installed. The datasets then appear in `/datasets` and can be ingested
-like any built-in.
+`workflows/*.json` (openEO UDPs). The ingestion plugin class is importable by dotted path because
+the package is installed. The datasets then appear in `/datasets` and can be ingested like any
+built-in.
 
 ## Precedence
 
@@ -95,5 +95,5 @@ For example, `osc-senorge-plugin` / `osc_senorge_plugin`.
 ## Reference implementation
 
 The [seNorge plugin](https://github.com/MasterMaps/osc-senorge-plugin) is the reference
-implementation: it ships the seNorge 2018 datasets (source + derived) and the download plugin, and
+implementation: it ships the seNorge 2018 datasets (source + derived) and the ingestion plugin, and
 is consumed by the Norway instance via `uv add`.

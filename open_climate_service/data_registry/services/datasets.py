@@ -175,8 +175,8 @@ def _load_entry_point_datasets() -> list[tuple[str, dict[str, Any]]]:
     """Load dataset templates contributed by installed plugin packages (#118).
 
     A plugin's ``datasets/*.yaml`` templates are loaded here; the package's Python —
-    the ``ingestion.plugin`` class and any transforms — is importable by dotted path
-    because the package is installed, so no ``sys.path`` handling is needed.
+    the ``ingestion.plugin`` class — is importable by dotted path because the package
+    is installed, so no ``sys.path`` handling is needed.
 
     Returns ``(plugin_name, template)`` pairs so the caller can report conflicts.
     """
