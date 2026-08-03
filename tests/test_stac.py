@@ -21,6 +21,7 @@ from open_climate_service.ingestions.schemas import (
     PublicationStatus,
 )
 from open_climate_service.openeo import collections as openeo_collections
+from open_climate_service.shared.geozarr import WEB_OPTIMIZED_ZARR_MEDIA_TYPE, ZARR_V3_MEDIA_TYPE
 from open_climate_service.stac import services as stac_services
 
 
@@ -392,6 +393,51 @@ def test_collection_uses_root_href_for_icechunk_store(client: TestClient, monkey
     assert payload["assets"]["zarr"]["href"].endswith("/zarr/chirps3_precipitation_daily")
     assert payload["assets"]["zarr"]["xarray:open_kwargs"] == {"consolidated": True}
     assert payload["assets"]["zarr"]["zarr:zarr_format"] == 3
+
+
+def _stub_collection_for_media_type(monkeypatch: pytest.MonkeyPatch, *, path: str) -> None:
+    artifact = _artifact(artifact_id="a1", format=ArtifactFormat.ICECHUNK, path=path)
+    monkeypatch.setattr(ingestion_services, "list_artifacts", lambda: SimpleNamespace(items=[artifact]))
+    monkeypatch.setattr(stac_services.registry_datasets, "get_dataset", lambda _: {"period_type": "daily"})
+    monkeypatch.setattr(stac_services, "_build_collection_with_xstac", lambda **_: _minimal_xstac_payload())
+    monkeypatch.setattr(stac_services, "_zarr_asset_metadata", lambda _: {})
+    monkeypatch.setattr(stac_services, "_zarr_open_kwargs", lambda _: {})
+
+
+def test_collection_advertises_multiscales_profile_for_pyramided_store(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pyramided store is advertised as web-optimized so clients will render it."""
+    _stub_collection_for_media_type(monkeypatch, path="/tmp/pyramided.icechunk")
+    monkeypatch.setattr(stac_services, "zarr_media_type", lambda *_, **__: WEB_OPTIMIZED_ZARR_MEDIA_TYPE)
+
+    response = client.get("/collections/chirps3_precipitation_daily")
+
+    assert response.status_code == 200
+    assert response.json()["assets"]["zarr"]["type"] == "application/vnd.zarr; version=3; profile=multiscales"
+
+
+def test_collection_advertises_plain_type_for_flat_store(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A flat store keeps the plain media type — no pyramid is claimed."""
+    _stub_collection_for_media_type(monkeypatch, path="/tmp/flat.icechunk")
+    monkeypatch.setattr(stac_services, "zarr_media_type", lambda *_, **__: ZARR_V3_MEDIA_TYPE)
+
+    response = client.get("/collections/chirps3_precipitation_daily")
+
+    assert response.status_code == 200
+    assert response.json()["assets"]["zarr"]["type"] == "application/vnd.zarr; version=3"
+
+
+def test_collection_media_type_falls_back_when_store_is_unreadable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreadable store yields the plain type rather than failing the collection."""
+    _stub_collection_for_media_type(monkeypatch, path="/tmp/does-not-exist.icechunk")
+
+    response = client.get("/collections/chirps3_precipitation_daily")
+
+    assert response.status_code == 200
+    assert response.json()["assets"]["zarr"]["type"] == "application/vnd.zarr; version=3"
 
 
 def test_collection_returns_404_for_unknown_dataset(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

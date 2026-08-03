@@ -20,6 +20,7 @@ from open_climate_service.data_registry.services import datasets as registry_dat
 from open_climate_service.ingestions import services as ingestion_services
 from open_climate_service.ingestions.schemas import ArtifactFormat, ArtifactRecord
 from open_climate_service.shared.crs import canonical_crs_code, is_builtin_crs
+from open_climate_service.shared.geozarr import ZARR_V3_MEDIA_TYPE, zarr_media_type
 from open_climate_service.shared.time import (
     parse_period_string_to_datetime,
     period_type_to_iso_step,
@@ -206,7 +207,7 @@ def _build_collection_template(
         "zarr",
         pystac.Asset(
             href=zarr_href,
-            media_type="application/vnd.zarr; version=3",
+            media_type=_zarr_media_type(artifact),
             title="Zarr store",
             roles=["data"],
         ),
@@ -656,6 +657,20 @@ def _zarr_asset_metadata(artifact: ArtifactRecord) -> dict[str, object]:
         if zgroup.exists():
             metadata["zarr:zarr_format"] = 2
     return metadata
+
+
+def _zarr_media_type(artifact: ArtifactRecord) -> str:
+    """Advertise the pyramided Zarr media type when the store really is pyramided.
+
+    Lets pyramid-aware clients (e.g. STAC Browser via ol/source/GeoZarr) tell a
+    multiscales store from a flat one, which the plain Zarr media type cannot
+    express. Falls back to the flat type if the store can't be inspected.
+    """
+    try:
+        store_path = _artifact_store_path(artifact)
+    except HTTPException:
+        return ZARR_V3_MEDIA_TYPE
+    return zarr_media_type(store_path, icechunk=artifact.format == ArtifactFormat.ICECHUNK)
 
 
 def _zarr_open_kwargs(artifact: ArtifactRecord) -> dict[str, bool | None]:
