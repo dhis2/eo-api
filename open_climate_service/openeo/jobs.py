@@ -587,6 +587,7 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         y_dim,
         t_dim,
         crs=crs,
+        pyramid_method=downloader.resampling_method_from_template(template),
         commit_message=f"Published from openEO job: {dataset_id}",
     )
 

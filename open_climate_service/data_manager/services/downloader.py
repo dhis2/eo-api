@@ -3,12 +3,13 @@
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import xarray as xr
 import xproj  # noqa: F401  # type: ignore[import-untyped]  # pyright: ignore[reportUnusedImport]
 import zarr
 from geozarr_toolkit import MultiscalesConventionMetadata, create_geozarr_attrs
+from topozarr import CoarseningMethod
 from topozarr.coarsen import create_pyramid
 
 from open_climate_service import config as api_config
@@ -46,6 +47,121 @@ def _pyramid_levels(ds: xr.Dataset, x_dim: str, y_dim: str) -> int:
     max_dim = max(ds.sizes[x_dim], ds.sizes[y_dim])
     levels = math.ceil(math.log2(max_dim / _PYRAMID_TARGET_TILE_SIZE))
     return max(2, min(levels, _PYRAMID_MAX_LEVELS))
+
+
+# Coarsening methods topozarr computes itself, each level block-reduced from the one above
+# (valid because they are composable). Correct for *continuous* data.
+_COMPOSABLE_METHODS = frozenset({"mean", "max", "min", "sum"})
+# Categorical methods topozarr cannot do: they are non-composable and must be resampled from
+# the native (level-0) array, so OCS recomputes those levels itself (see #293, carbonplan/topozarr#26).
+_NATIVE_RESAMPLE_METHODS = frozenset({"mode", "nearest"})
+_RESAMPLING_METHODS = _COMPOSABLE_METHODS | _NATIVE_RESAMPLE_METHODS
+_DEFAULT_RESAMPLING = "mean"
+
+
+def _normalize_resampling_method(raw: object) -> str:
+    """Trim/lower-case a resampling method and validate it against the supported set.
+
+    Unknown or missing values fall back to ``mean`` (the safe default for continuous
+    data) with a warning, so neither a mistyped template value nor a stray direct call
+    reaches topozarr as an invalid ``CoarseningMethod``.
+    """
+    if raw is None:
+        return _DEFAULT_RESAMPLING
+    method = str(raw).strip().lower()
+    if method not in _RESAMPLING_METHODS:
+        logger.warning(
+            "Unknown resampling method %r (expected one of %s); using %r",
+            raw,
+            sorted(_RESAMPLING_METHODS),
+            _DEFAULT_RESAMPLING,
+        )
+        return _DEFAULT_RESAMPLING
+    return method
+
+
+def resampling_method_from_template(template: dict[str, Any] | None) -> str:
+    """Pyramid coarsening method from a dataset template's ``ingestion.resampling`` field.
+
+    It lives under ``ingestion`` rather than ``display`` because it changes the *stored*
+    pyramid data (how coarse levels are aggregated), not how the layer is rendered.
+
+    Defaults to ``mean`` — correct for continuous data (temperature, precipitation, …).
+    Categorical layers should declare ``mode`` (multi-class, e.g. land-cover class codes)
+    or ``max`` (binary presence masks); ``mean`` averages class codes into meaningless
+    values at coarse zoom. An unrecognised value falls back to ``mean`` with a warning.
+    """
+    ingestion = (template or {}).get("ingestion")
+    raw = ingestion.get("resampling") if isinstance(ingestion, dict) else None
+    return _normalize_resampling_method(raw)
+
+
+def _mode_reduce(values: Any, axis: Any = None, **_kwargs: Any) -> Any:
+    """Majority value over ``axis`` — the reducer xarray's ``coarsen(...).reduce`` calls.
+
+    ``axis`` is the tuple of window axes; flatten them and take the per-cell mode so a
+    coarsened cell keeps a real class code instead of an average. NaNs are ignored.
+    """
+    import numpy as np
+    from scipy import stats  # type: ignore[import-untyped]
+
+    if axis is None:
+        axes: tuple[int, ...] = tuple(range(values.ndim))
+    elif isinstance(axis, (tuple, list)):
+        axes = tuple(int(a) for a in axis)
+    else:
+        axes = (int(axis),)
+    axes = tuple(a % values.ndim for a in axes)
+    keep = [a for a in range(values.ndim) if a not in axes]
+    moved = np.transpose(values, keep + list(axes))
+    flat = moved.reshape(*(values.shape[a] for a in keep), -1)
+    result = stats.mode(flat, axis=-1, nan_policy="omit", keepdims=False)
+    return result.mode
+
+
+def _coarsen_native(da: xr.DataArray, x_dim: str, y_dim: str, factor: int, method: str) -> xr.DataArray:
+    """Coarsen ``da`` by ``factor`` over the spatial dims using a non-composable ``method``.
+
+    ``boundary="trim"`` drops the trailing partial window, so the result is
+    ``floor(size / factor)`` per spatial dim — the same shape topozarr produces by
+    repeatedly halving, so the output drops straight into the level's existing array.
+    """
+    window = {x_dim: factor, y_dim: factor}
+    coarsen = da.coarsen(window, boundary="trim")
+    if method == "nearest":
+        # Decimation: keep the top-left cell of each window (a real, unaltered value).
+        constructed = coarsen.construct({x_dim: (x_dim, "_ocs_wx"), y_dim: (y_dim, "_ocs_wy")})
+        return constructed.isel(_ocs_wx=0, _ocs_wy=0)
+    if method == "mode":
+        return coarsen.reduce(_mode_reduce)
+    raise ValueError(f"unsupported native-resample method {method!r}")
+
+
+def _overwrite_native_resampled_levels(
+    store: Any, ds: xr.Dataset, x_dim: str, y_dim: str, levels: int, method: str
+) -> None:
+    """Replace topozarr's coarsened levels with a native resample for categorical data.
+
+    topozarr block-reduces each level from the level above, which is wrong for ``mode`` /
+    ``nearest`` (a coarse cell must be derived from the native cells it covers, not from an
+    already-coarsened parent). topozarr has still written every level's group/array with the
+    right shape, chunking and encoding, so we recompute levels 1..N-1 straight from the
+    native (level-0) arrays and write the values back in place.
+    """
+    root = zarr.open_group(store, mode="a")
+    spatial_vars = [str(name) for name, da in ds.data_vars.items() if {x_dim, y_dim} <= set(da.dims)]
+    for lvl in range(1, levels):
+        factor = 2**lvl
+        level_group = cast(zarr.Group, root[str(lvl)])
+        for name in spatial_vars:
+            da = ds[name]
+            coarsened = _coarsen_native(da, x_dim, y_dim, factor, method).transpose(*da.dims)
+            target = cast(zarr.Array, level_group[name])
+            values = coarsened.values
+            if values.shape != target.shape:
+                # Defensive: clip to the level array's shape if trimming disagrees by a cell.
+                values = values[tuple(slice(0, s) for s in target.shape)]
+            target[:] = values.astype(target.dtype, copy=False)
 
 
 def _write_root_time_coordinate(zarr_store: "Path | Any", ds: xr.Dataset, *, time_dim: str) -> None:
@@ -169,6 +285,7 @@ def write_to_icechunk_store(
     t_dim: str | None = "t",
     *,
     crs: str | None = None,
+    pyramid_method: str = "mean",
     commit_message: str = "Materialized dataset",
 ) -> None:
     """Write *ds* to an Icechunk store, building a multiscale pyramid when needed.
@@ -227,7 +344,17 @@ def write_to_icechunk_store(
 
         # topozarr.create_pyramid requires fully materialised numpy arrays.
         ds = ds.load()
-        pyramid = create_pyramid(ds, levels=levels, x_dim=x_dim, y_dim=y_dim, method="mean")
+        # Validate/normalize here too, so a direct caller passing e.g. "MAX" or a mistyped
+        # value never reaches topozarr as an invalid CoarseningMethod (falls back to mean).
+        pyramid_method = _normalize_resampling_method(pyramid_method)
+        # topozarr only offers composable coarsening (mean/max/min/sum). For categorical
+        # methods (mode/nearest) it writes valid structure with a placeholder here, then we
+        # overwrite the coarsened levels from native below (see #293).
+        native_resample = pyramid_method in _NATIVE_RESAMPLE_METHODS
+        composable_method = "max" if native_resample else pyramid_method
+        pyramid = create_pyramid(
+            ds, levels=levels, x_dim=x_dim, y_dim=y_dim, method=cast(CoarseningMethod, composable_method)
+        )
         # Pyramid.write() writes the root group attributes from ``pyramid.attrs``,
         # so merge the GeoZarr conventions (multiscales / proj / spatial) in here.
         pyramid.attrs.update(geozarr_attrs)
@@ -244,6 +371,12 @@ def write_to_icechunk_store(
                 pyramid.fill_values[str(var_name)] = 0
 
         pyramid.write(session.store, mode="w")
+
+        if native_resample:
+            # Categorical data: recompute the coarsened levels from native so class codes /
+            # masks aren't averaged (topozarr wrote them composably above; replace in place).
+            logger.info("Resampling pyramid levels of '%s' from native (%s)", store_path.name, pyramid_method)
+            _overwrite_native_resampled_levels(session.store, ds, x_dim, y_dim, levels, pyramid_method)
 
         # topozarr demotes spatial_ref from coordinate to data variable in the pyramid.
         # Patch the root and each level group: add CRS to multiscales datasets entries so

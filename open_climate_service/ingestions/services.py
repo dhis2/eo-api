@@ -462,7 +462,12 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
                 store_path.name,
             )
             return
-        downloader.write_to_icechunk_store(ds.load(), store_path, commit_message="Applied GeoZarr conventions")
+        downloader.write_to_icechunk_store(
+            ds.load(),
+            store_path,
+            pyramid_method=downloader.resampling_method_from_template(dataset),
+            commit_message="Applied GeoZarr conventions",
+        )
     except Exception:
         logger.error(
             "GeoZarr/pyramid write failed for '%s'; flat Icechunk artifact will be used as-is",
