@@ -136,6 +136,43 @@ tmax.process("heat_wave_frequency", arguments={
 
 ---
 
+## Derived meteorological variables (earthkit-meteo)
+
+Alongside the xclim indicators, the thermodynamic functions of ECMWF's [earthkit-meteo](https://earthkit.ecmwf.int) are auto-registered as processes. These are not indices but *derivations* — quantities computed from other quantities, useful as inputs to an index or a health model:
+
+| Process | Computes |
+|---|---|
+| `relative_humidity_from_dewpoint` | Relative humidity (%) from temperature and dewpoint |
+| `dewpoint_from_relative_humidity` | Dewpoint from temperature and relative humidity |
+| `specific_humidity_from_dewpoint` | Specific humidity from dewpoint and pressure |
+| `wet_bulb_temperature_from_dewpoint` | Wet-bulb temperature — a heat-stress input |
+| `saturation_vapour_pressure` | Saturation vapour pressure over water/ice/mixed phase |
+| `potential_temperature`, `virtual_temperature` | Thermodynamic temperatures |
+
+Relative humidity is the common case, since ERA5-Land provides temperature and dewpoint but not humidity directly:
+
+```python
+rh = t2m.process("relative_humidity_from_dewpoint", arguments={"t": t2m, "td": d2m})
+```
+
+Browse the full set in `GET /processes`; every function earthkit-meteo documents with a single cube output is registered.
+
+### Units are converted for you
+
+These functions expect ECMWF's native units — temperature in **K**, pressure in **Pa** — and do no checking of their own. Our stores are usually not in those units: ERA5-Land temperature is converted to `degC` at ingest. Passing `degC` where `K` is expected produces no error, just a wrong number.
+
+The registered processes therefore enforce units on the way in. A cube in a compatible unit is converted (`degC` → `K`, `hPa` → `Pa`); a cube whose `units` attribute is missing or incompatible is rejected with an explanatory error. So you can pass a stored `degC` temperature directly and get a correct answer:
+
+```python
+# era5land_temperature_daily is stored in degC — converted to K automatically
+rh = conn.load_collection("era5land_temperature_daily") \
+         .process("relative_humidity_from_dewpoint", arguments={"t": t, "td": td})
+```
+
+If a cube is rejected for missing units, the fix is to declare `units` on the variable in its dataset template — that value is what gets CF-stamped at ingest.
+
+---
+
 ## Customising an index
 
 The auto-registered xclim processes can be overridden per-instance by placing a `@process`-decorated function with the same id in `plugins_dir/processes/`. This is useful for adjusting default parameters or adding domain-specific documentation without modifying shared code.
@@ -160,4 +197,5 @@ See [Extensibility — Processes](extensibility.md#processes) for the full `@pro
 
 - [xclim documentation](https://xclim.readthedocs.io)
 - [xclim indicator catalogue](https://xclim.readthedocs.io/en/stable/indicators.html)
+- [earthkit-meteo documentation](https://earthkit-meteo.readthedocs.io)
 - [openEO process graph specification](https://processes.openeo.org)
