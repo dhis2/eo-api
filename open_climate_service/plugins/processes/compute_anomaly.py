@@ -6,6 +6,22 @@ Delegates the day-of-year/month alignment and subtraction to
 observed cube's datetime axis and combines them — so anomalies can be computed from an
 already-published observed dataset and a published normal (see the ``climate_anomaly``
 workflow). ``relative=True`` yields percent-of-normal.
+
+The subtraction, the calendar indexing and the ``relative`` percent form are all earthkit's.
+What this module adds is deliberately limited to two kinds of thing, kept separate so the
+first shrinks over time and the second does not (see CLIM-859):
+
+**Tracked upstream gaps** — delete once earthkit covers them:
+
+- ``_match_spatial_grid`` works around exact-equality coordinate alignment.
+
+**OCS policy** — ours to own, because earthkit is a general library and should not be
+deciding our domain rules:
+
+- refusing ``relative`` for temperature, an interval scale where percent-of-normal is
+  meaningless;
+- refusing an observed/normal temporal-resolution mismatch, which earthkit would otherwise
+  silently resample.
 """
 
 from __future__ import annotations
@@ -65,13 +81,25 @@ def _observed_step_days(observed: xr.DataArray, t_dim: str) -> float | None:
 def _match_spatial_grid(normal: xr.DataArray, observed: xr.DataArray, t_dim: str) -> xr.DataArray:
     """Snap the normal onto the observed cube's spatial grid.
 
-    Observed and normal cubes can be produced independently (e.g. a CDS-derived observed
-    vs an EDH normal whose longitudes were remapped from [0, 360)), so equal nominal grids
+    Observed and normal cubes can be produced independently (e.g. a CDS-derived observed vs
+    an EDH normal whose longitudes were remapped from [0, 360)), so nominally equal grids
     may still differ by floating-point noise (~1e-11). earthkit's anomaly subtracts the
-    climatology with xarray, which aligns coordinates by exact equality — that would
-    intersect such grids to nothing and yield an empty anomaly. Reindex the normal onto the
-    observed coordinates by nearest neighbour within half a grid step, so float noise snaps
-    cleanly while genuinely unmatched cells become NaN rather than collapsing the grid.
+    climatology with plain xarray arithmetic, which aligns coordinates by **exact
+    equality**, and it does not warn when that fails.
+
+    Measured against earthkit-transforms 1.0.0: with 1e-11 of noise on a single row, the
+    result keeps its full shape — a closing ``broadcast_like`` restores the dimensions — but
+    every cell on the mismatched row comes back NaN. So the output *looks* structurally
+    correct while silently losing data, and when the whole axis is uniformly offset (the
+    realistic remapped-longitude case) that is every cell in the cube.
+
+    Reindexing the normal onto the observed coordinates by nearest neighbour within half a
+    grid step makes float noise snap cleanly, while a genuinely unmatched cell still becomes
+    NaN rather than being silently paired with a distant neighbour.
+
+    Upstream gap, not a preference: earthkit could either accept a tolerance or — cheaper and
+    arguably better — detect the failed alignment and raise instead of returning a quietly
+    NaN cube. To be filed against ecmwf/earthkit-transforms; delete this helper once it lands.
 
     The step is taken from the first spacing of each axis, i.e. a *regular* grid is assumed
     (true for the lat/lon and UTM grids this serves); an irregular axis would mis-size the
@@ -115,6 +143,10 @@ def compute_anomaly(observed: xr.DataArray, normal: xr.DataArray, method: str = 
             raise ValueError("method 'standardised' (z-score) needs a standard-deviation normal — see issue #223")
         raise ValueError(f"method must be one of {_METHODS}, got {method!r}")
 
+    # earthkit 1.0 auto-detects the time dimension, so passing time_dim below is belt and
+    # braces. The detection is kept for the *error*: given a cube with no datetime axis,
+    # earthkit fails with "Invalid frequency 'month' - see xarray documentation", which
+    # names neither the real problem nor the cube. Checking here says what is actually wrong.
     t_dim = next(
         (d for d in observed.dims if d in observed.coords and np.issubdtype(observed[d].dtype, np.datetime64)),
         None,
@@ -127,6 +159,9 @@ def compute_anomaly(observed: xr.DataArray, normal: xr.DataArray, method: str = 
     if ordinal is None:
         raise ValueError(f"normal must have one of {_ORDINALS} as a dimension, got dims {tuple(normal.dims)}")
 
+    # OCS policy, not an earthkit gap: earthkit offers `relative` for any variable, which is
+    # correct for a general library. Deciding it is invalid for our temperature datasets is
+    # our call, so this guard stays regardless of what upstream does.
     if method == "relative" and _is_temperature_like(observed, normal):
         raise ValueError(
             "method 'relative' is not meaningful for temperature (an interval scale): dividing by the "
@@ -134,8 +169,10 @@ def compute_anomaly(observed: xr.DataArray, normal: xr.DataArray, method: str = 
             "only for ratio-scale variables such as precipitation."
         )
 
-    # Reject an observed/normal resolution mismatch: earthkit would otherwise silently
-    # resample the observed to the normal's frequency (e.g. daily → monthly means).
+    # OCS policy, as above. earthkit would silently resample the observed cube to the
+    # normal's frequency (daily observed against a month normal → monthly means), returning
+    # a plausible result for a pairing the caller almost certainly did not intend. Upstream
+    # could reasonably warn; refusing outright is our decision, so this guard also stays.
     step = _observed_step_days(observed, t_dim)
     if step is not None:
         if ordinal == "month" and step < _MONTHLY_STEP_DAYS:
