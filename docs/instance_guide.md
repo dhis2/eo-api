@@ -138,6 +138,7 @@ plugins_dir: ./plugins/
 | `extent.country_code` | No | ISO 3166-1 alpha-3 — required for WorldPop downloads |
 | `data_dir` | Yes | Directory for downloaded files and Zarr stores, resolved relative to the config file |
 | `plugins_dir` | No | Directory containing `datasets/`, `processes/`, and `workflows/` plugin subdirectories |
+| `read_only` | No | Set `true` to refuse all state-changing requests — see [Read-only instances](#read-only-instances). Defaults to `false` |
 
 To find the bounding box for a region, [bboxfinder.com](http://bboxfinder.com) is a useful tool.
 
@@ -255,3 +256,66 @@ make run
 For containerised deployment, the core open-climate-service repository ships a `Dockerfile`
 and a `compose.yml` that can serve as a starting point for packaging an instance. A
 dedicated instance Docker guide is planned.
+
+### Read-only instances
+
+An instance exposed to people who should be able to *browse* the data but not change it —
+a public demo, a shared reference endpoint — should run read-only:
+
+```yaml
+read_only: true
+```
+
+Every state-changing request is then refused with `403`, and the openEO capabilities
+document at `GET /openeo` stops advertising the endpoints that would refuse, so clients
+discover the reduced surface rather than discovering it by failing. `GET /info` reports
+`read_only: true`.
+
+**What stays available**
+
+| | |
+| --- | --- |
+| Catalogue and metadata | `/collections`, `/stac`, `/datasets`, `/processes`, `/process_graphs`, `/extent` |
+| Data | `/zarr/…`, `/icechunk/…`, dataset downloads |
+| Web UI | the landing page and the `/map` viewer |
+| Computation | `POST /result` — synchronous openEO process graphs |
+
+`POST /result` stays open deliberately: it is a POST only because the process graph travels
+in the request body, and it is how anyone actually *uses* the instance. It cannot publish a
+dataset, because the synchronous path rejects Zarr output outright.
+
+**What is refused**
+
+Ingestion and sync, the `/manage` admin console, stored process graphs (`PUT`/`DELETE
+/process_graphs/{id}`), and batch jobs.
+
+Batch jobs are closed entirely rather than merely made read-only. There is no request
+identity yet — `/me` reports `anonymous` for every caller — so the job namespace is shared:
+`GET /jobs` would list every visitor's jobs and `DELETE /jobs/{id}` would let anyone remove
+someone else's. Per-user job isolation arrives with authentication.
+
+**Ingesting on a read-only instance**
+
+Read-only applies to HTTP. Ingestion becomes an operator task performed on the host, which
+is what allows the switch to be absolute — there is no exemption, token or trusted header
+that could be misconfigured into a bypass. Until a dedicated CLI command exists, run the
+ingestion function directly inside the container or virtualenv:
+
+```python
+from open_climate_service.ingestions.processes import execute_ingestion
+
+execute_ingestion(dataset_id="era5land_temperature_monthly", start="2016-01", end="2016-12")
+```
+
+Note in particular that there is deliberately **no** "requests from localhost may write"
+escape hatch. Behind a reverse proxy on the same host every public request arrives from
+`127.0.0.1`, so such an exemption would open the instance to everyone while appearing to
+work during testing.
+
+**Defence in depth**
+
+Read-only mode protects data integrity, not availability. `POST /result` remains an
+unbounded compute endpoint, so a public instance should also sit behind a reverse proxy
+that **allowlists** the routes above — an allowlist, not a denylist, since a denylist
+silently permits every route added in a later release — and applies request timeouts, body
+size limits and per-IP rate limiting.
