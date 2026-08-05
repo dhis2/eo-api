@@ -144,11 +144,12 @@ def _overwrite_native_resampled_levels(
 ) -> None:
     """Replace topozarr's coarsened levels with a native resample for categorical data.
 
-    topozarr block-reduces each level from the level above, which is wrong for ``mode`` /
-    ``nearest`` (a coarse cell must be derived from the native cells it covers, not from an
-    already-coarsened parent). topozarr has still written every level's group/array with the
-    right shape, chunking and encoding, so we recompute levels 1..N-1 straight from the
-    native (level-0) arrays and write the values back in place.
+    topozarr block-reduces each level from the level above, which is wrong for ``mode``: a
+    coarse cell's majority class must be derived from the native cells it covers, not from an
+    already-coarsened parent, or a locally dominant class can win at coarse zoom while being
+    globally rare. topozarr has still written every level's group/array with the right shape,
+    chunking and encoding, so we recompute levels 1..N-1 straight from the native (level-0)
+    arrays and write the values back in place.
     """
     root = zarr.open_group(store, mode="a")
     spatial_vars = [str(name) for name, da in ds.data_vars.items() if {x_dim, y_dim} <= set(da.dims)]
@@ -349,9 +350,9 @@ def write_to_icechunk_store(
         # Validate/normalize here too, so a direct caller passing e.g. "MAX" or a mistyped
         # value never reaches topozarr as an invalid CoarseningMethod (falls back to mean).
         pyramid_method = _normalize_resampling_method(pyramid_method)
-        # topozarr only offers composable coarsening (mean/max/min/sum). For categorical
-        # methods (mode/nearest) it writes valid structure with a placeholder here, then we
-        # overwrite the coarsened levels from native below (see #293).
+        # topozarr only offers composable coarsening (mean/max/min/sum/nearest). For `mode`
+        # it writes valid structure with a placeholder here, then we overwrite the coarsened
+        # levels from native below (see #293 and carbonplan/topozarr#26).
         native_resample = pyramid_method in _NATIVE_RESAMPLE_METHODS
         composable_method = "max" if native_resample else pyramid_method
         pyramid = create_pyramid(
