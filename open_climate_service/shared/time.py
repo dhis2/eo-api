@@ -166,6 +166,39 @@ def daily_period_ids(start: str | date, end: str | date, *, cutoff: str | date |
     return out
 
 
+def monthly_period_ids(start: str | date, end: str | date, *, cutoff: str | date | None = None) -> list[str]:
+    """Return ``YYYY-MM`` strings for every month in ``[start, end]`` inclusive.
+
+    The monthly counterpart of :func:`daily_period_ids`, with the same contract: accepts ISO
+    strings (``2024-03`` or ``2024-03-17``) or ``date``/``datetime`` objects, returns an
+    empty list when ``start`` is after ``end``, and ``cutoff`` caps ``end`` so a plugin owns
+    only its availability clamp rather than the month arithmetic.
+
+    Any day within a month selects that month, so a caller need not normalise to the first.
+    """
+
+    def _as_year_month(value: str | date) -> tuple[int, int]:
+        if isinstance(value, datetime):
+            return value.year, value.month
+        if isinstance(value, date):
+            return value.year, value.month
+        text = str(value)
+        return int(text[:4]), int(text[5:7])
+
+    year, month = _as_year_month(start)
+    last_year, last_month = _as_year_month(end)
+    if cutoff is not None:
+        cutoff_year, cutoff_month = _as_year_month(cutoff)
+        if (cutoff_year, cutoff_month) < (last_year, last_month):
+            last_year, last_month = cutoff_year, cutoff_month
+
+    out: list[str] = []
+    while (year, month) <= (last_year, last_month):
+        out.append(f"{year:04d}-{month:02d}")
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return out
+
+
 def parse_hourly_period_string(value: str) -> datetime:
     """Parse a dataset-native hourly period string or full ISO datetime."""
     if len(value) == 13:

@@ -1,13 +1,13 @@
-"""CHIRPS3 plugin for per-period streaming ingest.
+"""CHIRPS3 plugins for per-period streaming ingest.
 
 CHIRPS3 keeps the first vertical slice small:
-- daily periods
+- daily and monthly periods
 - grid inferred from the first fetched period
 - one remote raster per period
 - straightforward bbox clipping into the requested extent
 
-This plugin stays intentionally source-focused. It knows how to derive the
-available periods and fetch one day, but it does not know anything about job
+These plugins stay intentionally source-focused. They know how to derive the
+available periods and fetch one period, but they do not know anything about job
 state, artifact records, or store mutation beyond returning one dataset.
 """
 
@@ -15,14 +15,55 @@ from __future__ import annotations
 
 import asyncio
 import calendar
+from collections.abc import Callable
 from datetime import UTC, date, datetime
-from typing import Any
+from typing import Any, TypeVar
 
 import xarray as xr
 
-from open_climate_service.streaming import BaseDatasetPlugin, daily_period_ids, normalize_period
+from open_climate_service.streaming import (
+    BaseDatasetPlugin,
+    daily_period_ids,
+    monthly_period_ids,
+    normalize_period,
+)
 
 _CHIRPS3_NODATA = -9999.0
+
+_T = TypeVar("_T")
+
+
+def _latest_published(
+    candidates: Callable[[int], _T],
+    url_for: Callable[[_T], str],
+    *,
+    lookback: int,
+    description: str,
+) -> _T:
+    """Return the most recent candidate period whose raster is actually published.
+
+    Issues a HEAD request per candidate, walking backwards from the present, so the
+    availability cutoff reflects real CDN state rather than a hardcoded lag assumption —
+    CHIRPS3's publication delay varies. Shared by the daily and monthly plugins, which
+    differ only in what a candidate is and how its URL is built.
+
+    Args:
+        candidates: maps a step count (0 = most recent candidate) to a candidate period.
+        url_for: builds the raster URL to probe for a candidate.
+        lookback: how many steps back to try before giving up.
+        description: used in the error message when nothing is published.
+
+    Raises:
+        RuntimeError: if no candidate within ``lookback`` steps is published.
+    """
+    import httpx
+
+    for step in range(lookback):
+        candidate = candidates(step)
+        response = httpx.head(url_for(candidate), timeout=10, follow_redirects=True)
+        if response.status_code == 200:
+            return candidate
+    raise RuntimeError(f"No published CHIRPS3 {description} found in the last {lookback} steps")
 
 
 class CHIRPS3DailyPlugin(BaseDatasetPlugin):
@@ -66,26 +107,16 @@ class CHIRPS3DailyPlugin(BaseDatasetPlugin):
         return normalize_period(da, variable="precip", period=period_id, nodata=_CHIRPS3_NODATA, bbox=bbox)
 
     def _availability_cutoff(self) -> date:
-        """Return the last day of the most recently published complete month.
+        """Return the last day of the most recently published complete month."""
 
-        Scans backward with a HEAD request on the last-day COG URL so the
-        cutoff reflects actual CDN state rather than a hardcoded lag assumption.
-        Raises if no published month is found within the last 6 months.
-        """
-        import httpx
+        def candidate(step: int) -> date:
+            today = datetime.now(UTC).date()
+            months_back = step + 1  # the current month is never complete
+            year, month = divmod(today.year * 12 + today.month - 1 - months_back, 12)
+            month += 1
+            return date(year, month, calendar.monthrange(year, month)[1])
 
-        today = datetime.now(UTC).date()
-        y, m = today.year, today.month
-        for _ in range(6):
-            m -= 1
-            if m == 0:
-                m, y = 12, y - 1
-            last_day = calendar.monthrange(y, m)[1]
-            candidate = date(y, m, last_day)
-            resp = httpx.head(self._url_for_day(candidate), timeout=10, follow_redirects=True)
-            if resp.status_code == 200:
-                return candidate
-        raise RuntimeError("No published CHIRPS3 month found in the last 6 months")
+        return _latest_published(candidate, self._url_for_day, lookback=6, description="daily month")
 
     def _url_for_day(self, day: date) -> str:
         """Build the remote CHIRPS3 raster URL for one day."""
@@ -98,3 +129,84 @@ class CHIRPS3DailyPlugin(BaseDatasetPlugin):
             f"https://data.chc.ucsb.edu/products/CHIRPS/v3.0/daily/prelim/sat/{day.year}/"
             f"chirps-v3.0.prelim.{day.year}.{day.month:02d}.{day.day:02d}.tif"
         )
+
+
+class CHIRPS3MonthlyPlugin(BaseDatasetPlugin):
+    """Streaming plugin for CHIRPS3 monthly precipitation.
+
+    One global COG per calendar month, so no ``stage``/``flavor`` variants and no
+    constructor arguments. The archive runs from 1981-01.
+
+    Stored as **mm/day**, not the raw monthly total. That is a real conversion rather than
+    the relabel the daily plugin gets away with: the source raster is a monthly *total* in
+    mm — verified against the sum of the same month's dailies, which matches to four decimal
+    places — so the rate is ``total / days_in_month``. It matters because every other monthly
+    precipitation dataset here is mm/d, including ``chirps3_precipitation_monthly_normal_1991_2020``,
+    which is the natural partner for a monthly anomaly. Storing the total under the same
+    units would make that pairing silently wrong by a factor of ~30.
+    """
+
+    max_concurrency = 4
+    commit_batch_size = 12
+
+    async def periods(self, start: str, end: str) -> list[str]:
+        """Return ordered ``YYYY-MM`` periods, clamped to the latest published month."""
+        cutoff = await asyncio.to_thread(self._availability_cutoff)
+        return monthly_period_ids(start, end, cutoff=cutoff)
+
+    def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
+        """Fetch one month, convert the total to a mean daily rate, and clip to the bbox."""
+        import rioxarray
+
+        year, month = self._parse_month(period_id)
+        da = rioxarray.open_rasterio(self._url_for_month(year, month), chunks=None, masked=True)
+        if not isinstance(da, xr.DataArray):
+            raise TypeError(f"Expected DataArray from CHIRPS3 monthly raster read, got {type(da).__name__}")
+
+        # Convert before masking so the nodata sentinel is still recognisable: -9999 / 31
+        # would no longer match _CHIRPS3_NODATA. normalize_period masks on the raw value,
+        # so scale only the valid data and leave the sentinel alone.
+        days_in_month = calendar.monthrange(year, month)[1]
+        da = da.where(da == _CHIRPS3_NODATA, da / days_in_month)
+
+        # Stamp the first of the month as the time coordinate, matching the monthly
+        # convention used by the ERA5-Land monthly datasets.
+        return normalize_period(
+            da,
+            variable="precip",
+            period=f"{year:04d}-{month:02d}-01",
+            nodata=_CHIRPS3_NODATA,
+            bbox=bbox,
+        )
+
+    def _availability_cutoff(self) -> str:
+        """Return the ``YYYY-MM`` of the most recently published monthly COG."""
+
+        def candidate(step: int) -> tuple[int, int]:
+            today = datetime.now(UTC).date()
+            year, month = divmod(today.year * 12 + today.month - 1 - step, 12)
+            return year, month + 1
+
+        year, month = _latest_published(
+            candidate,
+            lambda ym: self._url_for_month(*ym),
+            # The monthly final product trails the calendar by a month or two; 24 is ample
+            # headroom for a longer-than-usual upstream delay.
+            lookback=24,
+            description="monthly COG",
+        )
+        return f"{year:04d}-{month:02d}"
+
+    @staticmethod
+    def _parse_month(period_id: str) -> tuple[int, int]:
+        """Accept ``YYYY-MM`` or any ``YYYY-MM-DD`` within the month."""
+        text = str(period_id)
+        try:
+            return int(text[:4]), int(text[5:7])
+        except (ValueError, IndexError) as exc:
+            raise ValueError(f"Invalid CHIRPS3 monthly period id {period_id!r}: expected YYYY-MM") from exc
+
+    @staticmethod
+    def _url_for_month(year: int, month: int) -> str:
+        """Build the remote CHIRPS3 monthly COG URL for one month."""
+        return f"https://data.chc.ucsb.edu/products/CHIRPS/v3.0/monthly/global/cogs/chirps-v3.0.{year}.{month:02d}.cog"

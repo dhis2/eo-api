@@ -22,7 +22,7 @@ from open_climate_service.shared.time import (
     datetime_to_period_string,
     parse_period_string_to_datetime,
 )
-from open_climate_service.streaming import BaseDatasetPlugin
+from open_climate_service.streaming import BaseDatasetPlugin, monthly_period_ids
 from open_climate_service.transforms.unit_conversion import kelvin_to_celsius, metres_to_mm
 
 # CDS API long-name variables for reanalysis-era5-land-monthly-means
@@ -213,18 +213,7 @@ class ERA5LandMonthlyPlugin(BaseDatasetPlugin):
 
     async def periods(self, start: str, end: str) -> list[str]:
         cutoff = await asyncio.to_thread(_monthly_availability_cutoff)
-        start_dt = _parse_monthly(start)
-        end_dt = min(_parse_monthly(end), datetime(cutoff.year, cutoff.month, 1))
-        if start_dt > end_dt:
-            return []
-        result: list[str] = []
-        current = start_dt
-        while current <= end_dt:
-            result.append(f"{current.year:04d}-{current.month:02d}")
-            month = current.month % 12 + 1
-            year = current.year + (1 if current.month == 12 else 0)
-            current = datetime(year, month, 1)
-        return result
+        return monthly_period_ids(_parse_monthly(start), _parse_monthly(end), cutoff=cutoff)
 
     def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
         year, month = int(period_id[:4]), int(period_id[5:7])
