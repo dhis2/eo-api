@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 import xarray as xr
 from openeo_pg_parser_networkx.pg_schema import Date, ParameterReference, TemporalInterval
+from pydantic import ValidationError
 
 from open_climate_service.openeo import execution
 from open_climate_service.openeo.execution import _naive_temporal_scalar
@@ -112,7 +113,7 @@ def test_day_of_year_strings_are_left_intact(value: str) -> None:
     never validate as a pg-parser Date, so they arrive as plain strings and must reach
     xclim unchanged — normalising them into a full date would break those indicators.
     """
-    with pytest.raises(Exception):  # noqa: B017 - pydantic ValidationError, exact type is upstream's
+    with pytest.raises(ValidationError):
         Date.model_validate(value)
     assert _naive_temporal_scalar(value) is value
 

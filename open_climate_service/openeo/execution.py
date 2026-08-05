@@ -533,8 +533,11 @@ def _naive_temporal_scalar(value: Any) -> Any:
     # ordinary string arguments ("MS", "1991", "07-01", "mm/d", "degC") are untouched,
     # as is a naive ISO string, which is returned unchanged rather than reformatted.
     if isinstance(value, str):
+        # Rewrite a trailing "Z" only. A blanket replace() would touch any "Z" in the
+        # string, which is harder to reason about than the one position ISO 8601 uses it in.
+        candidate = f"{value[:-1]}+00:00" if value.endswith("Z") else value
         try:
-            parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.datetime.fromisoformat(candidate)
         except ValueError:
             return value
         return value if parsed.tzinfo is None else parsed.replace(tzinfo=None).isoformat()
@@ -545,8 +548,13 @@ def _naive_temporal_scalar(value: Any) -> Any:
     if not isinstance(root, datetime.date):
         return value
 
+    # Imported here rather than at module scope to match the rest of this module, which
+    # defers every openeo_pg_parser_networkx import so the package is only required when a
+    # process graph actually runs. After the first call this is a sys.modules lookup.
+    from openeo_pg_parser_networkx.pg_schema import Date
+
     text = _strip_tz(root.isoformat()) or ""
-    if type(value).__name__ == "Date":
+    if isinstance(value, Date):
         return text.split("T", 1)[0]
     return text
 
