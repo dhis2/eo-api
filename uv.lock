@@ -1984,6 +1984,7 @@ server = [
     { name = "stac-validator" },
     { name = "starlette" },
     { name = "topozarr" },
+    { name = "topozarr-core" },
     { name = "uvicorn" },
     { name = "xarray" },
     { name = "xclim" },
@@ -2039,7 +2040,8 @@ requires-dist = [
     { name = "rioxarray", marker = "extra == 'server'", specifier = ">=0.17" },
     { name = "stac-validator", marker = "extra == 'server'", specifier = ">=3.3.1" },
     { name = "starlette", marker = "extra == 'server'", specifier = ">=0.27.0" },
-    { name = "topozarr", marker = "extra == 'server'", specifier = ">=0.0.91,<0.1" },
+    { name = "topozarr", marker = "extra == 'server'", specifier = ">=0.1.3,<0.2" },
+    { name = "topozarr-core", marker = "extra == 'server'", specifier = ">=0.1.2,<0.2" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.41.0" },
     { name = "xarray", marker = "extra == 'server'", specifier = ">=2025.12.0" },
     { name = "xarray", marker = "extra == 'xarray'", specifier = ">=2025.12.0" },
@@ -2127,7 +2129,7 @@ name = "oschmod"
 version = "0.3.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pywin32" },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9d/64/6e522f0a1b500470ae14dcd1a4bb8f8751f5cf441e85e9fee7dfc712cb7b/oschmod-0.3.12.tar.gz", hash = "sha256:bec99216f31615ee653b2a5c87cacfb4e4b6184c0e9f71da186300dacae974f3", size = 20064, upload-time = "2020-10-30T00:38:42.409Z" }
 wheels = [
@@ -3393,7 +3395,7 @@ wheels = [
 
 [[package]]
 name = "topozarr"
-version = "0.0.91"
+version = "0.1.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
@@ -3404,24 +3406,24 @@ dependencies = [
     { name = "xproj" },
     { name = "zarr" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d2/fe/d0c1187dadf2f4bc47f82ebf6215add47242fc9f6ae4197191846ef0dc74/topozarr-0.0.91.tar.gz", hash = "sha256:4eab2046abe868232320f2d113a8b0e5ea8a92e0c89199dd7a143fb691feada5", size = 14017, upload-time = "2026-06-11T04:19:15.167Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/01/1edf239494253f99c2709d63ecad54cd2f4d0a56b7b466c064a8171e3268/topozarr-0.1.3.tar.gz", hash = "sha256:27161b3d25f607397b51ccedf9e2ab0b06bb71301217ab9c057d031d0fccd958", size = 21502, upload-time = "2026-08-03T20:58:50.624Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f1/43/95e8171ddafa2058531bb6093d12ba42b9051f69b1e0514b508252cdb72c/topozarr-0.0.91-py3-none-any.whl", hash = "sha256:c1c1107541d6c432ee82c22f9fe9262f4c2d1223c0427415665af43a2709bbc9", size = 17013, upload-time = "2026-06-11T04:19:15.92Z" },
+    { url = "https://files.pythonhosted.org/packages/93/36/40fd1ba12ac9024243c25b99d9b67c4371da33347f8017587793d9bac240/topozarr-0.1.3-py3-none-any.whl", hash = "sha256:cb3d883549b4f7bea07449fbcbed63721a813d342b440c3ec768078bccdd1702", size = 25289, upload-time = "2026-08-03T20:58:49.669Z" },
 ]
 
 [[package]]
 name = "topozarr-core"
-version = "0.1.0"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/19/1a/20ab04138a05d452ccfbffda1473c89649335ecfb6674bd91e202fc121cf/topozarr_core-0.1.0.tar.gz", hash = "sha256:a6ecf677ad8e466be4af65655523049e9cd25c2b0435a80d0408ec3bb798abf7", size = 5292, upload-time = "2026-06-10T21:21:27.957Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/81/1d/97ff7fc7028c1093c279632eaf8f941d20ab0c6389427d6d423e73e1eafb/topozarr_core-0.1.2.tar.gz", hash = "sha256:e504388029df432866ad0ba35abb2ef7f2b26523bbf49a7c3707f430638d5023", size = 30593, upload-time = "2026-08-03T20:58:25.236Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/63/e1/5befadd853f2fcf2e1709274ddd12182c00ca35b16a084fd800227509e85/topozarr_core-0.1.0-cp312-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:f1cf23ca24d69a0e14c3dc5814cbdfcbdf8ed4dad122c5927e08c99a8171049f", size = 611901, upload-time = "2026-06-10T21:21:30.942Z" },
-    { url = "https://files.pythonhosted.org/packages/f9/53/755f1b8fc242e1f605462fae7f8c8fba5adb675abf38baba2c6d9cd73a31/topozarr_core-0.1.0-cp312-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:7fb73cbace9866d9a5a2c21ba956cda82619c96375e65af338664ba834286940", size = 332258, upload-time = "2026-06-10T21:21:28.756Z" },
-    { url = "https://files.pythonhosted.org/packages/2e/a6/6a5771596ba0c6baa1ad8f3e91df44b51241b58cb109aa12b5014b707513/topozarr_core-0.1.0-cp312-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b7b5e3cc694fecf04e4f0d00f3ecef3c15beda55cef097f3aeefe582f24af6e7", size = 338095, upload-time = "2026-06-10T21:21:32.088Z" },
-    { url = "https://files.pythonhosted.org/packages/26/8f/51752ed5ea272422759c8a366ce624a10f51b7d770109d3ea481900b5881/topozarr_core-0.1.0-cp312-abi3-win_amd64.whl", hash = "sha256:8aaddccf62bd762244080ea7f4cda856f07e6ae546242952295a5f8fcced5a21", size = 223939, upload-time = "2026-06-10T21:21:29.972Z" },
+    { url = "https://files.pythonhosted.org/packages/de/6a/1b289c38412da4835e44e031b144e9822ef1021a4a8bf2b83d6a53daabcc/topozarr_core-0.1.2-cp312-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:f4638eb68d1883a090d6b4b9e7abb52275f26909bfa97c449217108776505d61", size = 9408282, upload-time = "2026-08-03T20:58:19.647Z" },
+    { url = "https://files.pythonhosted.org/packages/63/11/a7bd819337f4594c6c1ea646e370a5ee3c1b09ba17e51b43b9ab513fb0a8/topozarr_core-0.1.2-cp312-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c5d9543c3277c9ae3d55879630d9896b339171b903040351b3d445789ded289d", size = 5069340, upload-time = "2026-08-03T20:58:21.465Z" },
+    { url = "https://files.pythonhosted.org/packages/52/e2/57735c975e563b0e2c1b4ddb493826858fab8422074f0ef8ce5637292dd6/topozarr_core-0.1.2-cp312-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:e38032bd050c5749d6c7b3fd46d88f4e9348ea5ea75a2dc60023d2568e4cf37f", size = 4899842, upload-time = "2026-08-03T20:58:22.682Z" },
+    { url = "https://files.pythonhosted.org/packages/43/6d/4daacf77cfef5568a14efe0aea495c70bdac1befc2e9da0274dfb3f6e30e/topozarr_core-0.1.2-cp312-abi3-win_amd64.whl", hash = "sha256:75bd8c0d7a6a88cedc4d74de97254c9f394465ad0033be709ffb4640b938e72d", size = 4650377, upload-time = "2026-08-03T20:58:24.145Z" },
 ]
 
 [[package]]

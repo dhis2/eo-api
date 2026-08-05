@@ -74,7 +74,15 @@ server = [
     "zarr>=3.1.6,<4",
     "icechunk>=2.0,<3",
     "geozarr-toolkit==0.1.*",
-    "topozarr>=0.0.91,<0.1",
+    # 0.1.3 added the `nearest` coarsening method, so categorical pyramids no longer need a
+    # local decimation path (carbonplan/topozarr#26). `mode` is still ours — see downloader.
+    "topozarr>=0.1.3,<0.2",
+    # Pinned explicitly because topozarr's own constraint is `topozarr-core>=0.1.0,<0.2`,
+    # which is too loose: the `nearest` kernel only exists from core 0.1.2. Resolving to
+    # 0.1.0 leaves `nearest` accepted by the Python layer but failing inside the kernel with
+    # "method must be one of 'mean', 'max', 'min', 'sum'" — and only at ingest time, not on
+    # import. Drop this once upstream raises its own lower bound.
+    "topozarr-core>=0.1.2,<0.2",
     "rioxarray>=0.17",
     # Directly imported (shared/time.py, streaming, openeo). Capped to 2.x; pandas
     # 3.0 is a breaking major and not yet validated against this stack.
