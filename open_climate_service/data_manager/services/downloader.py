@@ -13,8 +13,12 @@ from topozarr import CoarseningMethod
 from topozarr.coarsen import create_pyramid
 
 from open_climate_service import config as api_config
-from open_climate_service.shared.crs import dataset_crs
 from open_climate_service.shared.geozarr import grid_geometry, write_gdal_geotransform
+from open_climate_service.shared.raster_contract import (
+    normalize_dim_layout,
+    normalize_longitudes,
+    resolve_store_crs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -302,12 +306,24 @@ def write_to_icechunk_store(
     import icechunk
     import rioxarray as _rxr  # noqa: F401  # pyright: ignore[reportUnusedImport]  # activates .rio accessor
 
-    if crs is None:
-        # Data is stored in its native CRS — the one the source delivered it in,
-        # recovered from the dataset itself. Never the instance config CRS:
-        # stamping e.g. EPSG:32633 onto WGS84 ERA5-Land coordinates puts the
-        # store off-map.
-        crs = dataset_crs(ds)
+    # Enforce the published-store layout contract here, at the write boundary, rather than
+    # relying on every plugin to get it right (CLIM-821). This is the whole-store rewrite
+    # path, so the longitude roll — which changes coordinate values — is safe here.
+    ds = normalize_dim_layout(ds, time_dim="t", x_dim=x_dim, y_dim=y_dim)
+    if t_dim is not None and t_dim != "t":
+        # The caller named the temporal dim as it arrived; normalisation has renamed it, so the
+        # rest of this function (root time coordinate, chunking) must follow the new name.
+        t_dim = "t" if "t" in ds.dims else t_dim
+
+    # Data is stored in its native CRS — the one the source delivered it in, recovered from
+    # the dataset itself. Never the instance config CRS: stamping e.g. EPSG:32633 onto WGS84
+    # ERA5-Land coordinates puts the store off-map. `resolve_store_crs` also refuses a
+    # *caller-supplied* CRS the coordinates contradict, which is how that used to happen.
+    crs = resolve_store_crs(ds, crs, x_dim=x_dim, y_dim=y_dim)
+    # Must follow the CRS resolution, not precede it: the roll applies to geographic axes only,
+    # so deciding it from an unvalidated declared CRS would skip the roll for exactly the
+    # lon/lat grid mislabelled as projected that resolve_store_crs just corrected.
+    ds = normalize_longitudes(ds, x_dim=x_dim, crs=crs)
 
     # Array order, (y, x): `spatial:dimensions` and `spatial:shape` are read positionally, so
     # naming them x-first transposes the grid for any client that trusts the convention.

@@ -564,9 +564,13 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     # "Mosquito hotspots (Rwanda 2018 Q1)" rather than "mosquito_hotspots".
     dataset_name: str = options.get("dataset_name") or template.get("name") or dataset_id
 
-    from open_climate_service import config as api_config
+    # The cube's own CRS — the store's `proj:code` when it has one, else whatever rioxarray
+    # detects from its grid mapping. Deliberately NOT the instance config CRS: falling back to
+    # that stamped e.g. EPSG:32633 onto an untagged WGS84 cube, which puts the published store
+    # at the projection's origin instead of on the map (CLIM-821).
+    from open_climate_service.shared.crs import dataset_crs
 
-    crs: str = ds.attrs.get("proj:code") or api_config.get_crs()
+    crs: str = dataset_crs(ds)
 
     # Stamp CF attributes (units / standard_name / cell_methods) from the template so the
     # published store is CF-compliant on disk (#280). The template is authoritative for the

@@ -27,6 +27,7 @@ from typing import Any, cast
 import xarray as xr
 
 from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
+from open_climate_service.shared.raster_contract import normalize_dim_layout
 from open_climate_service.streaming.protocol import GridSpec, IngestionPlugin
 from open_climate_service.streaming.store import (
     is_store_empty,
@@ -232,6 +233,12 @@ async def run_streaming_ingest(
             # open_dataset / remote HTTP) once it is written, so long backfills don't
             # leak file descriptors one period at a time.
             try:
+                # Enforce the naming/axis-order half of the published contract on every period,
+                # so a plugin can return data in its source's orientation (CLIM-821). Only the
+                # value-preserving half belongs here: rolling longitudes to −180…180 reorders
+                # the x axis, which would not match the x coordinates an existing store was
+                # created with, so that runs in the whole-store rewrite (write_to_icechunk_store).
+                ds = normalize_dim_layout(ds, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim)
                 # Infer the grid from the first fetched period, before _strip_cf_encoding
                 # so the nodata sentinel survives into the spec.
                 if spec is None:

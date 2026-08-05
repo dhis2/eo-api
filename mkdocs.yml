@@ -68,6 +68,7 @@ nav:
   - Concepts:
       - Architecture: architecture.md
       - Zarr and GeoZarr: zarr_and_geozarr.md
+      - Raster conventions: conventions.md
       - Project overview: project_description.md
   - Guides:
       - Instance guide: instance_guide.md
