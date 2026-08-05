@@ -200,13 +200,16 @@ Functions decorated with `@process` and placed in `plugins_dir/processes/` are r
 
 Every zarr artifact must have GeoZarr root attributes for map rendering to work correctly. These are written into `zarr.json` at the store root:
 
+- `spatial:transform` — the affine `[stepX, rotX, originX, rotY, stepY, originY]` that places the grid
+- `spatial:dimensions` — row/column axis names in array order, `["y", "x"]`
+- `spatial:shape` — grid size as `[height, width]`
 - `spatial:bbox` — `[xmin, ymin, xmax, ymax]` in the native CRS
 - `proj:code` — the CRS EPSG code (e.g. `EPSG:32633` for UTM, `EPSG:4326` for WGS84)
 - `zarr_conventions` — GeoZarr convention declaration
 
-The map viewer reads `spatial:bbox` and `proj:code` to determine where to position tiles on the map.
+The map viewer reads `spatial:bbox` and `proj:code` to determine where to position tiles on the map. Clients that read the store without a catalog (QGIS, GeoZarr viewers) use `spatial:transform` together with the axis order above — see [zarr_and_geozarr.md](zarr_and_geozarr.md#geozarr-root-attributes) for why both the order and the affine matter.
 
-**The framework writes these attributes — plugins do not.** They are written after reprojection, using the actual coordinate bounds of the final written data and the instance CRS.
+**The framework writes these attributes — plugins do not.** They are written after reprojection, from the stored coordinate arrays of the final written data (not from the requested bbox) and the instance CRS.
 
 ---
 

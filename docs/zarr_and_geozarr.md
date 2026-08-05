@@ -100,13 +100,36 @@ Both flat and pyramid stores are written in **Zarr v3** format using regular chu
 
 A plain Zarr store has no concept of spatial coordinates. A map viewer opening it has no way to know where to position tiles on a map. GeoZarr addresses this by writing a small set of attributes into `zarr.json` at the store root:
 
-| Attribute          | Example value             | Purpose                        |
-| ------------------ | ------------------------- | ------------------------------ |
-| `spatial:bbox`     | `[3.0, 57.0, 32.0, 72.5]` | Bounding box in the stored CRS |
-| `proj:code`        | `EPSG:4326`               | CRS of the stored coordinates  |
-| `zarr_conventions` | `[{...}]`                 | Convention declarations        |
+| Attribute            | Example value                              | Purpose                                          |
+| -------------------- | ------------------------------------------ | ------------------------------------------------ |
+| `spatial:transform`  | `[0.05, 0, 2.95, 0, -0.05, 60.0]`          | Affine placing the grid: cell size and origin     |
+| `spatial:dimensions` | `["y", "x"]`                               | Names of the row and column axes, in array order |
+| `spatial:shape`      | `[60, 581]`                                | Grid size as `[height, width]`                    |
+| `spatial:bbox`       | `[2.95, 57.0, 32.0, 60.0]`                 | Bounding box in the stored CRS                    |
+| `proj:code`          | `EPSG:4326`                                | CRS of the stored coordinates                     |
+| `zarr_conventions`   | `[{...}]`                                  | Convention declarations                           |
 
-These attributes are computed from the actual coordinate bounds of the written data and its CRS. They are always written by the framework after any transforms have run. This guarantees they always reflect the final stored data.
+Two details matter to any client that reads the store directly:
+
+- **Axis order is array order, `(y, x)`.** `spatial:dimensions` and `spatial:shape` are read
+  positionally — the second-to-last entry is the row axis, the last is the column axis. Naming
+  them x-first, or writing the shape as `[width, height]`, transposes the grid.
+- **`spatial:transform` is what actually places the raster.** It is `[stepX, rotX, originX,
+  rotY, stepY, originY]`, with the origin on the outer *edge* of the first cell (pixel
+  registration) and `stepY` negative for a north-up grid. Clients that find no affine fall
+  back to inferring one from the coordinate arrays, and typically assume EPSG:4326 while doing
+  so — which silently mislocates a store held in projected metres.
+
+The same affine is also written to the `spatial_ref` grid-mapping variable as a GDAL
+`GeoTransform`, in GDAL's own coefficient order (`originX stepX rotX originY rotY stepY`).
+That is what makes the store self-describing to GDAL/QGIS, and it is how a viewer recognises
+a projected grid rather than degrees.
+
+These attributes are computed from the **stored coordinate arrays** — not from the requested
+bbox. A source may return less than was asked for (CHIRPS ends at 60°N, so a request reaching
+72.5°N yields a store that stops at 60°N), and describing the request would stretch the raster
+over ground the store does not cover. They are always written by the framework after any
+transforms have run, so they reflect the final stored data.
 
 `zarr_conventions` for a flat store contains the base GeoZarr convention declaration. For pyramid stores it also includes a `multiscales` entry that declares the level structure.
 

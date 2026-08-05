@@ -154,8 +154,11 @@ def test_orchestrator_uses_store_state_as_resume_truth(monkeypatch: pytest.Monke
 
     root = zarr.open_group(store_path, mode="r")
     assert root.attrs["proj:code"] == "EPSG:4326"
-    assert root.attrs["spatial:dimensions"] == ["x", "y"]
+    # Array order, (y, x) — see tests/test_geozarr_grid_metadata.py for why.
+    assert root.attrs["spatial:dimensions"] == ["y", "x"]
     assert root.attrs["spatial:shape"] == [1, 1]
+    # A 1x1 grid has no derivable cell size, so no affine is claimed for it.
+    assert "spatial:transform" not in root.attrs
 
     run_streaming_ingest_sync(
         plugin=_FakePlugin(),
