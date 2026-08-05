@@ -27,7 +27,12 @@ from typing import Any, cast
 import xarray as xr
 
 from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
-from open_climate_service.shared.raster_contract import normalize_dim_layout
+from open_climate_service.shared.raster_contract import (
+    normalize_dim_layout,
+    normalize_longitudes,
+    normalize_y_direction,
+    spatial_coords_match,
+)
 from open_climate_service.streaming.protocol import GridSpec, IngestionPlugin
 from open_climate_service.streaming.store import (
     is_store_empty,
@@ -130,6 +135,40 @@ def _grid_spec_from_dataset(
     )
 
 
+def _assert_appendable_axes(store_path: Path, ds: xr.Dataset, *, x_dim: str, y_dim: str) -> None:
+    """Refuse to append a period whose spatial axes disagree with the committed store.
+
+    Normalisation reorders rows (y descending) and columns (longitudes rolled to −180…180). An
+    append writes along the time axis only, so the committed coordinate arrays stay as they were:
+    a period normalised one way, appended to a store written the other, puts data under
+    coordinates that no longer describe it — a silently mirrored or half-shifted raster, which is
+    far worse than metadata being out of date.
+
+    That can only happen to a store written before the contract existed (or by a plugin whose
+    orientation has since changed), and the fix is a re-ingest rather than anything this function
+    can do safely, so it fails with an actionable message instead of guessing.
+    """
+    from open_climate_service.streaming.store import read_committed_spatial_coords
+
+    stored = read_committed_spatial_coords(store_path, x_dim=x_dim, y_dim=y_dim)
+    if stored is None:
+        return  # nothing committed to disagree with, or a store we cannot read
+    for axis in (y_dim, x_dim):
+        if axis not in ds.coords or axis not in stored:
+            continue
+        if spatial_coords_match(stored[axis], ds[axis], axis=axis):
+            continue
+        raise RuntimeError(
+            f"Cannot append to {store_path.name}: its committed {axis!r} coordinates do not match "
+            f"the normalised ones for this period "
+            f"(store {stored[axis][0]!r}…{stored[axis][-1]!r}, "
+            f"period {float(ds[axis].values[0])!r}…{float(ds[axis].values[-1])!r}). "
+            "The store predates the published-store layout contract (y descending, longitudes "
+            "−180…180); appending would write data under coordinates that no longer describe it. "
+            "Re-ingest this dataset from scratch to rebuild it under the current contract."
+        )
+
+
 async def run_streaming_ingest(
     *,
     plugin: IngestionPlugin,
@@ -196,6 +235,8 @@ async def run_streaming_ingest(
     # Icechunk transaction batching.
     commit_batch_size = max(1, int(getattr(plugin, "commit_batch_size", 1)))
     expected_spatial_shape: tuple[int, int] | None = None
+    # The append-axes check runs once per run, on the first period appended to an existing store.
+    axes_checked = False
     # CF attributes (units / standard_name / cell_methods) declared on the template,
     # stamped onto each written period so the store is CF-compliant on disk (#280).
     # The template is authoritative for the fields it declares, so we overwrite any
@@ -233,12 +274,13 @@ async def run_streaming_ingest(
             # open_dataset / remote HTTP) once it is written, so long backfills don't
             # leak file descriptors one period at a time.
             try:
-                # Enforce the naming/axis-order half of the published contract on every period,
-                # so a plugin can return data in its source's orientation (CLIM-821). Only the
-                # value-preserving half belongs here: rolling longitudes to −180…180 reorders
-                # the x axis, which would not match the x coordinates an existing store was
-                # created with, so that runs in the whole-store rewrite (write_to_icechunk_store).
+                # Enforce the published-store contract on every period, so a plugin can return
+                # data in whatever orientation its source delivers (CLIM-821). Deterministic, so
+                # every period of a run agrees; a store written before the contract can disagree,
+                # which _assert_appendable_axes catches below.
                 ds = normalize_dim_layout(ds, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim)
+                ds = normalize_y_direction(ds, y_dim=y_dim)
+                ds = normalize_longitudes(ds, x_dim=x_dim, crs=getattr(plugin, "crs", None))
                 # Infer the grid from the first fetched period, before _strip_cf_encoding
                 # so the nodata sentinel survives into the spec.
                 if spec is None:
@@ -267,6 +309,9 @@ async def run_streaming_ingest(
                     ds.to_zarr(session.store, mode="w", zarr_format=3)
                     is_first_write = False
                 else:
+                    if not axes_checked:
+                        _assert_appendable_axes(store_path, ds, x_dim=x_dim, y_dim=y_dim)
+                        axes_checked = True
                     ds.to_zarr(session.store, append_dim=spec.time_dim, zarr_format=3)
                 # Root attrs are rewritten on every commit so later append sessions
                 # preserve GeoZarr metadata even if the underlying store layer only

@@ -100,6 +100,33 @@ def is_store_empty(store_path: Path) -> bool:
         return False
 
 
+def read_committed_spatial_coords(store_path: Path, *, x_dim: str = "x", y_dim: str = "y") -> Any:
+    """The spatial coordinate arrays already committed to a store, or None.
+
+    An append writes along the time axis only, leaving these as they are — so a period whose
+    rows or columns have been reordered by normalisation would land under coordinates that no
+    longer describe it. The orchestrator compares against these before its first append.
+
+    Returns None when there is nothing to compare against (new store, unreadable, no coords).
+    """
+    import xarray as xr
+
+    if not store_path.exists():
+        return None
+    try:
+        repo = open_or_create_repo(store_path)
+        ds = xr.open_zarr(repo.readonly_session("main").store)
+        try:
+            if x_dim not in ds.coords or y_dim not in ds.coords:
+                return None
+            return {x_dim: ds[x_dim].values, y_dim: ds[y_dim].values}
+        finally:
+            ds.close()
+    except Exception:  # noqa: BLE001 — best effort; a store we cannot read cannot be checked
+        logger.debug("Could not read committed spatial coordinates from %s", store_path, exc_info=True)
+        return None
+
+
 def _stored_grid_geometry(root: Any, spec: GridSpec) -> dict[str, Any] | None:
     """Grid geometry read from the store's own coordinate arrays, or None if unavailable.
 

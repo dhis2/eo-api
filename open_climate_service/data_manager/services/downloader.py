@@ -17,6 +17,7 @@ from open_climate_service.shared.geozarr import grid_geometry, write_gdal_geotra
 from open_climate_service.shared.raster_contract import (
     normalize_dim_layout,
     normalize_longitudes,
+    normalize_y_direction,
     resolve_store_crs,
 )
 
@@ -324,6 +325,9 @@ def write_to_icechunk_store(
     # so deciding it from an unvalidated declared CRS would skip the roll for exactly the
     # lon/lat grid mislabelled as projected that resolve_store_crs just corrected.
     ds = normalize_longitudes(ds, x_dim=x_dim, crs=crs)
+    # Row 0 must be the northernmost row: the thumbnail renderer and OpenLayers' GeoZarr source
+    # both assume it and neither checks. See shared/raster_contract.
+    ds = normalize_y_direction(ds, y_dim=y_dim)
 
     # Array order, (y, x): `spatial:dimensions` and `spatial:shape` are read positionally, so
     # naming them x-first transposes the grid for any client that trusts the convention.

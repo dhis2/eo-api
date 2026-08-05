@@ -11,21 +11,36 @@ The contract:
 
 1. the temporal dimension is named ``t``
 2. spatial dims are named ``y`` / ``x`` and ordered ``(…, y, x)``
-3. for a geographic CRS, longitudes run −180…180 rather than 0…360
-4. the declared CRS matches the coordinates it describes
+3. ``y`` descends — array row 0 is the northernmost row
+4. for a geographic CRS, longitudes run −180…180 rather than 0…360
+5. the declared CRS matters and matches the coordinates it describes
 
-**Not** in the contract: the direction of ``y``. The ticket originally required ascending
-(south→north) because the map viewer's zarr-layer did; as of 0.6.1 it detects the direction
-from the ``y`` coordinate array instead (``detectedLatAscending = y1 > y0``), and OCS stores
-always take its "untiled" path, so either direction renders. Stores therefore keep the
-direction their source delivered — which for most rasters is north-up, matching GDAL's
-convention for the ``GeoTransform`` written alongside. A reader must honour the ``y``
-coordinate rather than assume a direction.
+Invariant 3 exists because real consumers assume a direction and never check. Two of them:
+
+* ``openeo/jobs.py`` renders result thumbnails with ``imshow(..., origin="upper")`` straight off
+  the array — row 0 is north, unconditionally.
+* OpenLayers' ``ol/source/GeoZarr``, the renderer STAC Browser uses, derives its tile grid
+  ``origin`` as ``[bbox[0], bbox[3]]`` (top-left) and computes
+  ``minRow = (origin[1] - tileExtent[3]) / resolution``, feeding that straight into the array
+  slice. There is no ``reverse``/``flip`` and no read of ``spatial:transform``'s y step anywhere
+  in that file, so an ascending store renders vertically mirrored with no signal it could use.
+
+Descending rather than ascending: OpenLayers requires it and cannot detect otherwise, GDAL's
+``GeoTransform`` convention for north-up is a negative y step, most sources are north-up already
+so the normalisation is usually a no-op — and carbonplan/zarr-layer, the one consumer that *does*
+detect the direction from the coordinate array, is satisfied either way and so does not constrain
+the choice.
 
 Axis order here is *array* order, ``(…, y, x)`` — NumPy row-major, CF's ``T,Z,Y,X``, and what
 xarray/rioxarray/GDAL/GeoZarr all assume. It does not conflict with GeoJSON's ``[x, y]``
 coordinate pairs and ``[west, south, east, north]`` bboxes, which stay as RFC 7946 requires:
 those describe coordinate tuples, not an N-D array. See docs/conventions.md.
+
+Invariants 3 and 4 reorder the array. Applying either to a period being appended to a store
+whose axes were written the other way round would put rows or columns under coordinates that no
+longer describe them — silent mirrored data, which is worse than stale metadata. So an append
+must first check the store it is appending to; see
+:func:`spatial_coords_match` and the orchestrator's use of it.
 """
 
 from __future__ import annotations
@@ -93,13 +108,33 @@ def normalize_dim_layout(
     return ds
 
 
+def normalize_y_direction(ds: "xr.Dataset", *, y_dim: str = "y") -> "xr.Dataset":
+    """Reverse the rows of a south-up dataset so ``y`` descends (row 0 = north).
+
+    Consumers assume this and do not check — see the module docstring for the two that would
+    otherwise render mirrored. Reverses the coordinate *and* the data together, so the value at
+    a given latitude does not move; only its row index does.
+
+    A no-op for the north-up rasters most sources deliver, so this usually costs one comparison.
+    """
+    if y_dim not in ds.coords or ds.sizes.get(y_dim, 0) < 2:
+        return ds
+    y = ds[y_dim].values
+    try:
+        already_descending = bool(y[1] < y[0])
+    except (IndexError, TypeError, ValueError):
+        return ds
+    if already_descending:
+        return ds
+    logger.info("Reversing %r so row 0 is the northernmost row (was south-up)", y_dim)
+    return ds.isel({y_dim: slice(None, None, -1)})
+
+
 def normalize_longitudes(ds: "xr.Dataset", *, x_dim: str = "x", crs: str | None = None) -> "xr.Dataset":
     """Roll a geographic x axis from 0…360 to −180…180 and sort it ascending.
 
     Only for a geographic CRS — an easting in a projected CRS is legitimately larger than 180
-    and must not be touched. This *does* change coordinate values and reorders the array, so
-    it belongs to a whole-store rewrite, not to a period being appended to a store whose x
-    axis is already fixed.
+    and must not be touched.
 
     A no-op when no longitude exceeds 180, which is the case for every source that already
     publishes on the −180…180 frame.
@@ -217,6 +252,37 @@ def resolve_store_crs(
     return from_data
 
 
+def spatial_coords_match(
+    stored: "Any",
+    incoming: "Any",
+    *,
+    axis: str,
+    tolerance: float = 1e-9,
+) -> bool:
+    """True when an incoming period's axis coordinates match the ones already in the store.
+
+    An append writes along the time axis only: the spatial coordinate arrays already committed
+    stay as they are. So if normalisation reorders a period's rows or columns relative to how the
+    store was written — a store created before invariant 3 or 4, or by a plugin that has since
+    changed orientation — the new data lands under coordinates that no longer describe it. That
+    is silently mirrored data, which is why this is checked rather than assumed.
+
+    Compares elementwise with a tolerance, since a coordinate can survive a float round trip
+    through Zarr with a last-bit difference.
+    """
+    import numpy as np
+
+    try:
+        a = np.asarray(getattr(stored, "values", stored), dtype="float64")
+        b = np.asarray(getattr(incoming, "values", incoming), dtype="float64")
+    except (TypeError, ValueError):
+        logger.debug("Could not compare %s coordinates; skipping the check", axis)
+        return True
+    if a.shape != b.shape:
+        return False
+    return bool(np.allclose(a, b, rtol=0.0, atol=tolerance, equal_nan=True))
+
+
 def published_contract_violations(
     ds: "xr.Dataset",
     *,
@@ -243,6 +309,13 @@ def published_contract_violations(
         var_dims = tuple(str(d) for d in var.dims)
         if y_dim in var_dims and x_dim in var_dims and var_dims[-2:] != (y_dim, x_dim):
             problems.append(f"variable {str(name)!r} has dims {var_dims}, not (…, {y_dim}, {x_dim})")
+    if y_dim in ds.coords and ds.sizes.get(y_dim, 0) >= 2:
+        y = ds[y_dim].values
+        try:
+            if bool(y[1] > y[0]):
+                problems.append(f"{y_dim!r} ascends — row 0 must be the northernmost row")
+        except (IndexError, TypeError, ValueError):
+            pass
     declared: Any = ds.attrs.get("proj:code")
     units = _axis_units(str(declared)) if declared else None
     if declared and units == "linear" and _looks_geographic(ds, x_dim=x_dim, y_dim=y_dim):

@@ -1558,6 +1558,15 @@ def _write_png(ds: Any, results_dir: Any) -> str | None:
 
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
     fig.patch.set_alpha(0)
+    # `origin="upper"` puts array row 0 at the top, which is right because published stores
+    # guarantee y descending (row 0 = north) — see shared/raster_contract. A cube that reaches
+    # here south-up (an in-flight openEO result, not a published store) is flipped first, so the
+    # thumbnail is never upside down.
+    y_name = next((str(d) for d in arr.dims if str(d) in ("y", "lat", "latitude")), None)
+    if y_name is not None and y_name in arr.coords and arr.sizes.get(y_name, 0) >= 2:
+        y_values = arr[y_name].values
+        if float(y_values[1]) > float(y_values[0]):
+            data = data[::-1]
     ax.imshow(data, origin="upper", cmap=cmap, norm=norm, interpolation="nearest")
     ax.axis("off")
     fig.tight_layout(pad=0)
