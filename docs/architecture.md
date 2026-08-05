@@ -209,7 +209,7 @@ Every zarr artifact must have GeoZarr root attributes for map rendering to work 
 
 The map viewer reads `spatial:bbox` and `proj:code` to determine where to position tiles on the map. Clients that read the store without a catalog (QGIS, GeoZarr viewers) use `spatial:transform` together with the axis order above — see [zarr_and_geozarr.md](zarr_and_geozarr.md#geozarr-root-attributes) for why both the order and the affine matter.
 
-**The framework writes these attributes — plugins do not.** They are written after reprojection, from the stored coordinate arrays of the final written data (not from the requested bbox) and the instance CRS.
+**The framework writes these attributes — plugins do not.** They are derived from the stored coordinate arrays of the final written data — not from the requested bbox, and not from the instance-wide `crs:`. Nothing is reprojected at ingest: each dataset keeps the CRS its source delivered, and `proj:code` records that native CRS. See [Raster conventions](conventions.md#what-the-framework-guarantees).
 
 ---
 
@@ -231,17 +231,20 @@ The artifact store keeps the full history of records for sync deduplication and 
 
 Plugin code (streaming plugins, `@process` functions) can rely on the following being handled automatically by the framework:
 
-| Concern                                               | Where handled                               |
-| ----------------------------------------------------- | ------------------------------------------- |
-| Coordinate name normalisation (`lat` → `y`, etc.)     | `build_dataset_zarr`                        |
-| Reprojection to instance CRS                          | `reproject_to_instance_crs`                 |
-| Zarr chunking (auto-sized from `extents.temporal.resolution`) | `_compute_time_space_chunks`         |
-| Multiscale pyramid generation (when dims > 2048×2048) | `build_dataset_zarr`                        |
-| GeoZarr root attributes (`spatial:bbox`, `proj:code`) | `build_dataset_zarr`                        |
-| Artifact coverage computation                         | `_coverage_from_dataset`                    |
-| Artifact record persistence                           | `_store_artifact`                           |
-| STAC publication                                      | `publish_artifact_record` if `publish=true` |
-| STAC collection generation                            | Dynamic from artifact record                |
+| Concern                                                       | Where handled                                     |
+| ------------------------------------------------------------- | ------------------------------------------------- |
+| Coordinate name normalisation (`lat` → `y`, `time` → `t`)      | `normalize_period` / `normalize_dim_layout`        |
+| Axis order `(…, y, x)` and `y` descending                      | `normalize_dim_layout` / `normalize_y_direction`   |
+| Longitudes rolled to −180…180 for geographic data              | `normalize_longitudes`                            |
+| CRS kept consistent with the coordinates (never reprojected)   | `resolve_store_crs`                               |
+| Zarr chunking (auto-sized from `extents.temporal.resolution`)  | `time_chunk_for_iso_step`                         |
+| Multiscale pyramid generation (when dims > 2048×2048)          | `write_to_icechunk_store`                         |
+| GeoZarr root attributes (`spatial:transform`, `proj:code`, …)  | `grid_geometry` / `write_geozarr_attrs`            |
+| Artifact coverage computation                                  | `_coverage_from_dataset`                          |
+| Artifact record persistence                                    | `_store_artifact_record`                          |
+| STAC publication                                               | `publish_artifact_record` if `publish=true`       |
+| STAC collection generation                                     | Dynamic from the artifact record                  |
+| Media type advertising a pyramid (`profile=multiscales`)        | `zarr_media_type`                                 |
 
 Plugin code only needs to produce data. Everything else is the framework's responsibility.
 
