@@ -175,6 +175,11 @@ def monthly_period_ids(start: str | date, end: str | date, *, cutoff: str | date
     only its availability clamp rather than the month arithmetic.
 
     Any day within a month selects that month, so a caller need not normalise to the first.
+
+    Raises:
+        ValueError: for a malformed or out-of-range value, matching how ``daily_period_ids``
+            fails fast via ``date.fromisoformat``. Strictness is not cosmetic here: a month
+            outside 1..12 used to walk the increment past its 12 → 1 wrap and loop forever.
     """
 
     def _as_year_month(value: str | date) -> tuple[int, int]:
@@ -182,8 +187,10 @@ def monthly_period_ids(start: str | date, end: str | date, *, cutoff: str | date
             return value.year, value.month
         if isinstance(value, date):
             return value.year, value.month
-        text = str(value)
-        return int(text[:4]), int(text[5:7])
+        # Reuse the canonical monthly parser rather than slicing: it accepts YYYY-MM or any
+        # ISO date within the month and rejects everything else with a clear message.
+        canonical = normalize_period_string(str(value), "monthly")
+        return int(canonical[:4]), int(canonical[5:7])
 
     year, month = _as_year_month(start)
     last_year, last_month = _as_year_month(end)

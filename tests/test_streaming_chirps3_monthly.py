@@ -82,6 +82,40 @@ def test_accepts_date_objects() -> None:
     assert monthly_period_ids(date(2024, 11, 17), date(2025, 1, 3)) == ["2024-11", "2024-12", "2025-01"]
 
 
+def test_an_out_of_range_month_does_not_loop_forever() -> None:
+    """Regression: month 13 used to hang, not merely return a wrong answer.
+
+    The increment only wraps at exactly 12, so a month of 13 climbed indefinitely while the
+    ``(year, month) <= (last_year, last_month)`` guard stayed true — an unbounded loop
+    appending to a list. Validation is what makes it unreachable.
+    """
+    import signal
+
+    def _bail(*_: object) -> None:
+        raise TimeoutError("monthly_period_ids did not terminate")
+
+    original = signal.signal(signal.SIGALRM, _bail)
+    signal.alarm(5)
+    try:
+        with pytest.raises(ValueError, match="Invalid monthly period"):
+            monthly_period_ids("2025-13", "2026-01")
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, original)
+
+
+@pytest.mark.parametrize("value", ["2025-13", "2025-00", "2025-1", "2025", "garbage", ""])
+def test_rejects_malformed_months(value: str) -> None:
+    """Fails fast like ``daily_period_ids`` does via ``date.fromisoformat``."""
+    with pytest.raises(ValueError, match="Invalid monthly period"):
+        monthly_period_ids(value, "2026-01")
+
+
+def test_rejects_a_malformed_end_too() -> None:
+    with pytest.raises(ValueError, match="Invalid monthly period"):
+        monthly_period_ids("2025-01", "2025-13")
+
+
 def test_era5_land_monthly_uses_the_shared_helper() -> None:
     """It hand-rolled the same month loop before; the third copy is what prompted this."""
     from open_climate_service.plugins.datasets import era5_land
@@ -138,9 +172,12 @@ def test_accepts_a_full_date_period_id(stub_raster: None) -> None:
     assert np.datetime_as_string(ds["t"].values[0], unit="D") == "2025-03-01"
 
 
-def test_rejects_an_unparseable_period_id(stub_raster: None) -> None:
+@pytest.mark.parametrize("value", ["not-a-month", "2025-13", "2025-00", "2025-1", "2025"])
+def test_rejects_an_unparseable_period_id(stub_raster: None, value: str) -> None:
+    """An out-of-range month should name the plugin's contract, not surface as
+    ``calendar.IllegalMonthError`` from ``monthrange`` further in."""
     with pytest.raises(ValueError, match="expected YYYY-MM"):
-        CHIRPS3MonthlyPlugin().fetch_period("not-a-month", [33.0, -14.0, 34.0, -13.0])
+        CHIRPS3MonthlyPlugin().fetch_period(value, [33.0, -14.0, 34.0, -13.0])
 
 
 # --- URLs and availability ------------------------------------------------------------

@@ -21,6 +21,7 @@ from typing import Any, TypeVar
 
 import xarray as xr
 
+from open_climate_service.shared.time import normalize_period_string
 from open_climate_service.streaming import (
     BaseDatasetPlugin,
     daily_period_ids,
@@ -199,12 +200,17 @@ class CHIRPS3MonthlyPlugin(BaseDatasetPlugin):
 
     @staticmethod
     def _parse_month(period_id: str) -> tuple[int, int]:
-        """Accept ``YYYY-MM`` or any ``YYYY-MM-DD`` within the month."""
-        text = str(period_id)
+        """Accept ``YYYY-MM`` or any ``YYYY-MM-DD`` within the month.
+
+        Delegates to the canonical monthly parser so an out-of-range month is rejected here,
+        with the plugin's own contract in the message, rather than surfacing further in as a
+        ``calendar.IllegalMonthError`` from ``monthrange``.
+        """
         try:
-            return int(text[:4]), int(text[5:7])
-        except (ValueError, IndexError) as exc:
+            canonical = normalize_period_string(str(period_id), "monthly")
+        except (ValueError, TypeError) as exc:
             raise ValueError(f"Invalid CHIRPS3 monthly period id {period_id!r}: expected YYYY-MM") from exc
+        return int(canonical[:4]), int(canonical[5:7])
 
     @staticmethod
     def _url_for_month(year: int, month: int) -> str:
