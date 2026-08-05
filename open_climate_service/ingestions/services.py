@@ -215,7 +215,7 @@ def get_latest_artifact_for_dataset_or_404(dataset_id: str) -> ArtifactRecord:
 def create_artifact(
     *,
     dataset: dict[str, object],
-    start: str,
+    start: str | None,
     end: str | None,
     bbox: list[float] | None,
     country_code: str | None,
@@ -237,7 +237,7 @@ def create_artifact(
     are actually missing from the committed store.
     """
     period_type = str(dataset["period_type"])
-    start = _normalize_request_period(start, period_type=period_type, field_name="start")
+    start = _resolve_request_start(start, dataset=dataset, period_type=period_type)
     end = _normalize_optional_request_period(end, period_type=period_type, field_name="end")
     download_start = _normalize_optional_request_period(
         download_start, period_type=period_type, field_name="download_start"
@@ -251,7 +251,14 @@ def create_artifact(
     )
     resolved_download_end = download_end if download_end is not None else end
     if resolved_download_end is None:
-        resolved_download_end = _default_request_end(period_type)
+        if registry_datasets.is_future_facing(dataset):
+            # "Now" is this dataset's *start*, so using it as the end would collapse a
+            # seven-day forecast to a single day. Offer a generous horizon instead and let
+            # the plugin clip to whatever it actually publishes. `request_scope.end` stays
+            # None, so the coverage check does not hold the plugin to this wider bound.
+            resolved_download_end = _forecast_horizon(dataset, period_type)
+        else:
+            resolved_download_end = _current_request_period(period_type)
     request_scope = ArtifactRequestScope(
         start=start,
         end=end,
@@ -974,8 +981,69 @@ def _normalize_optional_request_period(value: str | None, *, period_type: str, f
     return _normalize_request_period(value, period_type=period_type, field_name=field_name)
 
 
-def _default_request_end(period_type: str) -> str:
-    """Return the current dataset-native period string for omitted ingestion end values."""
+def _resolve_request_start(value: str | None, *, dataset: dict[str, object], period_type: str) -> str:
+    """Return the normalized start period, substituting "now" for a forecast dataset.
+
+    A future-facing dataset may omit ``start``: its periods lie ahead of now, so any fixed
+    date would be stale by the next day and a scheduled re-ingest would silently drift out
+    of the forecast window. Omitting it means "from now", resolved here in the dataset's
+    native period format.
+
+    Note what is deliberately *not* done: ``None`` is never passed through to
+    ``plugin.periods()``. Every existing plugin's signature is ``periods(start: str, end:
+    str)`` and several parse the value immediately (``date.fromisoformat(start)``), so
+    handing them ``None`` would turn an omitted field into a ``TypeError`` deep inside a
+    plugin. Resolving here keeps the plugin contract exactly as it is.
+
+    A historical dataset with no start is a client error, not a defaulted one — silently
+    ingesting from "now" backwards would be a guess about intent, and the whole record is
+    rarely what someone wants.
+    """
+    if value is not None:
+        return _normalize_request_period(value, period_type=period_type, field_name="start")
+
+    if not registry_datasets.is_future_facing(dataset):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Dataset '{dataset.get('id')}' requires a start period: its periods are historical. "
+                "Only datasets declaring 'temporal_direction: future' (e.g. forecasts) may omit it."
+            ),
+        )
+    return _current_request_period(period_type)
+
+
+def _forecast_horizon(dataset: dict[str, object], period_type: str) -> str:
+    """Return how far ahead to ask a forecast plugin for, when no end was requested.
+
+    Prefers the template's declared ``extents.temporal.end``. Otherwise offers a year
+    ahead — deliberately generous, because the real limit belongs to the plugin (its own
+    lead-time parameter) and a bound here would silently truncate a longer forecast. The
+    plugin is expected to clip to what it publishes; ``request_scope.end`` remains None so
+    the coverage check does not require it to fill this whole window.
+
+    A year rather than no bound at all keeps ``periods()`` typed as ``end: str``, so a
+    plugin author never has to handle a missing end.
+    """
+    declared = registry_datasets.declared_temporal_end(dataset)
+    if declared:
+        return declared
+    horizon = utc_today().replace(year=utc_today().year + 1)
+    if period_type == "yearly":
+        return str(horizon.year)
+    if period_type == "monthly":
+        return f"{horizon.year:04d}-{horizon.month:02d}"
+    if period_type in {"hourly", "weekly"}:
+        return datetime_to_period_string(datetime.combine(horizon, datetime.min.time(), tzinfo=UTC), period_type)
+    return horizon.isoformat()
+
+
+def _current_request_period(period_type: str) -> str:
+    """Return "now" as a dataset-native period string.
+
+    Used for both an omitted ``end`` (sync through the latest period) and an omitted
+    ``start`` on a future-facing dataset (ingest from now forward).
+    """
     if period_type == "hourly":
         return datetime_to_period_string(utc_now(), period_type)
     if period_type == "daily":
@@ -991,7 +1059,7 @@ def _default_request_end(period_type: str) -> str:
         # Day-of-year climatology: the plugin enumerates 1..366 regardless of the
         # request range, so the end value is unused — return a stable sentinel.
         return "366"
-    raise HTTPException(status_code=400, detail=f"Invalid period_type '{period_type}' for request end defaulting")
+    raise HTTPException(status_code=400, detail=f"Invalid period_type '{period_type}' for request period defaulting")
 
 
 def _validate_download_scope(
