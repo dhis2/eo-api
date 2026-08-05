@@ -20,6 +20,7 @@ from open_climate_service.data_registry.services import datasets as registry_dat
 from open_climate_service.ingestions import services as ingestion_services
 from open_climate_service.ingestions.schemas import ArtifactFormat, ArtifactRecord
 from open_climate_service.shared.crs import canonical_crs_code, is_builtin_crs
+from open_climate_service.shared.geozarr import ZARR_V3_MEDIA_TYPE, zarr_media_type
 from open_climate_service.shared.time import (
     parse_period_string_to_datetime,
     period_type_to_iso_step,
@@ -29,15 +30,24 @@ from open_climate_service.shared.time import (
 CATALOG_TITLE = "Open Climate Service"
 CATALOG_DESCRIPTION = "Published Open Climate Service GeoZarr datasets"
 STAC_VERSION = "1.1.0"
+CF_EXTENSION = "https://stac-extensions.github.io/cf/v1.0.0/schema.json"
 DATACUBE_EXTENSION = "https://stac-extensions.github.io/datacube/v2.3.0/schema.json"
 PROJECTION_EXTENSION = "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
 RENDER_EXTENSION = "https://stac-extensions.github.io/render/v2.0.0/schema.json"
 ZARR_EXTENSION = "https://stac-extensions.github.io/zarr/v1.1.0/schema.json"
 DEFAULT_STAC_LICENSE = "various"
+# CF attributes surfaced from the store onto cube:variables, as `cf:`-prefixed STAC fields.
+# `cell_methods` is passed through as the CF string ("time: mean"); the CF extension also
+# defines a per-dimension array form, but permits the plain string for methods that span axes.
+_CF_VARIABLE_ATTRS = ("standard_name", "cell_methods")
 SPATIAL_STEP_DECIMALS = 8
 XSTAC_COLLECTION_CACHE_MAXSIZE = 128
 logger = logging.getLogger(__name__)
 _xstac_collection_cache: dict[str, dict[str, Any]] = {}
+# Media type per artifact id. Detecting it reads the store's root group, which the xstac cache
+# does not cover: the type is set on the collection template, which is built *before* — and so
+# on every request, even a cache hit. Same bound and same invalidation as the payload cache.
+_zarr_media_type_cache: dict[str, str] = {}
 
 
 def _get_catalog_id() -> str:
@@ -149,6 +159,8 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
     # artifact's materialized coverage.
     _override_temporal_extent_from_artifact(collection_payload, artifact)
     _sanitize_variable_attrs(collection_payload)
+    # Last, because the cf: fields are only known after the variables are built and sanitized.
+    _declare_cf_extension_if_used(collection_payload)
     return collection_payload
 
 
@@ -206,7 +218,7 @@ def _build_collection_template(
         "zarr",
         pystac.Asset(
             href=zarr_href,
-            media_type="application/vnd.zarr; version=3",
+            media_type=_zarr_media_type(artifact),
             title="Zarr store",
             roles=["data"],
         ),
@@ -392,6 +404,31 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
         ds.close()
 
 
+def _zarr_media_type(artifact: ArtifactRecord) -> str:
+    """Media type for the artifact's Zarr asset, advertising a pyramid only when there is one.
+
+    Lets pyramid-aware clients (STAC Browser via ``ol/source/GeoZarr``) tell a multiscales store
+    from a flat one, which the plain Zarr media type cannot express. Falls back to the flat type
+    whenever the store can't be inspected.
+
+    Cached per **artifact id**, not per store path. A re-ingest reuses the same path — and can
+    cross the pyramid threshold as the data grows — so a path-keyed cache would serve a stale
+    claim. A new write always means a new artifact record.
+    """
+    cached = _zarr_media_type_cache.get(artifact.artifact_id)
+    if cached is not None:
+        return cached
+    try:
+        store_path = _artifact_store_path(artifact)
+    except HTTPException:
+        return ZARR_V3_MEDIA_TYPE
+    media_type = zarr_media_type(store_path, icechunk=artifact.format == ArtifactFormat.ICECHUNK)
+    if len(_zarr_media_type_cache) >= XSTAC_COLLECTION_CACHE_MAXSIZE:
+        _zarr_media_type_cache.pop(next(iter(_zarr_media_type_cache)), None)
+    _zarr_media_type_cache[artifact.artifact_id] = media_type
+    return media_type
+
+
 def _cache_xstac_collection_payload(artifact_id: str, payload: dict[str, Any]) -> None:
     if artifact_id in _xstac_collection_cache:
         _xstac_collection_cache[artifact_id] = deepcopy(payload)
@@ -404,6 +441,7 @@ def _cache_xstac_collection_payload(artifact_id: str, payload: dict[str, Any]) -
 
 def _clear_xstac_collection_cache() -> None:
     _xstac_collection_cache.clear()
+    _zarr_media_type_cache.clear()
 
 
 def _link_to_dict(link: pystac.Link) -> dict[str, Any]:
@@ -545,12 +583,14 @@ def _build_cube_variables(ds: xr.Dataset) -> dict[str, Any]:
             "dimensions": [str(d) for d in var.dims],
             "unit": var.attrs.get("units"),
         }
-        # Surface the CF semantics we stamp onto the store so catalog clients can
-        # identify the quantity, not just its unit (#283).
-        for cf_key in ("standard_name", "cell_methods"):
+        # Surface the CF semantics stamped onto the store so catalog clients can identify the
+        # quantity, not just its unit (CLIM-828). Named per the STAC CF extension, which lists
+        # `cube:variables` among the places its fields may be used — an unprefixed
+        # `standard_name` here is not a field any STAC client is defined to understand.
+        for cf_key in _CF_VARIABLE_ATTRS:
             value = var.attrs.get(cf_key)
             if isinstance(value, str):
-                entry[cf_key] = value
+                entry[f"cf:{cf_key}"] = value
         result[str(name)] = entry
     return result
 
@@ -585,6 +625,26 @@ def _override_temporal_extent_from_artifact(collection: dict[str, Any], artifact
             return
 
 
+def _declare_cf_extension_if_used(collection: dict[str, Any]) -> None:
+    """Add the CF extension to ``stac_extensions`` when a ``cf:`` field was actually emitted.
+
+    Declared conditionally rather than always: a dataset whose store carries no CF attributes
+    emits no ``cf:`` field, and advertising an extension none of whose fields are present is
+    noise a client has to fetch and check for nothing.
+    """
+    variables = collection.get("cube:variables")
+    if not isinstance(variables, dict):
+        return
+    used = any(
+        isinstance(variable, dict) and any(key.startswith("cf:") for key in variable) for variable in variables.values()
+    )
+    if not used:
+        return
+    existing = collection.get("stac_extensions")
+    extensions = set(existing) if isinstance(existing, list) else set()
+    collection["stac_extensions"] = sorted({*extensions, CF_EXTENSION})
+
+
 def _sanitize_variable_attrs(collection: dict[str, Any]) -> None:
     variables = collection.get("cube:variables")
     if not isinstance(variables, dict):
@@ -603,13 +663,14 @@ def _sanitize_variable_attrs(collection: dict[str, Any]) -> None:
         if isinstance(units, str):
             kept_attrs["units"] = units
             variable["unit"] = units
-        # Surface the CF semantics we stamp onto the store as top-level cube:variable
-        # fields (and keep them in attrs) so catalog clients see the quantity (#283).
-        for cf_key in ("standard_name", "cell_methods"):
+        # Same CF semantics as _build_cube_variables, for the xstac-produced path. Prefixed at
+        # the cube:variable level (a defined STAC CF extension field); unprefixed inside
+        # `attrs`, which is a passthrough of the store's own CF attribute names.
+        for cf_key in _CF_VARIABLE_ATTRS:
             value = attrs.get(cf_key)
             if isinstance(value, str):
                 kept_attrs[cf_key] = value
-                variable[cf_key] = value
+                variable[f"cf:{cf_key}"] = value
         variable["attrs"] = kept_attrs
 
 

@@ -163,6 +163,53 @@ alongside it, so catalogue clients that expect geographic coordinates always get
 
 ---
 
+## How a client is told whether a store is pyramided
+
+STAC has no way to distinguish a flat store from a pyramided one through the plain Zarr media
+type, so the collection's `zarr` asset carries an extra parameter when — and only when — the
+store really has levels:
+
+| Store     | Advertised media type                                    |
+| --------- | -------------------------------------------------------- |
+| flat      | `application/vnd.zarr; version=3`                        |
+| pyramided | `application/vnd.zarr; version=3; profile=multiscales`   |
+
+Detection requires **both** the multiscales convention in the root `zarr_conventions` *and* a
+non-empty `multiscales.layout` — the same two conditions a pyramid-aware renderer checks, so the
+claim always matches what a renderer can use. Any failure to inspect the store degrades to the
+flat type: understating is harmless, since a client then opens the store the ordinary way, while
+overstating sends a renderer looking for levels that do not exist.
+
+The `profile` parameter is a
+[STAC Zarr best practices](https://github.com/radiantearth/stac-best-practices/blob/main/best-practices-zarr.md)
+recommendation, not part of the official Zarr media type registration. Consumers match it as a
+**literal**, not by parsing parameters, so the string is byte-for-byte fixed — same parameter
+order, one space after each `;`. Reformatting it silently disables rendering everywhere.
+
+## CF metadata in the catalog
+
+Variables carry their CF semantics into `cube:variables`, named per the
+[STAC CF extension](https://github.com/stac-extensions/cf):
+
+```json
+"cube:variables": {
+  "tg": {
+    "type": "data",
+    "dimensions": ["t", "y", "x"],
+    "unit": "degree_Celsius",
+    "cf:standard_name": "air_temperature",
+    "cf:cell_methods": "time: mean",
+    "attrs": { "long_name": "...", "units": "degree_Celsius", "standard_name": "air_temperature" }
+  }
+}
+```
+
+The `cf:` prefix matters: the extension explicitly lists `cube:variables` among the places its
+fields may be used, so a prefixed field is one a client is defined to understand, while a bare
+`standard_name` at that level is not. The unprefixed spellings remain inside `attrs`, which
+passes through the store's own CF attribute names verbatim. The extension is declared in
+`stac_extensions` only when a `cf:` field was actually emitted.
+
 ## How Zarr stores are served
 
 The Open Climate Service provides two endpoints for accessing the same Icechunk store:

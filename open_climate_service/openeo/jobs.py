@@ -26,6 +26,7 @@ from open_climate_service.openeo.schemas import (
     OpenEOJobStatus,
     OpenEOJobUpdate,
 )
+from open_climate_service.shared.geozarr import ZARR_V3_MEDIA_TYPE, zarr_media_type
 from open_climate_service.shared.time import utc_now
 
 _T = TypeVar("_T")
@@ -957,7 +958,7 @@ def _result_assets(record: OpenEOJobRecord) -> dict[str, Any]:
             },
             "zarr": {
                 "href": f"/zarr/{dataset_id}",
-                "type": "application/vnd.zarr; version=3",
+                "type": ZARR_V3_MEDIA_TYPE,
                 "title": "Zarr store",
                 "roles": ["data"],
                 "xarray:open_kwargs": {"consolidated": True},
@@ -966,14 +967,24 @@ def _result_assets(record: OpenEOJobRecord) -> dict[str, Any]:
         # Advertise the STAC collection only when the dataset is actually published.
         try:
             from open_climate_service.ingestions import services as _ingestion_services
+            from open_climate_service.ingestions.schemas import ArtifactFormat
 
-            if dataset_id in _ingestion_services.latest_published_zarr_artifacts_by_dataset():
+            artifact = _ingestion_services.latest_published_zarr_artifacts_by_dataset().get(dataset_id)
+            if artifact is not None:
                 assets["stac"] = {
                     "href": f"/stac/collections/{dataset_id}",
                     "type": "application/json",
                     "title": "STAC collection",
                     "roles": ["metadata"],
                 }
+                # Keep the claim in step with the STAC collection's zarr asset, so a client
+                # sees the same media type from either surface. Uncached, unlike the STAC
+                # side — a job-result read is rare enough not to warrant one.
+                store_path = artifact.path or (artifact.asset_paths[0] if artifact.asset_paths else None)
+                if store_path:
+                    assets["zarr"]["type"] = zarr_media_type(
+                        store_path, icechunk=artifact.format == ArtifactFormat.ICECHUNK
+                    )
         except Exception:
             logger.debug("Could not resolve STAC publication for managed dataset '%s'", dataset_id, exc_info=True)
         return assets
