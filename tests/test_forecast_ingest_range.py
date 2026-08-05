@@ -198,6 +198,22 @@ def test_forecast_horizon_prefers_a_declared_end() -> None:
 
 
 @pytest.mark.parametrize("period_type", ["daily", "monthly", "yearly", "hourly", "weekly"])
+def test_forecast_horizon_survives_a_leap_day(monkeypatch: pytest.MonkeyPatch, period_type: str) -> None:
+    """29 February has no counterpart in the following year.
+
+    An earlier version advanced the year with ``replace(year=+1)``, which raises "day is
+    out of range for month" on a leap day — a crash on one day every four years, for a
+    horizon that is approximate by design.
+    """
+    import datetime as _datetime
+
+    monkeypatch.setattr(ingestion_services, "utc_today", lambda: _datetime.date(2028, 2, 29))
+    horizon = ingestion_services._forecast_horizon({"id": "f"}, period_type)
+    assert horizon  # did not raise
+    assert horizon > "2028"
+
+
+@pytest.mark.parametrize("period_type", ["daily", "monthly", "yearly", "hourly", "weekly"])
 def test_forecast_horizon_is_period_native(period_type: str) -> None:
     """It is handed straight to the plugin, so it has to parse as that period type."""
     from open_climate_service.shared.time import normalize_period_string
@@ -233,9 +249,16 @@ def test_manage_form_exposes_each_template_direction(client: TestClient) -> None
     assert 'data-direction="past"' in body
 
 
-def test_manage_form_no_longer_hardcodes_a_start_requirement_message(client: TestClient) -> None:
-    """The blank-start rejection is now dataset-aware, made in create_artifact."""
+def test_manage_form_start_rejection_is_dataset_aware(client: TestClient) -> None:
+    """The unconditional "Start date is required" gate is gone from the manage route.
+
+    The rejection still happens in ``manage_ingest`` rather than downstream in
+    ``create_artifact`` — deliberately, because the ingest runs inside an SSE stream and a
+    response that has begun cannot redirect. What changed is that it now consults
+    ``is_future_facing()`` instead of rejecting every blank start.
+    """
     from open_climate_service.system import routes
 
     source = Path(routes.__file__).read_text(encoding="utf-8")
     assert 'detail="Start date is required"' not in source
+    assert "is_future_facing(template)" in source

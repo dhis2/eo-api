@@ -10,7 +10,7 @@ import os
 import shutil
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol, cast
 from uuid import uuid4
@@ -1028,7 +1028,11 @@ def _forecast_horizon(dataset: dict[str, object], period_type: str) -> str:
     declared = registry_datasets.declared_temporal_end(dataset)
     if declared:
         return declared
-    horizon = utc_today().replace(year=utc_today().year + 1)
+    # 365 days rather than replace(year=+1): the latter raises "day is out of range for
+    # month" on 29 February, since the following year has no such date — a crash on leap
+    # day for a horizon that is approximate by design. Read the date once, so a run
+    # crossing midnight cannot mix two different days.
+    horizon = utc_today() + timedelta(days=365)
     if period_type == "yearly":
         return str(horizon.year)
     if period_type == "monthly":
