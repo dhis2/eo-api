@@ -68,6 +68,36 @@ def test_non_temporal_values_pass_through(value: object) -> None:
     assert _naive_temporal_scalar(value) is value
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("1991-01-01T00:00:00+00:00", "1991-01-01T00:00:00"),
+        ("1991-01-01T00:00:00Z", "1991-01-01T00:00:00"),
+        ("2020-06-01T12:30:00+02:00", "2020-06-01T12:30:00"),
+    ],
+)
+def test_tz_qualified_iso_strings_lose_the_offset(value: str, expected: str) -> None:
+    """These reach a process as raw strings, because the pg-parser will not coerce them.
+
+    Only the plain forms ("1991-01-01") validate as a Date. A fully-qualified timestamp
+    fails that validation, stays a string, and then fails inside xclim with
+    "Both dates must have the same UTC offset" — so it has to be handled here too.
+    """
+    assert _naive_temporal_scalar(value) == expected
+
+
+@pytest.mark.parametrize("value", ["MS", "YS", "1991", "07-01", "mm/d", "degC", "1 mm/day", "dayofyear"])
+def test_ordinary_string_arguments_are_untouched(value: str) -> None:
+    """The ISO-with-offset rule must not catch frequencies, units or thresholds."""
+    assert _naive_temporal_scalar(value) is value
+
+
+@pytest.mark.parametrize("value", ["2020-12-31", "2020-06-01T12:00:00"])
+def test_naive_iso_strings_are_returned_unchanged(value: str) -> None:
+    """Nothing to strip, so don't reformat — "2020-12-31" must not become a timestamp."""
+    assert _naive_temporal_scalar(value) is value
+
+
 def test_cube_arguments_pass_through() -> None:
     """A datacube has no `root`; it must not be touched."""
     cube = _monthly_precip(3)
@@ -168,6 +198,30 @@ def test_standard_processes_still_execute(registry: object) -> None:
     cube = _monthly_precip(12)
     result = registry["mean"].implementation(data=cube, axis=0)  # type: ignore[index]
     assert result.shape == (2, 2)
+
+
+@pytest.mark.parametrize(
+    "cal_start",
+    [
+        "1991-01-01",
+        "1991-01-01T00:00:00+00:00",
+        "1991-01-01T00:00:00Z",
+        "1991",
+        None,
+    ],
+)
+def test_spi_accepts_every_bound_form_the_instance_override_handled(registry: object, cal_start: object) -> None:
+    """Parity check against the Uganda instance override this replaces.
+
+    Its `_to_date_str` accepted None, a plain string, a tz-suffixed string and a
+    pendulum/datetime object. All of those must work through the core process before that
+    override can be deleted — the tz-suffixed strings in particular, which the pg-parser
+    does not coerce into a Date and which the first version of this fix let through.
+    """
+    result = registry["spi"].implementation(  # type: ignore[index]
+        pr=_monthly_precip(), window=3, cal_start=cal_start, cal_end="2020-12-31", freq="MS"
+    )
+    assert result.dims == ("t", "y", "x")
 
 
 def test_temporal_extent_normalisation_is_unaffected() -> None:

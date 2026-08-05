@@ -525,6 +525,20 @@ def _naive_temporal_scalar(value: Any) -> Any:
     ``"2020-12-31T00:00:00"`` would exclude everything after midnight on a sub-daily
     series. Other wrappers keep their time component, minus the zone.
     """
+    # A timezone-qualified ISO *string* reaches the process raw, because the pg-parser
+    # only coerces plain forms like "1991-01-01" into a Date — "1991-01-01T00:00:00Z"
+    # fails that validation and stays a string. It then fails just as hard, with
+    # "ValueError: Both dates must have the same UTC offset", so strip the offset here.
+    # Narrow on purpose: the string must parse as ISO 8601 *and* carry an offset, so
+    # ordinary string arguments ("MS", "1991", "07-01", "mm/d", "degC") are untouched,
+    # as is a naive ISO string, which is returned unchanged rather than reformatted.
+    if isinstance(value, str):
+        try:
+            parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+        return value if parsed.tzinfo is None else parsed.replace(tzinfo=None).isoformat()
+
     root = getattr(value, "root", None)
     # pendulum's DateTime subclasses datetime.date, so one check covers every scalar
     # wrapper while structurally excluding TemporalInterval, whose root is a list.
