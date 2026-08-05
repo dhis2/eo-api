@@ -48,57 +48,34 @@ A plugin may return data in whatever orientation and naming its source delivers.
    for an untagged cube — doing so stamped `EPSG:32633` onto degree coordinates and put the
    store at the projection's origin instead of on the map.
 
-## Why the direction of `y` is guaranteed
+## What this means if you write a plugin
 
-Because real consumers assume one and never check. Two that matter:
+Nothing. Return data in whatever orientation, dimension naming and longitude frame your source
+delivers, and declare a `crs` class attribute only if the source carries no CRS of its own. The
+framework normalises the rest at the write boundary; a plugin that hand-rolls a y-flip or a
+longitude roll is doing work that will simply be re-done.
 
-**OpenLayers' `ol/source/GeoZarr`** — the renderer STAC Browser uses. It derives its tile grid
-origin as the top-left corner and counts rows down from it:
+The reasoning behind each invariant — which external consumers assume what, and why `y`
+descends rather than ascends — is recorded in the module docstring of
+[`shared/raster_contract.py`](https://github.com/dhis2/open-climate-service/blob/main/open_climate_service/shared/raster_contract.py),
+next to the code it constrains.
 
-```js
-const origin = [extent[0], extent[3]];                                  // top-left
-const minRow = Math.round((origin[1] - tileExtent[3]) / bandResolution);
-... get(array, [slice(minRow, maxRow), colSlice])                        // straight into the array
+## What this means if you operate an instance
+
+A store written before these invariants existed can disagree with them, and appending to it
+would put rows or columns under coordinates that no longer describe them. Rather than corrupt
+the store, **the next sync of such a dataset fails** with a message naming both coordinate
+ranges:
+
+```
+Cannot append to senorge_temperature_daily.icechunk: its committed 'y' coordinates do not
+match the normalised ones for this period (store 57.0…60.0, period 60.0…57.0). …
+Re-ingest this dataset from scratch to rebuild it under the current contract.
 ```
 
-There is no `reverse`, no `flip`, and no read of `spatial:transform`'s y step anywhere in that
-file, so array row 0 is always painted at the north edge. Worked through for a 3°-tall grid of
-0.05° rows:
-
-```
-OL asks for array row 0 to paint the northern tile (lat ~59.975)
-  descending store: row 0 holds lat 59.975  -> CORRECT
-  ascending  store: row 0 holds lat 57.025  -> WRONG, mirrored by 2.95 deg
-```
-
-**Result thumbnails** render with `imshow(..., origin="upper")`, which is the same assumption.
-
-Descending rather than ascending, given the choice:
-
-| | descending | ascending |
-| --- | --- | --- |
-| OpenLayers / STAC Browser | correct | mirrored, undetectably |
-| carbonplan/zarr-layer (the `/map` viewer) | detects from the coordinate | detects from the coordinate |
-| GDAL `GeoTransform` | negative y step — the north-up convention | positive — legal but unusual |
-| cost for a typical source | none, already north-up | reverses every raster |
-
-zarr-layer detects the direction either way (`detectedLatAscending = y1 > y0`), so it does not
-constrain the choice; OpenLayers does.
-
-A consumer should still prefer reading the `y` coordinate over assuming — `aggregate_spatial`
-does exactly that, flipping its rasterio mask only when `y` ascends, and stays correct whatever
-it is handed.
-
-## Appending to a store written before this contract
-
-Invariants 3 and 4 reorder the array. An append writes along the time axis only, so a store's
-committed coordinate arrays stay as they are — and a period normalised one way, appended to a
-store written the other, would put rows or columns under coordinates that no longer describe
-them. That is silently mirrored data, worse than metadata being out of date.
-
-So an ingest checks the committed axes before its first append and **fails with an actionable
-message** rather than guessing. The fix is a re-ingest, which rebuilds the store under the
-current contract.
+The fix is a one-off re-ingest of that dataset. Only stores that are south-up, or on the
+0…360 longitude frame, are affected — a north-up store on −180…180 keeps syncing normally.
+The same re-ingest also picks up the corrected `spatial:transform`, extent and CRS metadata.
 
 ## Where the two worlds meet
 

@@ -46,6 +46,8 @@ must first check the store it is appending to; see
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -59,6 +61,56 @@ _TIME_ALIASES = ("time", "valid_time", "date", "time_counter")
 
 # Beyond this longitude a geographic x axis is on the 0…360 frame rather than −180…180.
 _LON_ROLL_THRESHOLD = 180.0
+
+
+@dataclass(frozen=True)
+class PreparedCube:
+    """A cube normalised for publication, with the CRS that describes it."""
+
+    dataset: "xr.Dataset"
+    crs: str
+
+
+def prepare_for_publication(
+    ds: "xr.Dataset",
+    *,
+    fallback_crs: str | int | None = None,
+    time_dim: str = "t",
+    x_dim: str = "x",
+    y_dim: str = "y",
+) -> PreparedCube:
+    """Bring *ds* up to the published-store contract, and resolve the CRS that describes it.
+
+    **The entry point every write path should use.** The individual ``normalize_*`` steps below
+    are exported for focused testing, but composing them by hand at each call site is how the
+    two write paths came to run them in different orders with different CRS inputs — the drift
+    this module exists to prevent. The order here is not arbitrary:
+
+    * naming and axis order first, because everything after addresses axes by name;
+    * then the CRS, because whether the x axis is a longitude decides whether rolling it is
+      correct or destructive — an easting of 500000 rolled as a longitude becomes −40;
+    * then the coordinate reorderings, which need that answer.
+
+    ``fallback_crs`` is a *declaration* about a source that carries no CRS of its own (a
+    plugin's ``crs`` attribute, or an explicit argument); the data's own CRS still wins. See
+    :func:`resolve_store_crs`.
+    """
+    ds = normalize_dim_layout(ds, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim)
+    crs = resolve_store_crs(ds, fallback_crs, x_dim=x_dim, y_dim=y_dim)
+    ds = normalize_longitudes(ds, x_dim=x_dim, crs=crs)
+    ds = normalize_y_direction(ds, y_dim=y_dim)
+
+    # Normalisation should leave nothing behind. If it did, something upstream is producing a
+    # shape this module does not understand, and the store is about to be published that way —
+    # so say so in the ingest's own logs rather than waiting for a client to render it oddly.
+    ds.attrs.setdefault("proj:code", crs)
+    remaining = published_contract_violations(ds, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim)
+    if remaining:
+        logger.warning(
+            "Publishing a store that still violates the layout contract: %s",
+            "; ".join(str(violation) for violation in remaining),
+        )
+    return PreparedCube(dataset=ds, crs=crs)
 
 
 def normalize_dim_layout(
@@ -203,53 +255,53 @@ def _looks_geographic(ds: "xr.Dataset", *, x_dim: str, y_dim: str) -> bool:
 
 def resolve_store_crs(
     ds: "xr.Dataset",
-    declared: str | None = None,
+    fallback: str | int | None = None,
     *,
     x_dim: str = "x",
     y_dim: str = "y",
 ) -> str:
-    """The CRS to write for *ds*, refusing a declared CRS its coordinates contradict.
+    """The CRS to write for *ds*, in one decision.
 
-    ``declared`` is whatever the caller was going to write. When it is a projected CRS but the
-    coordinates can only be degrees, it is wrong — a projected code over geographic
-    coordinates puts the store at its projection's origin rather than on the map — so the
-    dataset's own CRS is preferred and the contradiction logged with both values.
+    Precedence, highest first:
 
-    Never consults the instance config CRS. That is how the contradiction arises in the first
-    place: an untagged cube picks up the instance's ``crs:`` (e.g. ``EPSG:32633`` for Norway)
-    regardless of where its coordinates actually are.
+    1. the dataset's own CRS — its ``proj:code`` attribute, else what rioxarray detects from
+       the CF grid mapping
+    2. ``fallback`` — how a plugin declares the projection of a source that carries none
+    3. ``EPSG:4326``
+
+    The data wins over a declaration because a declaration is a *guess about* the data, and
+    getting that precedence backwards is how a projected code ends up over lon/lat coordinates.
+
+    Whichever wins is then checked against the coordinates: a CRS in linear units over
+    coordinates that can only be degrees is wrong however it was arrived at, and is replaced by
+    plain WGS84 with the evidence logged. A stale ``proj:code`` is copied forward on every
+    rewrite, so *both* sources can be wrong at once — Norway's WorldPop store has EPSG:32633 at
+    the root and EPSG:4326 on level 0.
+
+    The instance config CRS is never consulted, at any step. Using it as a fallback is what
+    created the contradiction this function exists to catch.
     """
     from open_climate_service.shared.crs import canonical_crs_code, dataset_crs
 
-    if declared is None:
-        return canonical_crs_code(dataset_crs(ds))
+    default = canonical_crs_code(fallback) if fallback is not None else "EPSG:4326"
+    code = canonical_crs_code(dataset_crs(ds, default=default))
 
-    code = canonical_crs_code(declared)
-    # Override only on a definite contradiction: the declared CRS is known to be in linear
-    # units and the coordinates can only be degrees. An unresolvable CRS is left alone.
+    # Override only on a definite contradiction: the CRS is known to be in linear units and the
+    # coordinates can only be degrees. An unresolvable CRS is left alone rather than guessed at.
     if _axis_units(code) != "linear" or not _looks_geographic(ds, x_dim=x_dim, y_dim=y_dim):
         return code
 
-    from_data = canonical_crs_code(dataset_crs(ds))
     logger.warning(
-        "Declared CRS %s is projected but the coordinates are within ±180/±90 "
-        "(x %.4f…%.4f, y %.4f…%.4f) — they can only be degrees. Using %s from the data "
-        "instead; a projected code over geographic coordinates puts the store off the map.",
+        "CRS %s is projected but the coordinates are within ±180/±90 (x %.4f…%.4f, y %.4f…%.4f) "
+        "— they can only be degrees. Using EPSG:4326 instead; a projected code over geographic "
+        "coordinates puts the store at the projection's origin rather than on the map.",
         code,
         float(ds[x_dim].min()),
         float(ds[x_dim].max()),
         float(ds[y_dim].min()),
         float(ds[y_dim].max()),
-        from_data,
     )
-    if _axis_units(from_data) == "linear":
-        # The dataset's own CRS is projected too — a stale `proj:code` is copied forward on
-        # every rewrite, so both sources can be wrong at once (Norway's WorldPop store has
-        # EPSG:32633 at the root and EPSG:4326 on level 0). Neither agrees with the
-        # coordinates, so fall back to plain WGS84 rather than propagating a known-bad code.
-        logger.warning("Dataset CRS %s is also projected; falling back to EPSG:4326", from_data)
-        return "EPSG:4326"
-    return from_data
+    return "EPSG:4326"
 
 
 def spatial_coords_match(
@@ -283,47 +335,95 @@ def spatial_coords_match(
     return bool(np.allclose(a, b, rtol=0.0, atol=tolerance, equal_nan=True))
 
 
+class ContractViolation(StrEnum):
+    """A way a dataset fails the published-store contract."""
+
+    TEMPORAL_DIM_NAME = "temporal-dim-name"
+    MISSING_SPATIAL_DIM = "missing-spatial-dim"
+    AXIS_ORDER = "axis-order"
+    Y_ASCENDS = "y-ascends"
+    CRS_CONTRADICTS_COORDS = "crs-contradicts-coords"
+    LONGITUDE_FRAME = "longitude-frame"
+
+
+@dataclass(frozen=True)
+class Violation:
+    """One contract failure: a machine-checkable kind plus the detail behind it."""
+
+    kind: ContractViolation
+    detail: str
+
+    def __str__(self) -> str:
+        return f"{self.kind.value}: {self.detail}"
+
+
 def published_contract_violations(
     ds: "xr.Dataset",
     *,
     time_dim: str = "t",
     x_dim: str = "x",
     y_dim: str = "y",
-) -> list[str]:
-    """Ways *ds* fails the published-store contract, as human-readable strings.
+) -> list[Violation]:
+    """Ways *ds* fails the published-store contract; empty means conformant.
 
-    Used by the regression tests to assert the contract on a written store rather than
-    re-deriving it per test, and available to anyone debugging a store that renders oddly.
-    Empty list means conformant. The direction of ``y`` is deliberately not checked — see the
-    module docstring.
+    Called at the write boundary so a regression shows up in the logs of a real ingest rather
+    than only in a test run, and available to anyone debugging a store that renders oddly.
+    Each violation carries a ``kind`` so callers can match on it without depending on wording.
     """
-    problems: list[str] = []
+    problems: list[Violation] = []
     dims = set(str(d) for d in ds.dims)
     if time_dim not in dims:
         found = [a for a in _TIME_ALIASES if a in dims]
-        problems.append(f"temporal dimension is not named {time_dim!r}" + (f" (found {found[0]!r})" if found else ""))
+        problems.append(
+            Violation(
+                ContractViolation.TEMPORAL_DIM_NAME,
+                f"temporal dimension is not named {time_dim!r}" + (f" (found {found[0]!r})" if found else ""),
+            )
+        )
     for expected in (y_dim, x_dim):
         if expected not in dims:
-            problems.append(f"spatial dimension {expected!r} is missing")
+            problems.append(
+                Violation(ContractViolation.MISSING_SPATIAL_DIM, f"spatial dimension {expected!r} is missing")
+            )
     for name, var in ds.data_vars.items():
         var_dims = tuple(str(d) for d in var.dims)
         if y_dim in var_dims and x_dim in var_dims and var_dims[-2:] != (y_dim, x_dim):
-            problems.append(f"variable {str(name)!r} has dims {var_dims}, not (…, {y_dim}, {x_dim})")
+            problems.append(
+                Violation(
+                    ContractViolation.AXIS_ORDER,
+                    f"variable {str(name)!r} has dims {var_dims}, not (…, {y_dim}, {x_dim})",
+                )
+            )
     if y_dim in ds.coords and ds.sizes.get(y_dim, 0) >= 2:
         y = ds[y_dim].values
         try:
             if bool(y[1] > y[0]):
-                problems.append(f"{y_dim!r} ascends — row 0 must be the northernmost row")
+                problems.append(
+                    Violation(
+                        ContractViolation.Y_ASCENDS,
+                        f"{y_dim!r} ascends — row 0 must be the northernmost row",
+                    )
+                )
         except (IndexError, TypeError, ValueError):
             pass
     declared: Any = ds.attrs.get("proj:code")
     units = _axis_units(str(declared)) if declared else None
     if declared and units == "linear" and _looks_geographic(ds, x_dim=x_dim, y_dim=y_dim):
-        problems.append(f"declared CRS {declared} is projected but the coordinates are degrees")
+        problems.append(
+            Violation(
+                ContractViolation.CRS_CONTRADICTS_COORDS,
+                f"declared CRS {declared} is projected but the coordinates are degrees",
+            )
+        )
     if declared and units == "degrees" and x_dim in ds.coords:
         try:
             if bool((ds[x_dim] > _LON_ROLL_THRESHOLD).any()):
-                problems.append(f"geographic {x_dim!r} exceeds 180 — still on the 0…360 frame")
+                problems.append(
+                    Violation(
+                        ContractViolation.LONGITUDE_FRAME,
+                        f"geographic {x_dim!r} exceeds 180 — still on the 0…360 frame",
+                    )
+                )
         except (TypeError, ValueError):
             pass
     return problems

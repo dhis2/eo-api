@@ -26,8 +26,8 @@ from open_climate_service.openeo.schemas import (
     OpenEOJobStatus,
     OpenEOJobUpdate,
 )
-from open_climate_service.shared.geozarr import ZARR_V3_MEDIA_TYPE, zarr_media_type
 from open_climate_service.shared.time import utc_now
+from open_climate_service.stac.media_types import ZARR_V3_MEDIA_TYPE, zarr_media_type
 
 _T = TypeVar("_T")
 

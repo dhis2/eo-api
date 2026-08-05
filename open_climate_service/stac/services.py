@@ -7,7 +7,7 @@ import logging
 import os
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import pystac
 import xarray as xr
@@ -20,12 +20,12 @@ from open_climate_service.data_registry.services import datasets as registry_dat
 from open_climate_service.ingestions import services as ingestion_services
 from open_climate_service.ingestions.schemas import ArtifactFormat, ArtifactRecord
 from open_climate_service.shared.crs import canonical_crs_code, is_builtin_crs
-from open_climate_service.shared.geozarr import ZARR_V3_MEDIA_TYPE, zarr_media_type
 from open_climate_service.shared.time import (
     parse_period_string_to_datetime,
     period_type_to_iso_step,
     resolve_iso_period_step,
 )
+from open_climate_service.stac.media_types import ZARR_V3_MEDIA_TYPE, zarr_media_type
 
 CATALOG_TITLE = "Open Climate Service"
 CATALOG_DESCRIPTION = "Published Open Climate Service GeoZarr datasets"
@@ -41,13 +41,12 @@ DEFAULT_STAC_LICENSE = "various"
 # defines a per-dimension array form, but permits the plain string for methods that span axes.
 _CF_VARIABLE_ATTRS = ("standard_name", "cell_methods")
 SPATIAL_STEP_DECIMALS = 8
-XSTAC_COLLECTION_CACHE_MAXSIZE = 128
+ARTIFACT_CACHE_MAXSIZE = 128
 logger = logging.getLogger(__name__)
 _xstac_collection_cache: dict[str, dict[str, Any]] = {}
-# Media type per artifact id. Detecting it reads the store's root group, which the xstac cache
-# does not cover: the type is set on the collection template, which is built *before* — and so
-# on every request, even a cache hit. Same bound and same invalidation as the payload cache.
+# Media type per artifact id — see _zarr_media_type for why this needs its own cache.
 _zarr_media_type_cache: dict[str, str] = {}
+_V = TypeVar("_V")
 
 
 def _get_catalog_id() -> str:
@@ -411,9 +410,9 @@ def _zarr_media_type(artifact: ArtifactRecord) -> str:
     from a flat one, which the plain Zarr media type cannot express. Falls back to the flat type
     whenever the store can't be inspected.
 
-    Cached per **artifact id**, not per store path. A re-ingest reuses the same path — and can
-    cross the pyramid threshold as the data grows — so a path-keyed cache would serve a stale
-    claim. A new write always means a new artifact record.
+    Cached because detection reads the store's root group, and this is called from the collection
+    *template*, which is rebuilt on every request — so it sits outside the xstac payload cache.
+    See :func:`_cache_by_artifact` for why the key is the artifact id.
     """
     cached = _zarr_media_type_cache.get(artifact.artifact_id)
     if cached is not None:
@@ -423,20 +422,28 @@ def _zarr_media_type(artifact: ArtifactRecord) -> str:
     except HTTPException:
         return ZARR_V3_MEDIA_TYPE
     media_type = zarr_media_type(store_path, icechunk=artifact.format == ArtifactFormat.ICECHUNK)
-    if len(_zarr_media_type_cache) >= XSTAC_COLLECTION_CACHE_MAXSIZE:
-        _zarr_media_type_cache.pop(next(iter(_zarr_media_type_cache)), None)
-    _zarr_media_type_cache[artifact.artifact_id] = media_type
+    _cache_by_artifact(_zarr_media_type_cache, artifact.artifact_id, media_type)
     return media_type
 
 
-def _cache_xstac_collection_payload(artifact_id: str, payload: dict[str, Any]) -> None:
-    if artifact_id in _xstac_collection_cache:
-        _xstac_collection_cache[artifact_id] = deepcopy(payload)
+def _cache_by_artifact(cache: dict[str, _V], artifact_id: str, value: _V) -> None:
+    """Store *value* under *artifact_id*, evicting the oldest entry past the size bound.
+
+    Both per-artifact caches here are keyed on the artifact id rather than the store path: a
+    re-ingest reuses the path, so a path-keyed entry would go stale, while every write produces a
+    new artifact record. Refreshing an existing key keeps its insertion position, so a
+    frequently-rebuilt collection is not treated as newest and does not evict others.
+    """
+    if artifact_id in cache:
+        cache[artifact_id] = value
         return
-    if len(_xstac_collection_cache) >= XSTAC_COLLECTION_CACHE_MAXSIZE:
-        oldest_artifact_id = next(iter(_xstac_collection_cache))
-        _xstac_collection_cache.pop(oldest_artifact_id, None)
-    _xstac_collection_cache[artifact_id] = deepcopy(payload)
+    if len(cache) >= ARTIFACT_CACHE_MAXSIZE:
+        cache.pop(next(iter(cache)), None)
+    cache[artifact_id] = value
+
+
+def _cache_xstac_collection_payload(artifact_id: str, payload: dict[str, Any]) -> None:
+    _cache_by_artifact(_xstac_collection_cache, artifact_id, deepcopy(payload))
 
 
 def _clear_xstac_collection_cache() -> None:

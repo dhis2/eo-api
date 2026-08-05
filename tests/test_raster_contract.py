@@ -22,10 +22,12 @@ xr = pytest.importorskip("xarray")
 zarr = pytest.importorskip("zarr")
 
 from open_climate_service.shared.raster_contract import (  # noqa: E402
+    ContractViolation,
     _axis_units,
     normalize_dim_layout,
     normalize_longitudes,
     normalize_y_direction,
+    prepare_for_publication,
     published_contract_violations,
     resolve_store_crs,
     spatial_coords_match,
@@ -191,9 +193,24 @@ def _degree_grid(declared: str | None = None) -> Any:
 
 
 @_needs_proj
-def test_projected_crs_over_degree_coordinates_is_refused(ocs_logs: Any) -> None:
-    """The reported failure: EPSG:32633 declared over lon/lat puts the store at the UTM origin."""
+def test_the_data_crs_wins_over_a_projected_declaration() -> None:
+    """A declaration is a guess *about* the data, so the data outranks it.
+
+    Getting this precedence backwards is how a projected code ended up over lon/lat coordinates:
+    the instance's `crs:` was consulted as though it knew better than the store.
+    """
     ds = _degree_grid(declared="EPSG:4326")
+    assert resolve_store_crs(ds, "EPSG:32633") == "EPSG:4326"
+
+
+@_needs_proj
+def test_a_projected_crs_over_degree_coordinates_is_refused(ocs_logs: Any) -> None:
+    """The reported failure: EPSG:32633 over lon/lat puts the store at the UTM origin.
+
+    Reached here with no CRS on the data at all, so the projected declaration is what wins the
+    precedence — and is then rejected by the coordinates it claims to describe.
+    """
+    ds = _degree_grid()
 
     resolved = resolve_store_crs(ds, "EPSG:32633")
 
@@ -236,17 +253,17 @@ def test_a_consistent_projected_crs_is_kept() -> None:
 
 
 @_needs_proj
-def test_a_sticky_wrong_crs_falls_back_to_wgs84(ocs_logs: Any) -> None:
+def test_a_sticky_wrong_crs_on_the_data_is_also_refused(ocs_logs: Any) -> None:
     """A wrong `proj:code` is copied forward on every rewrite, so the data's CRS can be wrong too.
 
     Norway's WorldPop store is in exactly this state: root says EPSG:32633, level 0 says
-    EPSG:4326. Neither source agreeing with the coordinates must not propagate the bad code.
+    EPSG:4326. Data-wins precedence must not turn a stale bad code into a licence to keep it.
     """
     ds = _degree_grid(declared="EPSG:32633")
 
     assert resolve_store_crs(ds, "EPSG:32633") == "EPSG:4326"
 
-    assert "also projected" in ocs_logs.text
+    assert "EPSG:32633 is projected" in ocs_logs.text
 
 
 def test_no_declared_crs_uses_the_datasets_own() -> None:
@@ -273,12 +290,12 @@ def test_violations_lists_every_problem_at_once() -> None:
     ds = ds.assign_coords(x=[0.0, 90.0, 270.0, 350.0], y=[1.0, 2.0, 3.0])
     ds.attrs["proj:code"] = "EPSG:32633"
 
-    problems = "\n".join(published_contract_violations(ds))
+    kinds = {violation.kind for violation in published_contract_violations(ds)}
 
-    assert "not named 't'" in problems
-    assert "not (…, y, x)" in problems
+    assert ContractViolation.TEMPORAL_DIM_NAME in kinds
+    assert ContractViolation.AXIS_ORDER in kinds
     if _CRS_RESOLVABLE:
-        assert "projected but the coordinates are degrees" in problems
+        assert ContractViolation.CRS_CONTRADICTS_COORDS in kinds
 
 
 def test_a_normalised_dataset_has_no_violations() -> None:
@@ -334,7 +351,7 @@ def test_an_ascending_y_is_a_contract_violation() -> None:
     ascending = _cube(dims=("t", "y", "x"), sizes={"t": 1, "y": 2, "x": 2}, coords={"y": [59.0, 60.0]})
     descending = _cube(dims=("t", "y", "x"), sizes={"t": 1, "y": 2, "x": 2}, coords={"y": [60.0, 59.0]})
 
-    assert any("ascends" in problem for problem in published_contract_violations(ascending))
+    assert [v.kind for v in published_contract_violations(ascending)] == [ContractViolation.Y_ASCENDS]
     assert published_contract_violations(descending) == []
 
 
@@ -465,3 +482,71 @@ def test_a_missing_store_is_not_a_blocker(tmp_path: Path) -> None:
 
     ds = _cube(dims=("t", "y", "x"), sizes={"t": 1, "y": 2, "x": 2}, coords={"y": [60.0, 59.0]})
     _assert_appendable_axes(tmp_path / "absent.icechunk", ds, x_dim="x", y_dim="y")
+
+
+# --- the single entry point ----------------------------------------------------------------
+
+
+@_needs_proj
+def test_prepare_never_rolls_a_projected_axis(ocs_logs: Any) -> None:
+    """The defect this entry point exists to make unexpressible.
+
+    Composed by hand, the streaming path passed the plugin's `crs` *class attribute* into the
+    longitude roll while the resolved CRS sat unused a few lines away. With no attribute declared
+    that argument is None, the projected-CRS guard is skipped, and an easting of 500000 rolls to
+    ((500000 + 180) % 360) - 180 = -40 — the store silently destroyed. Going through
+    prepare_for_publication, the roll cannot be reached before the CRS is resolved.
+    """
+    ds = xr.Dataset(
+        {"v": (("t", "y", "x"), np.ones((1, 2, 3), dtype="float32"))},
+        coords={
+            "t": np.array(["2026-01-01"], dtype="datetime64[ns]"),
+            "y": [7_000_000.0, 6_999_000.0],
+            "x": [400_000.0, 500_000.0, 600_000.0],
+        },
+    )
+    ds.attrs["proj:code"] = "EPSG:32633"
+
+    prepared = prepare_for_publication(ds)  # no fallback_crs — the data must carry the decision
+
+    assert prepared.crs == "EPSG:32633"
+    assert prepared.dataset["x"].values.tolist() == [400_000.0, 500_000.0, 600_000.0]
+    assert "Rolling" not in ocs_logs.text
+
+
+def test_prepare_applies_every_invariant_in_one_call() -> None:
+    """A cube violating all four at once comes out conforming."""
+    ds = xr.Dataset(
+        {"v": (("time", "x", "y"), np.ones((1, 4, 3), dtype="float32"))},
+        coords={
+            "time": np.array(["2026-01-01"], dtype="datetime64[ns]"),
+            "x": [0.0, 10.0, 350.0, 355.0],
+            "y": [57.0, 58.0, 59.0],
+        },
+    )
+
+    prepared = prepare_for_publication(ds, fallback_crs="EPSG:32633")
+    out = prepared.dataset
+
+    assert published_contract_violations(out) == []
+    assert out["v"].dims == ("t", "y", "x")  # renamed and transposed
+    assert out["y"].values.tolist() == [59.0, 58.0, 57.0]  # north-up
+    assert out["x"].values.min() < 0  # rolled off 0…360
+    assert prepared.crs == "EPSG:4326"  # the projected declaration refused by the coordinates
+
+
+def test_prepare_leaves_a_conforming_cube_alone() -> None:
+    ds = xr.Dataset(
+        {"v": (("t", "y", "x"), np.ones((1, 2, 2), dtype="float32"))},
+        coords={
+            "t": np.array(["2026-01-01"], dtype="datetime64[ns]"),
+            "y": [60.0, 59.0],
+            "x": [10.0, 11.0],
+        },
+    )
+    ds.attrs["proj:code"] = "EPSG:4326"
+
+    prepared = prepare_for_publication(ds)
+
+    assert prepared.crs == "EPSG:4326"
+    assert prepared.dataset["v"].values is ds["v"].values

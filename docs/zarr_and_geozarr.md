@@ -183,8 +183,8 @@ overstating sends a renderer looking for levels that do not exist.
 The `profile` parameter is a
 [STAC Zarr best practices](https://github.com/radiantearth/stac-best-practices/blob/main/best-practices-zarr.md)
 recommendation, not part of the official Zarr media type registration. Consumers match it as a
-**literal**, not by parsing parameters, so the string is byte-for-byte fixed — same parameter
-order, one space after each `;`. Reformatting it silently disables rendering everywhere.
+literal rather than parsing parameters, so the exact string matters; the constraint is recorded
+next to it in `stac/media_types.py`.
 
 ## CF metadata in the catalog
 

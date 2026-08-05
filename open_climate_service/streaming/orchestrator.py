@@ -28,9 +28,7 @@ import xarray as xr
 
 from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
 from open_climate_service.shared.raster_contract import (
-    normalize_dim_layout,
-    normalize_longitudes,
-    normalize_y_direction,
+    prepare_for_publication,
     spatial_coords_match,
 )
 from open_climate_service.streaming.protocol import GridSpec, IngestionPlugin
@@ -76,40 +74,12 @@ def _strip_cf_encoding(ds: xr.Dataset, period_type: str, *, time_dim: str) -> No
         ds[time_dim].encoding.update({"units": units, "dtype": "int32"})
 
 
-def _infer_epsg(ds: xr.Dataset, fallback: int | str) -> int:
-    """Infer an EPSG code from a fetched dataset, falling back when unknown.
-
-    ``fallback`` may be an int or string CRS (e.g. the plugin's ``crs`` attribute);
-    it is normalized to an EPSG int.
-    """
-    from open_climate_service.streaming.protocol import to_epsg_int
-
-    code = ds.attrs.get("proj:code") or ds.attrs.get("proj:epsg")
-    if code:
-        try:
-            return to_epsg_int(code)
-        except (ValueError, TypeError):
-            pass
-    try:
-        import rioxarray  # noqa: F401  # pyright: ignore[reportUnusedImport]  # activates the .rio accessor
-
-        crs = ds.rio.crs
-        if crs is not None and crs.to_epsg():
-            return int(crs.to_epsg())
-    except Exception:  # noqa: BLE001 — CRS detection is best-effort
-        pass
-    return to_epsg_int(fallback)
-
-
-def _grid_spec_from_dataset(
-    ds: xr.Dataset, *, time_dim: str, x_dim: str, y_dim: str, fallback_crs: int | str = 4326
-) -> GridSpec:
+def _grid_spec_from_dataset(ds: xr.Dataset, *, time_dim: str, x_dim: str, y_dim: str, crs: str) -> GridSpec:
     """Infer the store `GridSpec` from the first fetched period.
 
-    Reads dtype/nodata before CF encoding is stripped, so the no-data sentinel
-    survives into the store's fill value. ``fallback_crs`` (the plugin's ``crs``
-    attribute) supplies the CRS when the fetched data carries none — how a
-    projected-grid plugin declares its projection.
+    Reads dtype/nodata before CF encoding is stripped, so the no-data sentinel survives into the
+    store's fill value. ``crs`` comes from :func:`prepare_for_publication`, which is the single
+    place a dataset's CRS is decided — a second inference here would be a second answer.
     """
     try:
         primary = next(iter(ds.data_vars))
@@ -126,7 +96,7 @@ def _grid_spec_from_dataset(
         ) from exc
     return GridSpec(
         shape=shape,
-        crs=_infer_epsg(ds, fallback_crs),
+        crs=crs,
         dtype=da.dtype,
         nodata=float(nodata) if nodata is not None else None,
         time_dim=time_dim,
@@ -278,15 +248,14 @@ async def run_streaming_ingest(
                 # data in whatever orientation its source delivers (CLIM-821). Deterministic, so
                 # every period of a run agrees; a store written before the contract can disagree,
                 # which _assert_appendable_axes catches below.
-                ds = normalize_dim_layout(ds, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim)
-                ds = normalize_y_direction(ds, y_dim=y_dim)
-                ds = normalize_longitudes(ds, x_dim=x_dim, crs=getattr(plugin, "crs", None))
+                prepared = prepare_for_publication(
+                    ds, fallback_crs=fallback_crs, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim
+                )
+                ds = prepared.dataset
                 # Infer the grid from the first fetched period, before _strip_cf_encoding
                 # so the nodata sentinel survives into the spec.
                 if spec is None:
-                    spec = _grid_spec_from_dataset(
-                        ds, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim, fallback_crs=fallback_crs
-                    )
+                    spec = _grid_spec_from_dataset(ds, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim, crs=prepared.crs)
                 _strip_cf_encoding(ds, period_type, time_dim=spec.time_dim)
                 apply_cf_metadata(ds, cf_attrs, overwrite=True)
                 try:
