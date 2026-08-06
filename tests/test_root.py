@@ -118,6 +118,57 @@ def test_zarr_route_allows_private_network_preflight(client: TestClient, monkeyp
     assert response.headers["access-control-allow-private-network"] == "true"
 
 
+def test_zarr_route_allows_the_hosted_geozarr_viewer_by_default(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """source-cooperative/zarr-viewer must work without the operator configuring anything.
+
+    Left out of the default allowlist, its requests are blocked and it reports "your connection
+    looks slow or unstable" — a message that sends an operator to debug their network for what
+    is actually a cross-origin refusal (CLIM-852).
+    """
+    monkeypatch.setattr(
+        ingestion_services,
+        "get_dataset_zarr_store_file_or_404",
+        lambda _id, _path, range_header=None: {"zarr_format": 3, "node_type": "group", "attributes": {}},
+    )
+
+    response = client.get(
+        "/zarr/dataset-1/zarr.json", headers={"Origin": "https://source-cooperative.github.io"}
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://source-cooperative.github.io"
+
+
+def test_zarr_route_answers_the_local_network_access_preflight(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Chrome renamed the opt-in from Private Network Access to Local Network Access.
+
+    Both spellings are answered, because which one a browser sends depends on its version and
+    getting it wrong looks identical to the server being unreachable.
+    """
+    monkeypatch.setattr(
+        ingestion_services,
+        "get_dataset_zarr_store_file_or_404",
+        lambda _id, _path, range_header=None: {"zarr_format": 3, "node_type": "group", "attributes": {}},
+    )
+
+    response = client.options(
+        "/zarr/dataset-1/zarr.json",
+        headers={
+            "Origin": "https://source-cooperative.github.io",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Local-Network-Access": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-local-network-access"] == "true"
+    assert response.headers["access-control-allow-private-network"] == "true"
+
+
 def test_zarr_route_preserves_existing_vary_values(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         ingestion_services,

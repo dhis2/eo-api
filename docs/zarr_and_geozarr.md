@@ -210,6 +210,40 @@ fields may be used, so a prefixed field is one a client is defined to understand
 passes through the store's own CF attribute names verbatim. The extension is declared in
 `stac_extensions` only when a `cf:` field was actually emitted.
 
+## Opening a local store in a hosted browser viewer
+
+Hosted tools like [zarr-viewer](https://source-cooperative.github.io/zarr-viewer/) and
+[inspect.geozarr.org](https://inspect.geozarr.org) read a store directly over HTTP, which means a
+public page fetching `http://localhost:9000`. Browsers gate that, and there are **two** separate
+gates — only one of which the server controls.
+
+**Server side, handled for you.** The instance answers both spellings of the opt-in Chrome has
+shipped as the spec evolved — Private Network Access and its successor Local Network Access — for
+an allowlist of origins that already includes the two viewers above. Add others with:
+
+```
+CLIMATE_SERVICE_ZARR_BROWSER_ORIGINS="https://inspect.geozarr.org,https://your-viewer.example"
+```
+
+**Browser side, yours to grant.** Current Chrome additionally requires *user permission* to reach
+the loopback address space, and refuses by default. When that is what blocks the request, the
+console says:
+
+```
+Access to fetch at 'http://localhost:9000/zarr/...' from origin 'https://...'
+has been blocked by CORS policy: Permission was denied for this request
+to access the `loopback` address space.
+```
+
+Note the wording — `Permission was denied`, not a missing header. No server change fixes it. The
+options are to allow local network access for the site when the browser prompts (or via the icon
+in the address bar), to run the viewer from `localhost` as well so both are in the same address
+space, or to expose the instance on a public HTTPS origin.
+
+The viewer's own error message is unhelpful here: it reports *"your connection looks slow or
+unstable"* for what is a permission refusal, so check the browser console before suspecting the
+network.
+
 ## How Zarr stores are served
 
 The Open Climate Service provides two endpoints for accessing the same Icechunk store:
