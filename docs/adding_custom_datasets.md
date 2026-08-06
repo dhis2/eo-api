@@ -323,3 +323,13 @@ Verify it appears in the STAC catalog:
 ```bash
 curl -s http://127.0.0.1:9000/stac/catalog.json | jq '.links[] | select(.rel == "child")'
 ```
+
+## Distributing a plugin as an installable package
+
+The `plugins_dir` above is ideal for instance-specific customisation. To make a plugin
+**reusable across instances** — packaged and installed with `uv add`, no path wiring — see the
+[Installable plugins](installable_plugins.md) guide. The layout mirrors `plugins_dir`, so migrating
+is mostly moving the files into a package and declaring one entry point.
+
+The [seNorge plugin](https://github.com/dhis2/open-climate-service-senorge-plugin) is the reference
+implementation.
