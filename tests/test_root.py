@@ -133,9 +133,7 @@ def test_zarr_route_allows_the_hosted_geozarr_viewer_by_default(
         lambda _id, _path, range_header=None: {"zarr_format": 3, "node_type": "group", "attributes": {}},
     )
 
-    response = client.get(
-        "/zarr/dataset-1/zarr.json", headers={"Origin": "https://source-cooperative.github.io"}
-    )
+    response = client.get("/zarr/dataset-1/zarr.json", headers={"Origin": "https://source-cooperative.github.io"})
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "https://source-cooperative.github.io"
