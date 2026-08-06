@@ -142,9 +142,10 @@ def test_coarsen_native_only_handles_mode() -> None:
 def test_topozarr_nearest_keeps_the_top_left_cell() -> None:
     """Pin the upstream kernel's corner choice, since our equivalence argument rests on it.
 
-    Also guards the packaging trap: `nearest` only exists from topozarr-core 0.1.2, and
-    topozarr's own constraint (`>=0.1.0`) would allow an older core where this raises
-    "method must be one of 'mean', 'max', 'min', 'sum'" — at ingest time, not on import.
+    Also the last line of defence against a `topozarr` / `topozarr-core` version mismatch. That
+    used to be reachable — 0.1.3 declared only `topozarr-core>=0.1.0` while the `nearest` kernel
+    exists from core 0.1.2 — and it failed at ingest time rather than on import. 0.1.4 pins the
+    pair exactly, so it should no longer be possible; this asserts that rather than assuming it.
     """
     from topozarr_core import block_reduce
 
