@@ -149,11 +149,22 @@ Alongside the xclim indicators, the thermodynamic functions of ECMWF's [earthkit
 | `saturation_vapour_pressure` | Saturation vapour pressure over water/ice/mixed phase |
 | `potential_temperature`, `virtual_temperature` | Thermodynamic temperatures |
 
-Relative humidity is the common case, since ERA5-Land provides temperature and dewpoint but not humidity directly:
+Relative humidity is the common case, since the ERA5-Land source carries temperature and dewpoint but not humidity directly:
 
 ```python
+t2m = conn.load_collection("era5land_temperature_daily")
+d2m = conn.load_collection("era5land_dewpoint_daily")
+
 rh = t2m.process("relative_humidity_from_dewpoint", arguments={"t": t2m, "td": d2m})
 ```
+
+Two things worth noting. Both cubes are passed **explicitly** — the collection you call
+`.process()` on is only the entry point, not an implicit first argument. And
+`era5land_dewpoint_daily` is **not a built-in**: the shipped ERA5-Land templates cover
+temperature (`t2m`) and precipitation (`tp`) only. Dewpoint needs a template of its own,
+which is a copy of the temperature one with `variable: d2m` — the same
+one-plugin-many-templates pattern described in
+[Architecture](architecture.md#streaming-plugin).
 
 Browse the full set in `GET /processes`; every function earthkit-meteo documents with a single cube output is registered.
 
@@ -161,13 +172,9 @@ Browse the full set in `GET /processes`; every function earthkit-meteo documents
 
 These functions expect ECMWF's native units — temperature in **K**, pressure in **Pa** — and do no checking of their own. Our stores are usually not in those units: ERA5-Land temperature is converted to `degC` at ingest. Passing `degC` where `K` is expected produces no error, just a wrong number.
 
-The registered processes therefore enforce units on the way in. A cube in a compatible unit is converted (`degC` → `K`, `hPa` → `Pa`); a cube whose `units` attribute is missing or incompatible is rejected with an explanatory error. So you can pass a stored `degC` temperature directly and get a correct answer:
+The registered processes therefore enforce units on the way in. A cube in a compatible unit is converted (`degC` → `K`, `hPa` → `Pa`); a cube whose `units` attribute is missing or incompatible is rejected with an explanatory error.
 
-```python
-# era5land_temperature_daily is stored in degC — converted to K automatically
-rh = conn.load_collection("era5land_temperature_daily") \
-         .process("relative_humidity_from_dewpoint", arguments={"t": t, "td": td})
-```
+So the call above needs no change on a `degC` store: `era5land_temperature_daily` and `era5land_dewpoint_daily` are both converted to `K` on the way in, and the answer is correct without a manual conversion step.
 
 If a cube is rejected for missing units, the fix is to declare `units` on the variable in its dataset template — that value is what gets CF-stamped at ingest.
 
