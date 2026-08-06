@@ -67,9 +67,15 @@ def declared_temporal_end(dataset: dict[str, Any]) -> str | None:
 def list_datasets() -> list[dict[str, Any]]:
     """Load all dataset templates and return a flat list.
 
-    Built-in templates from open_climate_service/plugins/datasets/ are always loaded. When
-    plugins_dir is set in CLIMATE_SERVICE_CONFIG, templates from that directory are
-    merged on top — a custom template with the same id overrides the built-in one.
+    Templates are merged in increasing order of precedence:
+
+    1. Built-in templates from open_climate_service/plugins/datasets/.
+    2. Installed plugin packages that declare an ``open_climate_service.plugins``
+       entry point (auto-discovered — no config change beyond installing them, #118).
+    3. The instance ``plugins_dir`` from CLIMATE_SERVICE_CONFIG.
+
+    A template with the same id overrides one from an earlier stage, so ``plugins_dir``
+    always wins and an installed plugin overrides a built-in. Overrides are logged.
 
     CONFIGS_DIR (test override via monkeypatch) bypasses this and loads only
     from the given directory, as tests supply a fully controlled set.
@@ -78,6 +84,12 @@ def list_datasets() -> list[dict[str, Any]]:
         return _load_from_dir(CONFIGS_DIR)
 
     merged: dict[str, dict[str, Any]] = {d["id"]: d for d in _load_builtin_datasets()}
+
+    for plugin_name, dataset in _load_entry_point_datasets():
+        ds_id = dataset["id"]
+        if ds_id in merged:
+            logger.warning("Plugin '%s' template '%s' overrides an existing dataset template", plugin_name, ds_id)
+        merged[ds_id] = dataset
 
     config = api_config.get_config()
     if config.get("templates_dir"):
@@ -102,7 +114,10 @@ def list_datasets() -> list[dict[str, Any]]:
         datasets_subdir = root / "datasets"
         if datasets_subdir.is_dir():
             for dataset in _load_from_dir(datasets_subdir):
-                merged[dataset["id"]] = dataset
+                ds_id = dataset["id"]
+                if ds_id in merged:
+                    logger.info("plugins_dir template '%s' overrides an existing dataset template", ds_id)
+                merged[ds_id] = dataset
 
     return list(merged.values())
 
@@ -198,6 +213,35 @@ def _load_builtin_datasets() -> list[dict[str, Any]]:
             logger.exception("Error loading %s", resource.name)
             raise
     return datasets
+
+
+def _load_entry_point_datasets() -> list[tuple[str, dict[str, Any]]]:
+    """Load dataset templates contributed by installed plugin packages (#118).
+
+    A plugin's ``datasets/*.yaml`` templates are loaded here; the package's Python —
+    the ``ingestion.plugin`` class — is importable by dotted path because the package
+    is installed, so no ``sys.path`` handling is needed.
+
+    Returns ``(plugin_name, template)`` pairs so the caller can report conflicts.
+    """
+    from open_climate_service.plugin_discovery import iter_plugin_subdirs
+
+    results: list[tuple[str, dict[str, Any]]] = []
+    for plugin_name, _package, datasets_res in iter_plugin_subdirs("datasets"):
+        try:
+            for resource in datasets_res.iterdir():
+                if not resource.name.endswith((".yaml", ".yml")):
+                    continue
+                file_datasets = yaml.safe_load(resource.read_text(encoding="utf-8"))
+                if not isinstance(file_datasets, list):
+                    raise ValueError(f"{plugin_name} ({resource.name}) must contain a list of dataset templates")
+                for dataset in file_datasets:
+                    _validate_dataset_template(dataset, source=f"plugin '{plugin_name}' ({resource.name})")
+                    results.append((plugin_name, dataset))
+        except Exception:
+            logger.exception("Error loading dataset templates from plugin '%s'", plugin_name)
+            raise
+    return results
 
 
 def _load_from_dir(folder: Path) -> list[dict[str, Any]]:
