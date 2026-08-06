@@ -13,7 +13,8 @@ from topozarr import CoarseningMethod
 from topozarr.coarsen import create_pyramid
 
 from open_climate_service import config as api_config
-from open_climate_service.shared.crs import dataset_crs
+from open_climate_service.shared.geozarr import grid_geometry, write_gdal_geotransform
+from open_climate_service.shared.raster_contract import prepare_for_publication
 
 logger = logging.getLogger(__name__)
 
@@ -304,24 +305,39 @@ def write_to_icechunk_store(
     import icechunk
     import rioxarray as _rxr  # noqa: F401  # pyright: ignore[reportUnusedImport]  # activates .rio accessor
 
-    if crs is None:
-        # Data is stored in its native CRS — the one the source delivered it in,
-        # recovered from the dataset itself. Never the instance config CRS:
-        # stamping e.g. EPSG:32633 onto WGS84 ERA5-Land coordinates puts the
-        # store off-map.
-        crs = dataset_crs(ds)
+    # Bring the cube up to the published-store contract, and resolve the CRS that describes it,
+    # at the write boundary — rather than relying on every plugin to get it right (CLIM-821).
+    prepared = prepare_for_publication(ds, fallback_crs=crs, x_dim=x_dim, y_dim=y_dim)
+    ds, crs = prepared.dataset, prepared.crs
+    if t_dim is not None and t_dim != "t":
+        # The caller named the temporal dim as it arrived; normalisation has renamed it, so the
+        # rest of this function (root time coordinate, chunking) must follow the new name.
+        t_dim = "t" if "t" in ds.dims else t_dim
 
-    dims = [x_dim, y_dim]
-    xmin = float(ds[x_dim].min())
-    xmax = float(ds[x_dim].max())
-    ymin = float(ds[y_dim].min())
-    ymax = float(ds[y_dim].max())
-    geozarr_attrs = create_geozarr_attrs(
-        dimensions=dims,
-        crs=crs,
-        bbox=[xmin, ymin, xmax, ymax],
-        shape=(ds.sizes[x_dim], ds.sizes[y_dim]),
-    )
+    # Array order, (y, x): `spatial:dimensions` and `spatial:shape` are read positionally, so
+    # naming them x-first transposes the grid for any client that trusts the convention.
+    dims = [y_dim, x_dim]
+    geometry = grid_geometry(ds[x_dim], ds[y_dim])
+    if geometry is None:
+        # Degenerate grid (a single cell on an axis) — the cell size can't be derived from
+        # coordinates, so fall back to the centre-based extent and omit the affine.
+        bbox = [
+            float(ds[x_dim].min()),
+            float(ds[y_dim].min()),
+            float(ds[x_dim].max()),
+            float(ds[y_dim].max()),
+        ]
+        shape: tuple[int, ...] = (ds.sizes[y_dim], ds.sizes[x_dim])
+    else:
+        bbox = geometry["bbox"]
+        shape = tuple(geometry["shape"])
+    geozarr_attrs = create_geozarr_attrs(dimensions=dims, crs=crs, bbox=bbox, shape=shape)
+    if geometry is not None:
+        # The affine is what a client places the raster with; without it, viewers infer a grid
+        # from the coordinate arrays and assume EPSG:4326 while doing so, which puts every
+        # projected store off the map. topozarr writes the same affine for pyramid level 0,
+        # and this matches it exactly (pixel registration, so the origin is the cell edge).
+        geozarr_attrs["spatial:transform"] = geometry["transform"]
 
     ds = ds.proj.assign_crs(spatial_ref=crs)
     ds = ds.rio.write_crs(crs)
@@ -396,11 +412,26 @@ def write_to_icechunk_store(
                         ds_entry.setdefault("crs", crs)
                 root_attrs["multiscales"] = ms
                 root.attrs.update(root_attrs)
+        if geometry is not None:
+            write_gdal_geotransform(root, geometry["transform"])
         for level_key in root.keys():
-            if isinstance(root[level_key], zarr.Group):
-                lvl_attrs = dict(root[level_key].attrs)
-                lvl_attrs["coordinates"] = "spatial_ref"
-                root[level_key].attrs.update(lvl_attrs)
+            level_group = root[level_key]
+            if not isinstance(level_group, zarr.Group):
+                continue
+            lvl_attrs = dict(level_group.attrs)
+            lvl_attrs["coordinates"] = "spatial_ref"
+            level_group.attrs.update(lvl_attrs)
+            # Level groups are named by their downsample exponent ("0" = native). Anything
+            # else is not a pyramid level, so leave its georeferencing alone.
+            if geometry is not None and level_key.isdigit():
+                # Each level halves the resolution, so it needs its own GeoTransform — one
+                # copied from level 0 would place every overview at twice its true size.
+                factor = float(2 ** int(level_key))
+                step_x, rot_x, origin_x, rot_y, step_y, origin_y = geometry["transform"]
+                write_gdal_geotransform(
+                    level_group,
+                    [step_x * factor, rot_x, origin_x, rot_y, step_y * factor, origin_y],
+                )
 
         if t_dim is not None:
             _write_root_time_coordinate(session.store, ds, time_dim=t_dim)
@@ -425,5 +456,7 @@ def write_to_icechunk_store(
         flat_attrs = dict(root_flat.attrs)
         flat_attrs["coordinates"] = "spatial_ref"
         root_flat.attrs.update(flat_attrs)
+        if geometry is not None:
+            write_gdal_geotransform(root_flat, geometry["transform"])
 
     session.commit(commit_message)

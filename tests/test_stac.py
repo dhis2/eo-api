@@ -227,9 +227,12 @@ def test_collection_uses_xstac_and_adds_expected_fields(client: TestClient, monk
     assert payload["cube:dimensions"]["t"]["extent"] == ["2026-01-01T00:00:00Z", "2026-01-10T00:00:00Z"]
     assert payload["cube:dimensions"]["t"]["step"] == "P1D"
     assert payload["cube:variables"]["precip"]["unit"] == "mm/day"
-    # CF semantics surfaced as top-level cube:variable fields (#283)
-    assert payload["cube:variables"]["precip"]["standard_name"] == "lwe_precipitation_rate"
-    assert payload["cube:variables"]["precip"]["cell_methods"] == "time: mean"
+    # CF semantics surfaced as cube:variable fields, named per the STAC CF extension
+    # (CLIM-828). Prefixed at this level because that is the defined STAC field; the raw CF
+    # spellings stay inside `attrs`, which passes the store's own attribute names through.
+    assert payload["cube:variables"]["precip"]["cf:standard_name"] == "lwe_precipitation_rate"
+    assert payload["cube:variables"]["precip"]["cf:cell_methods"] == "time: mean"
+    assert "standard_name" not in payload["cube:variables"]["precip"]
     assert payload["cube:variables"]["precip"]["attrs"] == {
         "long_name": "Precipitation",
         "units": "mm/day",
@@ -237,6 +240,8 @@ def test_collection_uses_xstac_and_adds_expected_fields(client: TestClient, monk
         "cell_methods": "time: mean",
     }
     assert "https://stac-extensions.github.io/projection/v2.0.0/schema.json" in payload["stac_extensions"]
+    # Declared because cf: fields were emitted.
+    assert "https://stac-extensions.github.io/cf/v1.0.0/schema.json" in payload["stac_extensions"]
 
 
 def test_stac_collection_compatibility_route_builds_collection(
@@ -907,3 +912,126 @@ def test_build_collection_crs_render_hints_use_store_wkt(tmp_path: Path) -> None
     proj4 = payload["open_climate_service:proj4"]
     assert "proj=utm" in proj4 and "zone=33" in proj4
     assert payload["proj:wkt2"].startswith("PROJCRS")
+
+
+def _stub_collection_build(monkeypatch: pytest.MonkeyPatch, artifact: ArtifactRecord) -> None:
+    """Stub out the store-reading parts of collection building, leaving the media type real."""
+    monkeypatch.setattr(ingestion_services, "list_artifacts", lambda: SimpleNamespace(items=[artifact]))
+    monkeypatch.setattr(stac_services.registry_datasets, "get_dataset", lambda _: {"period_type": "daily"})
+    monkeypatch.setattr(stac_services, "_build_collection_with_xstac", lambda **_: _minimal_xstac_payload())
+    monkeypatch.setattr(stac_services, "_zarr_asset_metadata", lambda _: {})
+    monkeypatch.setattr(stac_services, "_zarr_open_kwargs", lambda _: {"consolidated": True})
+
+
+def test_collection_advertises_the_detected_media_type(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Whatever detection concludes must reach the payload — the `profile` parameter is what
+    gates rendering in pyramid-only clients (CLIM-853).
+
+    Detection itself is covered against real stores in test_geozarr_media_type.py; this is the
+    plumbing from there to the collection's zarr asset.
+    """
+    artifact = _artifact(artifact_id="pyr1")
+    _stub_collection_build(monkeypatch, artifact)
+    monkeypatch.setattr(
+        stac_services,
+        "zarr_media_type",
+        lambda *_a, **_k: "application/vnd.zarr; version=3; profile=multiscales",
+    )
+
+    payload = client.get("/stac/collections/chirps3_precipitation_daily").json()
+
+    assert payload["assets"]["zarr"]["type"] == "application/vnd.zarr; version=3; profile=multiscales"
+
+
+def test_collection_keeps_the_plain_media_type_for_a_flat_store(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claiming a pyramid for a flat store sends a renderer looking for levels that don't exist."""
+    artifact = _artifact(artifact_id="flat1")
+    _stub_collection_build(monkeypatch, artifact)
+    monkeypatch.setattr(stac_services, "zarr_media_type", lambda *_a, **_k: "application/vnd.zarr; version=3")
+
+    payload = client.get("/stac/collections/chirps3_precipitation_daily").json()
+
+    assert payload["assets"]["zarr"]["type"] == "application/vnd.zarr; version=3"
+
+
+def test_media_type_detection_is_cached_per_request(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Detection reads the store's root group; that must not happen on every STAC request.
+
+    The media type is set on the collection *template*, which is rebuilt per request — so it
+    sits outside the xstac payload cache and needs its own.
+    """
+    reads = 0
+
+    def counting_media_type(store_path: str, *, icechunk: bool) -> str:
+        nonlocal reads
+        reads += 1
+        return "application/vnd.zarr; version=3"
+
+    artifact = _artifact(artifact_id="cache1")
+    _stub_collection_build(monkeypatch, artifact)
+    monkeypatch.setattr(stac_services, "zarr_media_type", counting_media_type)
+
+    client.get("/stac/collections/chirps3_precipitation_daily")
+    client.get("/stac/collections/chirps3_precipitation_daily")
+
+    assert reads == 1
+
+
+def test_media_type_cache_is_keyed_by_artifact_not_store_path(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A re-ingest reuses the store path and can cross the pyramid threshold as data grows.
+
+    A path-keyed cache would keep serving the old claim; keying on the artifact id cannot, since
+    every write produces a new artifact record.
+    """
+    detections: list[str] = []
+
+    def growing_media_type(store_path: str, *, icechunk: bool) -> str:
+        detections.append(store_path)
+        return (
+            "application/vnd.zarr; version=3; profile=multiscales"
+            if len(detections) > 1
+            else "application/vnd.zarr; version=3"
+        )
+
+    monkeypatch.setattr(stac_services.registry_datasets, "get_dataset", lambda _: {"period_type": "daily"})
+    monkeypatch.setattr(stac_services, "_build_collection_with_xstac", lambda **_: _minimal_xstac_payload())
+    monkeypatch.setattr(stac_services, "_zarr_asset_metadata", lambda _: {})
+    monkeypatch.setattr(stac_services, "_zarr_open_kwargs", lambda _: {"consolidated": True})
+    monkeypatch.setattr(stac_services, "zarr_media_type", growing_media_type)
+
+    same_path = "/tmp/chirps3_precipitation_daily.icechunk"
+    monkeypatch.setattr(
+        ingestion_services,
+        "list_artifacts",
+        lambda: SimpleNamespace(items=[_artifact(artifact_id="before", path=same_path)]),
+    )
+    first = client.get("/stac/collections/chirps3_precipitation_daily").json()
+
+    # Same store path, new artifact record — as a re-ingest produces.
+    monkeypatch.setattr(
+        ingestion_services,
+        "list_artifacts",
+        lambda: SimpleNamespace(items=[_artifact(artifact_id="after", path=same_path)]),
+    )
+    second = client.get("/stac/collections/chirps3_precipitation_daily").json()
+
+    assert first["assets"]["zarr"]["type"] == "application/vnd.zarr; version=3"
+    assert second["assets"]["zarr"]["type"] == "application/vnd.zarr; version=3; profile=multiscales"
+    assert detections == [same_path, same_path]  # detected twice, despite the identical path
+
+
+def test_cf_extension_is_not_declared_when_no_cf_attrs_are_present(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A store with no CF attributes emits no cf: field, so the extension is left undeclared."""
+    artifact = _artifact(artifact_id="nocf")
+    _stub_collection_build(monkeypatch, artifact)
+
+    payload = client.get("/stac/collections/chirps3_precipitation_daily").json()
+
+    assert not any(key.startswith("cf:") for key in payload["cube:variables"]["precip"])
+    assert stac_services.CF_EXTENSION not in payload["stac_extensions"]
