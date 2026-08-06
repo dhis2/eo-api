@@ -263,7 +263,10 @@ async def test_manage_ingest_rejects_blank_start(monkeypatch: pytest.MonkeyPatch
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "http://testserver/manage?error=Start%20date%20is%20required"
+    # The rejection is now dataset-aware: only a forecast (temporal_direction: future) may
+    # omit the start, so a historical template still gets a redirect with an error.
+    assert "Start%20period%20is%20required" in response.headers["location"]
+    assert "chirps3_precipitation_daily" in response.headers["location"]
 
 
 def test_manage_page_shows_split_publication_and_sync_columns(
