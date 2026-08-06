@@ -852,7 +852,11 @@ def _get_icechunk_store_path_or_404(
     store = session.store
     target = _normalize_icechunk_relative_path(relative_path)
     if target == "":
-        raise HTTPException(status_code=404, detail="Not found")
+        # The store root. A Zarr library never asks for it — it treats the URL as a base and
+        # appends keys — but a person pasting the URL does, and FastAPI's redirect sends the
+        # slashless form here too, so 404 made the root of every store look like a dead store.
+        # Serve the group metadata it stands for, which is also what the appended request gets.
+        target = "zarr.json"
 
     if _icechunk_exists(store, target):
         payload = _icechunk_get(store, target)
