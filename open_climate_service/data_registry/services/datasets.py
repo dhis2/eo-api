@@ -19,6 +19,50 @@ CONFIGS_DIR: Path | None = None
 SUPPORTED_SYNC_KINDS = {"temporal", "release", "static"}
 SUPPORTED_SYNC_EXECUTIONS = {"append", "rematerialize"}
 
+# Which way a dataset's periods run relative to now. Deliberately separate from
+# `sync.kind`: a forecast is still `temporal` for sync purposes (re-run it and you get
+# fresh data), so this is an orthogonal property rather than a fourth kind. Keeping them
+# apart also means the sync engine's decision logic is untouched.
+#
+# `past` (the default) — periods are historical, so an ingestion must say where to start.
+# `future` — every period lies ahead of now, as for a weather forecast. An omitted start
+#     means "from now", because a fixed date would be stale the next day.
+# `spanning` — periods cross now: WorldPop Global2 runs 2015–2030, and climate projections
+#     behave the same way. An explicit start is still required, because defaulting to "now"
+#     would silently drop the historical half — which is usually the half you want.
+#     Declaring it is not decoration: it tells the ingest form to offer the dataset's
+#     declared future end rather than truncating at today.
+SUPPORTED_TEMPORAL_DIRECTIONS = {"past", "future", "spanning"}
+DEFAULT_TEMPORAL_DIRECTION = "past"
+
+
+def temporal_direction(dataset: dict[str, Any]) -> str:
+    """Return a dataset template's temporal direction, defaulting to ``past``."""
+    raw = dataset.get("temporal_direction")
+    return raw if isinstance(raw, str) and raw else DEFAULT_TEMPORAL_DIRECTION
+
+
+def is_future_facing(dataset: dict[str, Any]) -> bool:
+    """True when *every* period lies ahead of now, so an omitted start can mean "now".
+
+    Deliberately excludes ``spanning``. A dataset straddling now (WorldPop Global2's
+    2015–2030, or a climate projection) must still be given an explicit start: defaulting
+    it to "now" would quietly ingest only the projected half and drop all the history.
+    """
+    return temporal_direction(dataset) == "future"
+
+
+def declared_temporal_end(dataset: dict[str, Any]) -> str | None:
+    """Return the template's declared temporal end, if any.
+
+    Used by the ingest form to offer a ``spanning`` dataset's full range rather than
+    stopping at today, which would truncate the projected periods.
+    """
+    extents = dataset.get("extents")
+    temporal = extents.get("temporal") if isinstance(extents, dict) else None
+    end = temporal.get("end") if isinstance(temporal, dict) else None
+    return str(end) if end is not None else None
+
 
 def list_datasets() -> list[dict[str, Any]]:
     """Load all dataset templates and return a flat list.
@@ -197,6 +241,20 @@ def _validate_dataset_template(dataset: object, *, source: str) -> None:
             f"Dataset template '{dataset_id}' in {source} has unsupported sync.kind "
             f"'{sync_kind}'. Supported values: {supported}"
         )
+
+    direction = dataset.get("temporal_direction")
+    if direction is not None:
+        if not isinstance(direction, str) or direction not in SUPPORTED_TEMPORAL_DIRECTIONS:
+            supported = ", ".join(sorted(SUPPORTED_TEMPORAL_DIRECTIONS))
+            raise ValueError(
+                f"Dataset template '{dataset_id}' in {source} has unsupported temporal_direction "
+                f"{direction!r}. Supported values: {supported}"
+            )
+        if direction == "future" and sync_kind == "static":
+            raise ValueError(
+                f"Dataset template '{dataset_id}' in {source} declares temporal_direction: future "
+                "with sync.kind: static. A static dataset has no upstream to look ahead into."
+            )
 
     sync_execution = sync_block.get("execution") if isinstance(sync_block, dict) else None
     if sync_execution is not None:
