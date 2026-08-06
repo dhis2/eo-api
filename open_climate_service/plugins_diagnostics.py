@@ -62,7 +62,10 @@ def log_plugin_loading() -> None:
     for sub, pattern in _PLUGIN_SUBDIRS:
         directory = root / sub
         if not directory.is_dir():
-            logger.warning("Instance plugins: '%s/' is missing under %s — those plugins will not load.", sub, root)
+            # A missing subdir is normal — most instances ship only one or two of
+            # datasets/processes/workflows. The summary line below reports it as
+            # sub=0, so this is only a debug detail, not a warning.
+            logger.debug("Instance plugins: no '%s/' directory under %s.", sub, root)
             counts.append(f"{sub}=0")
             continue
         # Only skip _-prefixed files for Python process plugins; dataset YAML and
