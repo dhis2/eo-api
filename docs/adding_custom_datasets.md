@@ -188,7 +188,9 @@ Layers larger than ~2048×2048 are stored as a multiscale pyramid so the map sta
 - **Binary masks** (0/1 presence) — use `max` ("present anywhere in the block"). Averaging turns a mask into meaningless fractions.
 - **Multi-class categorical** (land-cover class codes, etc.) — use `mode` (majority class). `mean` would average class codes into a *different, non-existent* class (e.g. `mean(10, 80) = 45`).
 
-`mean`/`max`/`min`/`sum` are computed by [topozarr](https://github.com/carbonplan/topozarr); `mode` and `nearest` are resampled from the native resolution by Open Climate Service, because they can't be built level-from-level (a first-class `mode`/`nearest` in topozarr is requested in [carbonplan/topozarr#26](https://github.com/carbonplan/topozarr/issues/26)).
+`mean`/`max`/`min`/`sum`/`nearest` are computed by [topozarr](https://github.com/carbonplan/topozarr), which builds each level from the one above. That is valid for all five because they are *composable* — for `nearest`, taking the corner of each corner gives the same cell as taking every nth cell of the original.
+
+`mode` is not composable: mode-of-modes is not mode-of-native, since a locally dominant class can win at coarse zoom even when it is globally rare. So Open Climate Service resamples `mode` levels from the native resolution itself. A first-class `mode` upstream is still open as [carbonplan/topozarr#26](https://github.com/carbonplan/topozarr/issues/26); when it lands, that local path can go.
 
 **Spatial and temporal extents** — declares what the source dataset covers. Used to validate ingest requests before hitting the provider:
 

@@ -50,12 +50,17 @@ def _pyramid_levels(ds: xr.Dataset, x_dim: str, y_dim: str) -> int:
     return max(2, min(levels, _PYRAMID_MAX_LEVELS))
 
 
-# Coarsening methods topozarr computes itself, each level block-reduced from the one above
-# (valid because they are composable). Correct for *continuous* data.
-_COMPOSABLE_METHODS = frozenset({"mean", "max", "min", "sum"})
-# Categorical methods topozarr cannot do: they are non-composable and must be resampled from
-# the native (level-0) array, so OCS recomputes those levels itself (see #293, carbonplan/topozarr#26).
-_NATIVE_RESAMPLE_METHODS = frozenset({"mode", "nearest"})
+# Coarsening methods topozarr computes itself, each level block-reduced from the one above.
+# That is valid because they are composable — `nearest` included, since corner-of-corners
+# equals corner-of-native. `nearest` arrived in topozarr 0.1.3 (carbonplan/topozarr#26) and
+# is now delegated rather than recomputed here.
+_COMPOSABLE_METHODS = frozenset({"mean", "max", "min", "sum", "nearest"})
+# Methods topozarr cannot do: non-composable, so each level must be resampled from the
+# native (level-0) array rather than from an already-coarsened parent, and OCS recomputes
+# those levels itself. Only `mode` remains — carbonplan/topozarr#26 is still open for it, and
+# upstream's own note says such methods "must reduce from native instead". Delete this path
+# and the helpers below once it lands.
+_NATIVE_RESAMPLE_METHODS = frozenset({"mode"})
 _RESAMPLING_METHODS = _COMPOSABLE_METHODS | _NATIVE_RESAMPLE_METHODS
 _DEFAULT_RESAMPLING = "mean"
 
@@ -126,16 +131,13 @@ def _coarsen_native(da: xr.DataArray, x_dim: str, y_dim: str, factor: int, metho
     ``boundary="trim"`` drops the trailing partial window, so the result is
     ``floor(size / factor)`` per spatial dim — the same shape topozarr produces by
     repeatedly halving, so the output drops straight into the level's existing array.
+
+    Only ``mode`` reaches here. ``nearest`` used to as well, but topozarr 0.1.3 does it
+    natively and composably, so it is delegated (see ``_COMPOSABLE_METHODS``).
     """
-    window = {x_dim: factor, y_dim: factor}
-    coarsen = da.coarsen(window, boundary="trim")
-    if method == "nearest":
-        # Decimation: keep the top-left cell of each window (a real, unaltered value).
-        constructed = coarsen.construct({x_dim: (x_dim, "_ocs_wx"), y_dim: (y_dim, "_ocs_wy")})
-        return constructed.isel(_ocs_wx=0, _ocs_wy=0)
-    if method == "mode":
-        return coarsen.reduce(_mode_reduce)
-    raise ValueError(f"unsupported native-resample method {method!r}")
+    if method != "mode":
+        raise ValueError(f"unsupported native-resample method {method!r}")
+    return da.coarsen({x_dim: factor, y_dim: factor}, boundary="trim").reduce(_mode_reduce)
 
 
 def _overwrite_native_resampled_levels(
@@ -143,11 +145,12 @@ def _overwrite_native_resampled_levels(
 ) -> None:
     """Replace topozarr's coarsened levels with a native resample for categorical data.
 
-    topozarr block-reduces each level from the level above, which is wrong for ``mode`` /
-    ``nearest`` (a coarse cell must be derived from the native cells it covers, not from an
-    already-coarsened parent). topozarr has still written every level's group/array with the
-    right shape, chunking and encoding, so we recompute levels 1..N-1 straight from the
-    native (level-0) arrays and write the values back in place.
+    topozarr block-reduces each level from the level above, which is wrong for ``mode``: a
+    coarse cell's majority class must be derived from the native cells it covers, not from an
+    already-coarsened parent, or a locally dominant class can win at coarse zoom while being
+    globally rare. topozarr has still written every level's group/array with the right shape,
+    chunking and encoding, so we recompute levels 1..N-1 straight from the native (level-0)
+    arrays and write the values back in place.
     """
     root = zarr.open_group(store, mode="a")
     spatial_vars = [str(name) for name, da in ds.data_vars.items() if {x_dim, y_dim} <= set(da.dims)]
@@ -363,9 +366,9 @@ def write_to_icechunk_store(
         # Validate/normalize here too, so a direct caller passing e.g. "MAX" or a mistyped
         # value never reaches topozarr as an invalid CoarseningMethod (falls back to mean).
         pyramid_method = _normalize_resampling_method(pyramid_method)
-        # topozarr only offers composable coarsening (mean/max/min/sum). For categorical
-        # methods (mode/nearest) it writes valid structure with a placeholder here, then we
-        # overwrite the coarsened levels from native below (see #293).
+        # topozarr only offers composable coarsening (mean/max/min/sum/nearest). For `mode`
+        # it writes valid structure with a placeholder here, then we overwrite the coarsened
+        # levels from native below (see #293 and carbonplan/topozarr#26).
         native_resample = pyramid_method in _NATIVE_RESAMPLE_METHODS
         composable_method = "max" if native_resample else pyramid_method
         pyramid = create_pyramid(

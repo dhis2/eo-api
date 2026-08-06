@@ -115,10 +115,43 @@ def test_coarsen_native_mode_picks_block_majority() -> None:
     np.testing.assert_array_equal(out.values, np.array([[10, 20], [30, 40]], dtype="uint8"))
 
 
-def test_coarsen_native_nearest_takes_top_left() -> None:
-    out = _coarsen_native(_categorical_block_da(), "x", "y", 2, "nearest").transpose("y", "x")
-    # Top-left cell of each 2x2 block: 99/20/30/40.
-    np.testing.assert_array_equal(out.values, np.array([[99, 20], [30, 40]], dtype="uint8"))
+def test_nearest_is_delegated_to_topozarr() -> None:
+    """`nearest` arrived upstream in topozarr 0.1.3, so OCS no longer computes it.
+
+    It is composable — corner-of-corners equals corner-of-native — so level-from-previous
+    (what topozarr does) and level-from-native (what OCS used to do) agree. Verified
+    byte-identical across a real 3-level pyramid when the delegation was made.
+    """
+    from open_climate_service.data_manager.services.downloader import (
+        _COMPOSABLE_METHODS,
+        _NATIVE_RESAMPLE_METHODS,
+    )
+
+    assert "nearest" in _COMPOSABLE_METHODS
+    assert "nearest" not in _NATIVE_RESAMPLE_METHODS
+    # Still a valid template value — it just takes the upstream path now.
+    assert _normalize_resampling_method("nearest") == "nearest"
+
+
+def test_coarsen_native_only_handles_mode() -> None:
+    """`mode` is the sole remaining local method; anything else is a programming error."""
+    with pytest.raises(ValueError, match="unsupported native-resample method"):
+        _coarsen_native(_categorical_block_da(), "x", "y", 2, "nearest")
+
+
+def test_topozarr_nearest_keeps_the_top_left_cell() -> None:
+    """Pin the upstream kernel's corner choice, since our equivalence argument rests on it.
+
+    Also the last line of defence against a `topozarr` / `topozarr-core` version mismatch. That
+    used to be reachable — 0.1.3 declared only `topozarr-core>=0.1.0` while the `nearest` kernel
+    exists from core 0.1.2 — and it failed at ingest time rather than on import. 0.1.4 pins the
+    pair exactly, so it should no longer be possible; this asserts that rather than assuming it.
+    """
+    from topozarr_core import block_reduce
+
+    block = np.arange(16, dtype="int16").reshape(4, 4)
+    out = np.asarray(block_reduce(block, (2, 2), "nearest", 0, True))
+    np.testing.assert_array_equal(out, np.array([[0, 2], [8, 10]], dtype="int16"))
 
 
 def _categorical_pyramid_cube():
