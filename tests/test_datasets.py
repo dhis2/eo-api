@@ -176,6 +176,38 @@ def test_get_dataset_zarr_store_file_reads_icechunk_metadata(tmp_path: Path, mon
     assert b'"node_type":"group"' in response.body
 
 
+def test_zarr_store_root_serves_group_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A trailing slash addresses the store root, and must not look like a missing store.
+
+    No Zarr library requests the root — they treat the URL as a base and append keys — but a
+    person pasting the URL does, and FastAPI redirects the slashless form here too, so a 404
+    made the root of every store a dead end reachable by the most obvious route.
+    """
+    store_path = tmp_path / "root.icechunk"
+    repo = icechunk.Repository.create(icechunk.local_filesystem_storage(str(store_path)))
+    session = repo.writable_session("main")
+    ds = xr.Dataset(
+        {"precip": (("t", "y", "x"), [[[1.0]]])},
+        coords={"t": ["2026-01-01"], "x": [1.0], "y": [2.0]},
+        attrs={"proj:code": "EPSG:4326"},
+    )
+    ds.to_zarr(session.store, mode="w", zarr_format=3)
+    session.commit("seed metadata")
+    ds.close()
+
+    artifact = _artifact(artifact_id="a-root")
+    artifact.format = ArtifactFormat.ICECHUNK
+    artifact.path = str(store_path)
+    artifact.asset_paths = [str(store_path)]
+    monkeypatch.setattr(services, "get_latest_artifact_for_dataset_or_404", lambda _: artifact)
+
+    # "" is what the route passes for both /zarr/{id} (after its redirect) and /zarr/{id}/.
+    response = services.get_dataset_zarr_store_file_or_404("chirps3_precipitation_daily", "")
+
+    assert isinstance(response, services.JSONResponse)
+    assert b'"node_type":"group"' in response.body
+
+
 def test_get_dataset_zarr_store_file_rejects_invalid_icechunk_relative_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

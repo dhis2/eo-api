@@ -27,6 +27,10 @@ from typing import Any, cast
 import xarray as xr
 
 from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
+from open_climate_service.shared.raster_contract import (
+    prepare_for_publication,
+    spatial_coords_match,
+)
 from open_climate_service.streaming.protocol import GridSpec, IngestionPlugin
 from open_climate_service.streaming.store import (
     is_store_empty,
@@ -70,40 +74,12 @@ def _strip_cf_encoding(ds: xr.Dataset, period_type: str, *, time_dim: str) -> No
         ds[time_dim].encoding.update({"units": units, "dtype": "int32"})
 
 
-def _infer_epsg(ds: xr.Dataset, fallback: int | str) -> int:
-    """Infer an EPSG code from a fetched dataset, falling back when unknown.
-
-    ``fallback`` may be an int or string CRS (e.g. the plugin's ``crs`` attribute);
-    it is normalized to an EPSG int.
-    """
-    from open_climate_service.streaming.protocol import to_epsg_int
-
-    code = ds.attrs.get("proj:code") or ds.attrs.get("proj:epsg")
-    if code:
-        try:
-            return to_epsg_int(code)
-        except (ValueError, TypeError):
-            pass
-    try:
-        import rioxarray  # noqa: F401  # pyright: ignore[reportUnusedImport]  # activates the .rio accessor
-
-        crs = ds.rio.crs
-        if crs is not None and crs.to_epsg():
-            return int(crs.to_epsg())
-    except Exception:  # noqa: BLE001 — CRS detection is best-effort
-        pass
-    return to_epsg_int(fallback)
-
-
-def _grid_spec_from_dataset(
-    ds: xr.Dataset, *, time_dim: str, x_dim: str, y_dim: str, fallback_crs: int | str = 4326
-) -> GridSpec:
+def _grid_spec_from_dataset(ds: xr.Dataset, *, time_dim: str, x_dim: str, y_dim: str, crs: str) -> GridSpec:
     """Infer the store `GridSpec` from the first fetched period.
 
-    Reads dtype/nodata before CF encoding is stripped, so the no-data sentinel
-    survives into the store's fill value. ``fallback_crs`` (the plugin's ``crs``
-    attribute) supplies the CRS when the fetched data carries none — how a
-    projected-grid plugin declares its projection.
+    Reads dtype/nodata before CF encoding is stripped, so the no-data sentinel survives into the
+    store's fill value. ``crs`` comes from :func:`prepare_for_publication`, which is the single
+    place a dataset's CRS is decided — a second inference here would be a second answer.
     """
     try:
         primary = next(iter(ds.data_vars))
@@ -120,13 +96,47 @@ def _grid_spec_from_dataset(
         ) from exc
     return GridSpec(
         shape=shape,
-        crs=_infer_epsg(ds, fallback_crs),
+        crs=crs,
         dtype=da.dtype,
         nodata=float(nodata) if nodata is not None else None,
         time_dim=time_dim,
         x_dim=x_dim,
         y_dim=y_dim,
     )
+
+
+def _assert_appendable_axes(store_path: Path, ds: xr.Dataset, *, x_dim: str, y_dim: str) -> None:
+    """Refuse to append a period whose spatial axes disagree with the committed store.
+
+    Normalisation reorders rows (y descending) and columns (longitudes rolled to −180…180). An
+    append writes along the time axis only, so the committed coordinate arrays stay as they were:
+    a period normalised one way, appended to a store written the other, puts data under
+    coordinates that no longer describe it — a silently mirrored or half-shifted raster, which is
+    far worse than metadata being out of date.
+
+    That can only happen to a store written before the contract existed (or by a plugin whose
+    orientation has since changed), and the fix is a re-ingest rather than anything this function
+    can do safely, so it fails with an actionable message instead of guessing.
+    """
+    from open_climate_service.streaming.store import read_committed_spatial_coords
+
+    stored = read_committed_spatial_coords(store_path, x_dim=x_dim, y_dim=y_dim)
+    if stored is None:
+        return  # nothing committed to disagree with, or a store we cannot read
+    for axis in (y_dim, x_dim):
+        if axis not in ds.coords or axis not in stored:
+            continue
+        if spatial_coords_match(stored[axis], ds[axis], axis=axis):
+            continue
+        raise RuntimeError(
+            f"Cannot append to {store_path.name}: its committed {axis!r} coordinates do not match "
+            f"the normalised ones for this period "
+            f"(store {stored[axis][0]!r}…{stored[axis][-1]!r}, "
+            f"period {float(ds[axis].values[0])!r}…{float(ds[axis].values[-1])!r}). "
+            "The store predates the published-store layout contract (y descending, longitudes "
+            "−180…180); appending would write data under coordinates that no longer describe it. "
+            "Re-ingest this dataset from scratch to rebuild it under the current contract."
+        )
 
 
 async def run_streaming_ingest(
@@ -195,6 +205,8 @@ async def run_streaming_ingest(
     # Icechunk transaction batching.
     commit_batch_size = max(1, int(getattr(plugin, "commit_batch_size", 1)))
     expected_spatial_shape: tuple[int, int] | None = None
+    # The append-axes check runs once per run, on the first period appended to an existing store.
+    axes_checked = False
     # CF attributes (units / standard_name / cell_methods) declared on the template,
     # stamped onto each written period so the store is CF-compliant on disk (#280).
     # The template is authoritative for the fields it declares, so we overwrite any
@@ -232,12 +244,18 @@ async def run_streaming_ingest(
             # open_dataset / remote HTTP) once it is written, so long backfills don't
             # leak file descriptors one period at a time.
             try:
+                # Enforce the published-store contract on every period, so a plugin can return
+                # data in whatever orientation its source delivers (CLIM-821). Deterministic, so
+                # every period of a run agrees; a store written before the contract can disagree,
+                # which _assert_appendable_axes catches below.
+                prepared = prepare_for_publication(
+                    ds, fallback_crs=fallback_crs, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim
+                )
+                ds = prepared.dataset
                 # Infer the grid from the first fetched period, before _strip_cf_encoding
                 # so the nodata sentinel survives into the spec.
                 if spec is None:
-                    spec = _grid_spec_from_dataset(
-                        ds, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim, fallback_crs=fallback_crs
-                    )
+                    spec = _grid_spec_from_dataset(ds, time_dim=time_dim, x_dim=x_dim, y_dim=y_dim, crs=prepared.crs)
                 _strip_cf_encoding(ds, period_type, time_dim=spec.time_dim)
                 apply_cf_metadata(ds, cf_attrs, overwrite=True)
                 try:
@@ -260,6 +278,9 @@ async def run_streaming_ingest(
                     ds.to_zarr(session.store, mode="w", zarr_format=3)
                     is_first_write = False
                 else:
+                    if not axes_checked:
+                        _assert_appendable_axes(store_path, ds, x_dim=x_dim, y_dim=y_dim)
+                        axes_checked = True
                     ds.to_zarr(session.store, append_dim=spec.time_dim, zarr_format=3)
                 # Root attrs are rewritten on every commit so later append sessions
                 # preserve GeoZarr metadata even if the underlying store layer only

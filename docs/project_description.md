@@ -176,7 +176,7 @@ The API is built on FastAPI and exposes the following endpoint groups:
 
 All datasets are stored as GeoZarr. Key properties:
 
-- Stored without reprojection — coordinates keep the source's native CRS, recorded in the GeoZarr `proj:code` metadata from the CRS the ingestion declares (the instance `crs:`, default `EPSG:4326`, is the fallback). The framework does not auto-detect per-source CRS or reconcile mixed coordinate systems.
+- Stored without reprojection — coordinates keep the source's native CRS, recorded in the GeoZarr `proj:code` metadata from the CRS the ingestion declares, falling back to what rioxarray detects on the data and then to `EPSG:4326`. The instance-wide `crs:` is deliberately never a fallback: using it stamped a projected code onto degree coordinates and put the store at the projection's origin. A declared CRS that contradicts the coordinates is rejected in favour of the data's own. The framework does not otherwise reconcile mixed coordinate systems.
 - CF-compliant coordinate attributes and `_ARRAY_DIMENSIONS` metadata.
 - Multiscale pyramid overview levels declared under the `multiscales` key in `.zattrs` — required for efficient zoom-level-aware chunk fetching by zarr-layer.
 - Chunk shape tuned per dataset to balance three access patterns: time series queries, polygon aggregation, and browser tile rendering.

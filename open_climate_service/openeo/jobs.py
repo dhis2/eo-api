@@ -27,6 +27,7 @@ from open_climate_service.openeo.schemas import (
     OpenEOJobUpdate,
 )
 from open_climate_service.shared.time import utc_now
+from open_climate_service.stac.media_types import ZARR_V3_MEDIA_TYPE, zarr_media_type
 
 _T = TypeVar("_T")
 
@@ -564,9 +565,13 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     # "Mosquito hotspots (Rwanda 2018 Q1)" rather than "mosquito_hotspots".
     dataset_name: str = options.get("dataset_name") or template.get("name") or dataset_id
 
-    from open_climate_service import config as api_config
+    # The cube's own CRS — the store's `proj:code` when it has one, else whatever rioxarray
+    # detects from its grid mapping. Deliberately NOT the instance config CRS: falling back to
+    # that stamped e.g. EPSG:32633 onto an untagged WGS84 cube, which puts the published store
+    # at the projection's origin instead of on the map (CLIM-821).
+    from open_climate_service.shared.crs import dataset_crs
 
-    crs: str = ds.attrs.get("proj:code") or api_config.get_crs()
+    crs: str = dataset_crs(ds)
 
     # Stamp CF attributes (units / standard_name / cell_methods) from the template so the
     # published store is CF-compliant on disk (#280). The template is authoritative for the
@@ -953,7 +958,7 @@ def _result_assets(record: OpenEOJobRecord) -> dict[str, Any]:
             },
             "zarr": {
                 "href": f"/zarr/{dataset_id}",
-                "type": "application/vnd.zarr; version=3",
+                "type": ZARR_V3_MEDIA_TYPE,
                 "title": "Zarr store",
                 "roles": ["data"],
                 "xarray:open_kwargs": {"consolidated": True},
@@ -962,14 +967,24 @@ def _result_assets(record: OpenEOJobRecord) -> dict[str, Any]:
         # Advertise the STAC collection only when the dataset is actually published.
         try:
             from open_climate_service.ingestions import services as _ingestion_services
+            from open_climate_service.ingestions.schemas import ArtifactFormat
 
-            if dataset_id in _ingestion_services.latest_published_zarr_artifacts_by_dataset():
+            artifact = _ingestion_services.latest_published_zarr_artifacts_by_dataset().get(dataset_id)
+            if artifact is not None:
                 assets["stac"] = {
                     "href": f"/stac/collections/{dataset_id}",
                     "type": "application/json",
                     "title": "STAC collection",
                     "roles": ["metadata"],
                 }
+                # Keep the claim in step with the STAC collection's zarr asset, so a client
+                # sees the same media type from either surface. Uncached, unlike the STAC
+                # side — a job-result read is rare enough not to warrant one.
+                store_path = artifact.path or (artifact.asset_paths[0] if artifact.asset_paths else None)
+                if store_path:
+                    assets["zarr"]["type"] = zarr_media_type(
+                        store_path, icechunk=artifact.format == ArtifactFormat.ICECHUNK
+                    )
         except Exception:
             logger.debug("Could not resolve STAC publication for managed dataset '%s'", dataset_id, exc_info=True)
         return assets
@@ -1543,6 +1558,15 @@ def _write_png(ds: Any, results_dir: Any) -> str | None:
 
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
     fig.patch.set_alpha(0)
+    # `origin="upper"` puts array row 0 at the top, which is right because published stores
+    # guarantee y descending (row 0 = north) — see shared/raster_contract. A cube that reaches
+    # here south-up (an in-flight openEO result, not a published store) is flipped first, so the
+    # thumbnail is never upside down.
+    y_name = next((str(d) for d in arr.dims if str(d) in ("y", "lat", "latitude")), None)
+    if y_name is not None and y_name in arr.coords and arr.sizes.get(y_name, 0) >= 2:
+        y_values = arr[y_name].values
+        if float(y_values[1]) > float(y_values[0]):
+            data = data[::-1]
     ax.imshow(data, origin="upper", cmap=cmap, norm=norm, interpolation="nearest")
     ax.axis("off")
     fig.tight_layout(pad=0)
