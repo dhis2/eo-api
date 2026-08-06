@@ -82,6 +82,7 @@ async def manage_ingest(request: Request) -> Response:
     """Handle ingest form submission and stream progress via SSE."""
     from fastapi import HTTPException
 
+    from open_climate_service.data_registry.services import datasets as registry_datasets
     from open_climate_service.data_registry.services.datasets import get_dataset
     from open_climate_service.extents.services import get_extent_or_404
     from open_climate_service.ingestions.services import create_artifact
@@ -90,17 +91,23 @@ async def manage_ingest(request: Request) -> Response:
     try:
         form = await request.form()
         dataset_id = str(form.get("dataset_id", "")).strip()
-        start = str(form.get("start", "")).strip()
+        # A blank field submits "" rather than being absent, so normalise to None.
+        start = str(form.get("start", "")).strip() or None
         end = str(form.get("end", "")).strip() or None
         publish = "publish" in form
         overwrite = "overwrite" in form
 
-        if not start:
-            raise HTTPException(status_code=400, detail="Start date is required")
-
         template = get_dataset(dataset_id)
         if template is None:
             msg = urllib.parse.quote(f"Dataset template '{dataset_id}' not found")
+            return RedirectResponse(f"{base}/manage?error={msg}", status_code=303)
+
+        # Validate the blank start here rather than leaving it to create_artifact. The work
+        # below runs inside an SSE stream, and a response that has already begun cannot
+        # redirect — the operator would get a progress bar that fails mid-flight instead of
+        # the error banner. Only a forecast may omit it (see temporal_direction).
+        if start is None and not registry_datasets.is_future_facing(template):
+            msg = urllib.parse.quote(f"Start period is required for '{dataset_id}': its periods are not in the future")
             return RedirectResponse(f"{base}/manage?error={msg}", status_code=303)
 
         extent = get_extent_or_404()

@@ -240,3 +240,60 @@ def test_write_dataset_template_rejects_path_traversal_id(
                 "display": {"colormap": "RdBu", "range": [-10.0, 10.0]},
             }
         )
+
+
+def test_entry_point_plugin_dataset_is_discovered(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An installed plugin's dataset template is merged into list_datasets (#118)."""
+    monkeypatch.setattr(datasets, "CONFIGS_DIR", None)
+    monkeypatch.setattr(datasets, "_load_builtin_datasets", lambda: [])
+    monkeypatch.setattr(
+        datasets,
+        "_load_entry_point_datasets",
+        lambda: [
+            (
+                "senorge",
+                {
+                    "id": "senorge_temperature_daily",
+                    "sync": {"kind": "temporal"},
+                    "ingestion": {"plugin": "pkg.senorge.SeNorgePlugin"},
+                },
+            )
+        ],
+    )
+    monkeypatch.setattr(api_config, "get_config", lambda: {})
+    ids = [d["id"] for d in datasets.list_datasets()]
+    assert "senorge_temperature_daily" in ids
+
+
+def test_entry_point_plugin_overrides_builtin(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A plugin template with a built-in id overrides the built-in one."""
+    monkeypatch.setattr(datasets, "CONFIGS_DIR", None)
+    monkeypatch.setattr(
+        datasets, "_load_builtin_datasets", lambda: [{"id": "x", "name": "builtin", "sync": {"kind": "static"}}]
+    )
+    monkeypatch.setattr(
+        datasets,
+        "_load_entry_point_datasets",
+        lambda: [("p", {"id": "x", "name": "plugin", "sync": {"kind": "static"}})],
+    )
+    monkeypatch.setattr(api_config, "get_config", lambda: {})
+    result = {d["id"]: d for d in datasets.list_datasets()}
+    assert result["x"]["name"] == "plugin"
+
+
+def test_plugins_dir_overrides_entry_point_plugin(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """plugins_dir takes precedence over an installed plugin on id conflict."""
+    datasets_dir = tmp_path / "datasets"
+    datasets_dir.mkdir()
+    (datasets_dir / "x.yaml").write_text("- id: x\n  name: plugins_dir\n  sync:\n    kind: static\n", encoding="utf-8")
+    monkeypatch.setattr(datasets, "CONFIGS_DIR", None)
+    monkeypatch.setattr(datasets, "_load_builtin_datasets", lambda: [])
+    monkeypatch.setattr(
+        datasets,
+        "_load_entry_point_datasets",
+        lambda: [("p", {"id": "x", "name": "plugin", "sync": {"kind": "static"}})],
+    )
+    monkeypatch.setattr(api_config, "get_config", lambda: {"plugins_dir": str(tmp_path)})
+    monkeypatch.setattr(api_config, "get_config_path", lambda: tmp_path / "climate-service.yaml")
+    result = {d["id"]: d for d in datasets.list_datasets()}
+    assert result["x"]["name"] == "plugins_dir"

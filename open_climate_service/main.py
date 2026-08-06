@@ -19,10 +19,21 @@ from open_climate_service.read_only import read_only_middleware
 from open_climate_service.stac import routes as stac_routes
 from open_climate_service.system import routes as system_routes
 
+# Hosted browser tools that read a Zarr store directly over HTTP. They are the reason a local
+# instance needs any cross-origin story at all: each is a public page fetching a store that may
+# be on localhost, which browsers gate behind the private/local network rules handled below.
+DEFAULT_ZARR_BROWSER_ORIGINS = (
+    "https://inspect.geozarr.org",
+    # source-cooperative/zarr-viewer, the reference viewer for GeoZarr stores (CLIM-852).
+    # Omitting it is a dead end an operator cannot diagnose: the viewer reports "your connection
+    # looks slow or unstable" for what is actually a blocked cross-origin request.
+    "https://source-cooperative.github.io",
+)
+
 
 def _zarr_browser_access_origins() -> set[str]:
     """Return allowlisted remote origins permitted to inspect local Zarr endpoints."""
-    raw = os.getenv("CLIMATE_SERVICE_ZARR_BROWSER_ORIGINS", "https://inspect.geozarr.org")
+    raw = os.getenv("CLIMATE_SERVICE_ZARR_BROWSER_ORIGINS", ",".join(DEFAULT_ZARR_BROWSER_ORIGINS))
     return {origin.strip() for origin in raw.split(",") if origin.strip()}
 
 
@@ -33,7 +44,7 @@ def _pna_trusted_origins() -> set[str]:
     CLIMATE_SERVICE_PNA_ORIGINS environment variable (comma-separated).
     """
     default = "https://editor.openeo.org," + os.getenv(
-        "CLIMATE_SERVICE_ZARR_BROWSER_ORIGINS", "https://inspect.geozarr.org"
+        "CLIMATE_SERVICE_ZARR_BROWSER_ORIGINS", ",".join(DEFAULT_ZARR_BROWSER_ORIGINS)
     )
     raw = os.getenv("CLIMATE_SERVICE_PNA_ORIGINS", default)
     return {o.strip() for o in raw.split(",") if o.strip()}
@@ -97,18 +108,27 @@ def create_app() -> FastAPI:
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        """Handle Private Network Access preflights and Zarr browser CORS headers.
+        """Handle private/local network preflights and Zarr browser CORS headers.
 
-        Chrome's Private Network Access policy blocks public-origin pages (e.g.
-        editor.openeo.org or inspect.geozarr.org) from fetching localhost resources
-        unless the server explicitly opts in via Access-Control-Allow-Private-Network.
-        We grant this for any origin that is already allowed by the CORS wildcard,
-        which covers both the openEO editor and remote Zarr inspectors.
+        Browsers gate a public-origin page (editor.openeo.org, a hosted Zarr viewer) fetching a
+        localhost resource, and the server has to opt in. Chrome has shipped two spellings of
+        that opt-in as the spec evolved — the older Private Network Access
+        (``Access-Control-Request/Allow-Private-Network``) and the newer Local Network Access
+        (``...-Local-Network-Access``) — so both are answered here rather than betting on one.
+
+        A server header is necessary but, on current Chrome, no longer sufficient: reaching the
+        loopback address space also needs a user permission grant, refused by default. When that
+        is what blocks a request the console says "Permission was denied for this request to
+        access the `loopback` address space" — distinct from a missing-header CORS failure, and
+        not something the server can fix. See docs/zarr_and_geozarr.md.
         """
         origin = request.headers.get("origin")
         is_pna_preflight = (
             request.method == "OPTIONS"
-            and request.headers.get("access-control-request-private-network") == "true"
+            and (
+                request.headers.get("access-control-request-private-network") == "true"
+                or request.headers.get("access-control-request-local-network-access") == "true"
+            )
             and origin is not None
         )
 
@@ -117,6 +137,7 @@ def create_app() -> FastAPI:
             response = Response(status_code=200)
             response.headers["Access-Control-Allow-Origin"] = str(origin)
             response.headers["Access-Control-Allow-Private-Network"] = "true"
+            response.headers["Access-Control-Allow-Local-Network-Access"] = "true"
             response.headers["Access-Control-Allow-Methods"] = request.headers.get(
                 "access-control-request-method", "GET, POST, OPTIONS"
             )
@@ -139,6 +160,7 @@ def create_app() -> FastAPI:
                 request.headers.get("access-control-request-headers", "*"),
             )
             response.headers["Access-Control-Allow-Private-Network"] = "true"
+            response.headers["Access-Control-Allow-Local-Network-Access"] = "true"
 
         return response
 

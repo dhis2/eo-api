@@ -155,6 +155,66 @@ from the dimension's metadata, so there's nothing extra to configure.
 | `period_type`    | Yes      | Temporal resolution: `hourly`, `daily`, `monthly`, `yearly`                                       |
 | `sync.kind`      | Yes      | `temporal` — data grows over time; `release` — versioned releases; `static` — never synced        |
 | `sync.execution` | No       | `append` — new time steps appended to existing store; `rematerialize` — full rebuild on each sync |
+| `temporal_direction` | No   | Which way the periods run relative to now: `past` (default), `future` (a forecast), or `spanning` (crosses now, e.g. WorldPop 2015–2030). See below |
+
+### Which way the periods run: `temporal_direction`
+
+Most datasets are historical, and the default (`past`) suits them. Two other shapes exist, and they behave differently at ingest time:
+
+| Value | Periods | `start` on an ingestion |
+| --- | --- | --- |
+| `past` (default) | All historical | Required |
+| `future` | All ahead of now — a forecast | **Optional**, meaning "from now" |
+| `spanning` | Cross now — WorldPop Global2 (2015–2030), climate projections | Required |
+
+`spanning` requires a start *on purpose*. Defaulting it to "now" would ingest only the projected years and silently drop every historical one, which is usually the half you actually want. What declaring it does buy you: the ingest form prefills the end from the dataset's declared `extents.temporal.end`, so selecting WorldPop offers the full range through 2030 instead of truncating at today.
+
+### Forecast datasets (`temporal_direction: future`)
+
+A forecast's periods lie in the *future*, which changes what an ingestion request means. Declare it:
+
+```yaml
+- id: tmax_forecast_daily
+  period_type: daily
+  temporal_direction: future
+  sync:
+    kind: temporal          # still temporal: re-running fetches a fresher forecast
+  ingestion:
+    plugin: datasets.my_forecast.MyForecastPlugin
+    params:
+      max_lead_days: 7
+```
+
+With that declared, **`start` may be omitted** from an ingestion request, and means "from now":
+
+```bash
+curl -X POST http://localhost:9000/ingestions \
+  -H 'Content-Type: application/json' \
+  -d '{"dataset_id": "tmax_forecast_daily"}'
+```
+
+Omitting it is usually what you want. A fixed `start` is only correct on the day it is written — tomorrow it under-requests — so a scheduled refresh with hardcoded dates drifts out of the forecast window and then quietly fetches nothing. Supplying `start`/`end` still works, and narrows the window when you deliberately want a subset.
+
+**What your `periods()` receives.** For a historical dataset an omitted end is filled in with "now" — "through the latest available period". A forecast cannot use that, because "now" is the *start* of its window: filling it in would hand you `start == end == today` and collapse a seven-day forecast to one day. So a forecast instead receives a **forward horizon** — the template's declared `extents.temporal.end` if it has one, otherwise a year ahead. It is deliberately generous: the real limit is your plugin's lead time, and a tighter bound in core would silently truncate a longer forecast.
+
+Your plugin clips to what it actually publishes:
+
+```python
+async def periods(self, start: str, end: str) -> list[str]:
+    base = date.fromisoformat(start[:10])           # core resolves this to today
+    days = [(base + timedelta(days=i)).isoformat() for i in range(self.max_lead_days)]
+    return [d for d in days if d <= end[:10]]       # clip to the requested window
+```
+
+Note `end` stays a plain `str`, so there is no missing-value case to handle.
+
+**Honour `end` when it is given.** If your plugin returns periods outside the requested scope, the ingestion is refused with `Materialized artifact coverage does not match the requested scope`. That guard is helpful — it catches a plugin that ignores the range rather than silently storing more than was asked for — but it means a lead-day plugin has to filter rather than ignore.
+
+`temporal_direction` is separate from `sync.kind` on purpose: a forecast is still `temporal` for sync (re-run it and you get fresher data); what differs is which way its periods run. It cannot be combined with `sync.kind: static`, which has no upstream to look ahead into.
+
+**How far ahead belongs in the template, not the request.** A source often publishes further out than is useful — 40 days when only 7 verify well. That cap is a property of the dataset, so express it in `ingestion.params` (as `max_lead_days` above) and let your plugin's `periods()` honour it. The request then narrows *within* that window rather than re-deciding it on every run.
+
+The response reports the window that was actually ingested, under `dataset.extent.temporal`, so you can confirm what an omitted `start` resolved to.
 
 **Ingestion**
 
@@ -188,7 +248,9 @@ Layers larger than ~2048×2048 are stored as a multiscale pyramid so the map sta
 - **Binary masks** (0/1 presence) — use `max` ("present anywhere in the block"). Averaging turns a mask into meaningless fractions.
 - **Multi-class categorical** (land-cover class codes, etc.) — use `mode` (majority class). `mean` would average class codes into a *different, non-existent* class (e.g. `mean(10, 80) = 45`).
 
-`mean`/`max`/`min`/`sum` are computed by [topozarr](https://github.com/carbonplan/topozarr); `mode` and `nearest` are resampled from the native resolution by Open Climate Service, because they can't be built level-from-level (a first-class `mode`/`nearest` in topozarr is requested in [carbonplan/topozarr#26](https://github.com/carbonplan/topozarr/issues/26)).
+`mean`/`max`/`min`/`sum`/`nearest` are computed by [topozarr](https://github.com/carbonplan/topozarr), which builds each level from the one above. That is valid for all five because they are *composable* — for `nearest`, taking the corner of each corner gives the same cell as taking every nth cell of the original.
+
+`mode` is not composable: mode-of-modes is not mode-of-native, since a locally dominant class can win at coarse zoom even when it is globally rare. So Open Climate Service resamples `mode` levels from the native resolution itself. A first-class `mode` upstream is still open as [carbonplan/topozarr#26](https://github.com/carbonplan/topozarr/issues/26); when it lands, that local path can go.
 
 **Spatial and temporal extents** — declares what the source dataset covers. Used to validate ingest requests before hitting the provider:
 
@@ -261,3 +323,13 @@ Verify it appears in the STAC catalog:
 ```bash
 curl -s http://127.0.0.1:9000/stac/catalog.json | jq '.links[] | select(.rel == "child")'
 ```
+
+## Distributing a plugin as an installable package
+
+The `plugins_dir` above is ideal for instance-specific customisation. To make a plugin
+**reusable across instances** — packaged and installed with `uv add`, no path wiring — see the
+[Installable plugins](installable_plugins.md) guide. The layout mirrors `plugins_dir`, so migrating
+is mostly moving the files into a package and declaring one entry point.
+
+The [seNorge plugin](https://github.com/dhis2/open-climate-service-senorge-plugin) is the reference
+implementation.

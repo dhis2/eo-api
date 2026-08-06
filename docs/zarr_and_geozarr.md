@@ -100,13 +100,36 @@ Both flat and pyramid stores are written in **Zarr v3** format using regular chu
 
 A plain Zarr store has no concept of spatial coordinates. A map viewer opening it has no way to know where to position tiles on a map. GeoZarr addresses this by writing a small set of attributes into `zarr.json` at the store root:
 
-| Attribute          | Example value             | Purpose                        |
-| ------------------ | ------------------------- | ------------------------------ |
-| `spatial:bbox`     | `[3.0, 57.0, 32.0, 72.5]` | Bounding box in the stored CRS |
-| `proj:code`        | `EPSG:4326`               | CRS of the stored coordinates  |
-| `zarr_conventions` | `[{...}]`                 | Convention declarations        |
+| Attribute            | Example value                              | Purpose                                          |
+| -------------------- | ------------------------------------------ | ------------------------------------------------ |
+| `spatial:transform`  | `[0.05, 0, 2.95, 0, -0.05, 60.0]`          | Affine placing the grid: cell size and origin     |
+| `spatial:dimensions` | `["y", "x"]`                               | Names of the row and column axes, in array order |
+| `spatial:shape`      | `[60, 581]`                                | Grid size as `[height, width]`                    |
+| `spatial:bbox`       | `[2.95, 57.0, 32.0, 60.0]`                 | Bounding box in the stored CRS                    |
+| `proj:code`          | `EPSG:4326`                                | CRS of the stored coordinates                     |
+| `zarr_conventions`   | `[{...}]`                                  | Convention declarations                           |
 
-These attributes are computed from the actual coordinate bounds of the written data and its CRS. They are always written by the framework after any transforms have run. This guarantees they always reflect the final stored data.
+Two details matter to any client that reads the store directly:
+
+- **Axis order is array order, `(y, x)`.** `spatial:dimensions` and `spatial:shape` are read
+  positionally — the second-to-last entry is the row axis, the last is the column axis. Naming
+  them x-first, or writing the shape as `[width, height]`, transposes the grid.
+- **`spatial:transform` is what actually places the raster.** It is `[stepX, rotX, originX,
+  rotY, stepY, originY]`, with the origin on the outer *edge* of the first cell (pixel
+  registration) and `stepY` negative for a north-up grid. Clients that find no affine fall
+  back to inferring one from the coordinate arrays, and typically assume EPSG:4326 while doing
+  so — which silently mislocates a store held in projected metres.
+
+The same affine is also written to the `spatial_ref` grid-mapping variable as a GDAL
+`GeoTransform`, in GDAL's own coefficient order (`originX stepX rotX originY rotY stepY`).
+That is what makes the store self-describing to GDAL/QGIS, and it is how a viewer recognises
+a projected grid rather than degrees.
+
+These attributes are computed from the **stored coordinate arrays** — not from the requested
+bbox. A source may return less than was asked for (CHIRPS ends at 60°N, so a request reaching
+72.5°N yields a store that stops at 60°N), and describing the request would stretch the raster
+over ground the store does not cover. They are always written by the framework after any
+transforms have run, so they reflect the final stored data.
 
 `zarr_conventions` for a flat store contains the base GeoZarr convention declaration. For pyramid stores it also includes a `multiscales` entry that declares the level structure.
 
@@ -139,6 +162,87 @@ eastings and northings for a projected one. STAC metadata also stores the WGS84 
 alongside it, so catalogue clients that expect geographic coordinates always get one.
 
 ---
+
+## How a client is told whether a store is pyramided
+
+STAC has no way to distinguish a flat store from a pyramided one through the plain Zarr media
+type, so the collection's `zarr` asset carries an extra parameter when — and only when — the
+store really has levels:
+
+| Store     | Advertised media type                                    |
+| --------- | -------------------------------------------------------- |
+| flat      | `application/vnd.zarr; version=3`                        |
+| pyramided | `application/vnd.zarr; version=3; profile=multiscales`   |
+
+Detection requires **both** the multiscales convention in the root `zarr_conventions` *and* a
+non-empty `multiscales.layout` — the same two conditions a pyramid-aware renderer checks, so the
+claim always matches what a renderer can use. Any failure to inspect the store degrades to the
+flat type: understating is harmless, since a client then opens the store the ordinary way, while
+overstating sends a renderer looking for levels that do not exist.
+
+The `profile` parameter is a
+[STAC Zarr best practices](https://github.com/radiantearth/stac-best-practices/blob/main/best-practices-zarr.md)
+recommendation, not part of the official Zarr media type registration. Consumers match it as a
+literal rather than parsing parameters, so the exact string matters; the constraint is recorded
+next to it in `stac/media_types.py`.
+
+## CF metadata in the catalog
+
+Variables carry their CF semantics into `cube:variables`, named per the
+[STAC CF extension](https://github.com/stac-extensions/cf):
+
+```json
+"cube:variables": {
+  "tg": {
+    "type": "data",
+    "dimensions": ["t", "y", "x"],
+    "unit": "degree_Celsius",
+    "cf:standard_name": "air_temperature",
+    "cf:cell_methods": "time: mean",
+    "attrs": { "long_name": "...", "units": "degree_Celsius", "standard_name": "air_temperature" }
+  }
+}
+```
+
+The `cf:` prefix matters: the extension explicitly lists `cube:variables` among the places its
+fields may be used, so a prefixed field is one a client is defined to understand, while a bare
+`standard_name` at that level is not. The unprefixed spellings remain inside `attrs`, which
+passes through the store's own CF attribute names verbatim. The extension is declared in
+`stac_extensions` only when a `cf:` field was actually emitted.
+
+## Opening a local store in a hosted browser viewer
+
+Hosted tools like [zarr-viewer](https://source-cooperative.github.io/zarr-viewer/) and
+[inspect.geozarr.org](https://inspect.geozarr.org) read a store directly over HTTP, which means a
+public page fetching `http://localhost:9000`. Browsers gate that, and there are **two** separate
+gates — only one of which the server controls.
+
+**Server side, handled for you.** The instance answers both spellings of the opt-in Chrome has
+shipped as the spec evolved — Private Network Access and its successor Local Network Access — for
+an allowlist of origins that already includes the two viewers above. Add others with:
+
+```
+CLIMATE_SERVICE_ZARR_BROWSER_ORIGINS="https://inspect.geozarr.org,https://your-viewer.example"
+```
+
+**Browser side, yours to grant.** Current Chrome additionally requires *user permission* to reach
+the loopback address space, and refuses by default. When that is what blocks the request, the
+console says:
+
+```
+Access to fetch at 'http://localhost:9000/zarr/...' from origin 'https://...'
+has been blocked by CORS policy: Permission was denied for this request
+to access the `loopback` address space.
+```
+
+Note the wording — `Permission was denied`, not a missing header. No server change fixes it. The
+options are to allow local network access for the site when the browser prompts (or via the icon
+in the address bar), to run the viewer from `localhost` as well so both are in the same address
+space, or to expose the instance on a public HTTPS origin.
+
+The viewer's own error message is unhelpful here: it reports *"your connection looks slow or
+unstable"* for what is a permission refusal, so check the browser console before suspecting the
+network.
 
 ## How Zarr stores are served
 

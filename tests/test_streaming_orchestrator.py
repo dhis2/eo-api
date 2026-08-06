@@ -15,7 +15,7 @@ from open_climate_service.streaming.orchestrator import _grid_spec_from_dataset,
 def test_grid_spec_from_dataset_raises_clear_error_for_missing_spatial_dims() -> None:
     ds = xr.Dataset({"v": (("t", "lat", "lon"), np.zeros((1, 1, 1), dtype=np.float32))})
     with pytest.raises(RuntimeError, match="missing the expected spatial dimensions 'y' and 'x'"):
-        _grid_spec_from_dataset(ds, time_dim="t", x_dim="x", y_dim="y")
+        _grid_spec_from_dataset(ds, time_dim="t", x_dim="x", y_dim="y", crs="EPSG:4326")
 
 
 class _FakePlugin:
@@ -154,8 +154,11 @@ def test_orchestrator_uses_store_state_as_resume_truth(monkeypatch: pytest.Monke
 
     root = zarr.open_group(store_path, mode="r")
     assert root.attrs["proj:code"] == "EPSG:4326"
-    assert root.attrs["spatial:dimensions"] == ["x", "y"]
+    # Array order, (y, x) — see tests/test_geozarr_grid_metadata.py for why.
+    assert root.attrs["spatial:dimensions"] == ["y", "x"]
     assert root.attrs["spatial:shape"] == [1, 1]
+    # A 1x1 grid has no derivable cell size, so no affine is claimed for it.
+    assert "spatial:transform" not in root.attrs
 
     run_streaming_ingest_sync(
         plugin=_FakePlugin(),
@@ -261,9 +264,22 @@ def test_orchestrator_infers_grid_when_plugin_has_no_probe(monkeypatch: pytest.M
 
 
 class _ProjectedNoProbePlugin(_NoProbePlugin):
-    """No probe(), but declares a projected CRS via the `crs` class attribute."""
+    """No probe(), but declares a projected CRS via the `crs` class attribute.
+
+    Emits UTM33 metres rather than the base fixture's toy (1, 0). A declared projected CRS is
+    checked against the coordinates it claims to describe, so a store one metre from its own
+    origin would — correctly — be treated as degrees mislabelled as UTM.
+    """
 
     crs = 32633
+
+    def fetch_period(self, period_id: str, bbox: list[float], **params: Any) -> xr.Dataset:
+        _ = bbox, params
+        value = float(period_id[-2:])
+        return xr.Dataset(
+            {"precip": (("t", "y", "x"), np.array([[[value]]], dtype=np.float32))},
+            coords={"t": [np.datetime64(period_id, "D")], "y": [6_650_000.0], "x": [500_000.0]},
+        )
 
 
 def test_orchestrator_uses_plugin_crs_attr_as_inference_fallback(
