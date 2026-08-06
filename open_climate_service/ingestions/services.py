@@ -714,10 +714,24 @@ def _icechunk_list_dir(store: _IcechunkReadableStore, prefix: str) -> list[str]:
 
 
 def _icechunk_exists(store: _IcechunkReadableStore, key: str) -> bool:
+    """Whether *key* exists in the store; False for anything Icechunk cannot address.
+
+    A browser probing an unknown store asks for keys that are not Zarr keys at all, and Icechunk
+    rejects those two different ways: ``KeyError`` for Zarr v2 spellings (``.zgroup``,
+    ``.zarray``), and ``IcechunkError: invalid zarr key format`` for paths outside the Zarr
+    namespace entirely (``repo``, ``refs/branch.main/ref.json`` — the layout probes zarr-viewer
+    uses to decide whether a URL is an Icechunk repository).
+
+    Both mean "not here", so both must answer False. Letting the second escape turned a probe
+    into a 500, and because an unhandled 500 is raised above the CORS middleware it reached the
+    browser with no ``Access-Control-Allow-Origin`` — reported as a CORS failure, which is not
+    where anyone would look for a missing-key bug.
+    """
+    from icechunk import IcechunkError
+
     try:
         return cast(bool, _run_async(store.exists(key)))
-    except KeyError:
-        # Icechunk raises KeyError for Zarr v2 keys (e.g. .zgroup, .zarray)
+    except (KeyError, IcechunkError):
         return False
 
 
