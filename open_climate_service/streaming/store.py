@@ -18,6 +18,7 @@ from typing import Any
 
 from geozarr_toolkit import create_geozarr_attrs
 
+from open_climate_service.shared.geozarr import grid_geometry, write_gdal_geotransform
 from open_climate_service.streaming.protocol import GridSpec
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,52 @@ def is_store_empty(store_path: Path) -> bool:
         return False
 
 
+def read_committed_spatial_coords(store_path: Path, *, x_dim: str = "x", y_dim: str = "y") -> Any:
+    """The spatial coordinate arrays already committed to a store, or None.
+
+    An append writes along the time axis only, leaving these as they are — so a period whose
+    rows or columns have been reordered by normalisation would land under coordinates that no
+    longer describe it. The orchestrator compares against these before its first append.
+
+    Returns None when there is nothing to compare against (new store, unreadable, no coords).
+    """
+    import xarray as xr
+
+    if not store_path.exists():
+        return None
+    try:
+        repo = open_or_create_repo(store_path)
+        ds = xr.open_zarr(repo.readonly_session("main").store)
+        try:
+            if x_dim not in ds.coords or y_dim not in ds.coords:
+                return None
+            return {x_dim: ds[x_dim].values, y_dim: ds[y_dim].values}
+        finally:
+            ds.close()
+    except Exception:  # noqa: BLE001 — best effort; a store we cannot read cannot be checked
+        logger.debug("Could not read committed spatial coordinates from %s", store_path, exc_info=True)
+        return None
+
+
+def _stored_grid_geometry(root: Any, spec: GridSpec) -> dict[str, Any] | None:
+    """Grid geometry read from the store's own coordinate arrays, or None if unavailable.
+
+    The coordinate arrays are the ground truth for where the data actually is. The requested
+    ``bbox`` is not: a source can return less than was asked for (CHIRPS ends at 60°N, so a
+    Norway request to 72.5°N yields a grid that stops at 60°N), and describing the request
+    would stretch the raster over ground it does not cover.
+
+    Returns None for a store whose coordinates aren't readable yet — the first-write path
+    calls this before any data exists, and a 1-cell axis has no derivable cell size.
+    """
+    try:
+        x_centres = root[spec.x_dim][:]
+        y_centres = root[spec.y_dim][:]
+    except (KeyError, TypeError):
+        return None
+    return grid_geometry(x_centres, y_centres)
+
+
 def write_geozarr_attrs(store: Any, *, spec: GridSpec, bbox: list[float]) -> None:
     """Write root metadata for a flat Zarr v3 store.
 
@@ -107,11 +154,17 @@ def write_geozarr_attrs(store: Any, *, spec: GridSpec, bbox: list[float]) -> Non
     """
     import zarr
 
+    root = zarr.open_group(store, mode="r+")
+    geometry = _stored_grid_geometry(root, spec)
+
     attrs = create_geozarr_attrs(
-        dimensions=[spec.x_dim, spec.y_dim],
+        # Array order, (y, x) — `spatial:dimensions` and `spatial:shape` are read
+        # positionally, so naming them x-first transposes the grid for any client that
+        # trusts the convention.
+        dimensions=[spec.y_dim, spec.x_dim],
         crs=f"EPSG:{spec.crs}",
         bbox=bbox,
-        shape=(spec.shape[1], spec.shape[0]),
+        shape=spec.shape,
     )
     crs_code = f"EPSG:{spec.crs}"
     attrs["proj:code"] = crs_code
@@ -121,7 +174,15 @@ def write_geozarr_attrs(store: Any, *, spec: GridSpec, bbox: list[float]) -> Non
     # coordinate arrays — no non-standard `proj4`/`bounds` attrs required. The STAC hints
     # (open_climate_service:proj4, proj:bbox) in stac/services.py serve the map viewer.
     attrs["spatial:bbox"] = bbox
+    if geometry is not None:
+        # The affine is what a client actually places the raster with. Without it, viewers
+        # fall back to inferring a grid from the coordinate arrays and assume EPSG:4326 while
+        # doing so, which puts every projected store (seNorge's UTM33 metres) off the map.
+        attrs["spatial:transform"] = geometry["transform"]
+        attrs["spatial:shape"] = geometry["shape"]
+        attrs["spatial:bbox"] = geometry["bbox"]
     attrs.update(spec.attrs)
 
-    root = zarr.open_group(store, mode="r+")
     root.attrs.update(attrs)
+    if geometry is not None:
+        write_gdal_geotransform(root, geometry["transform"])

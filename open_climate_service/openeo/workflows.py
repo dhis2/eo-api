@@ -46,7 +46,12 @@ def list_workflows() -> WorkflowListResponse:
     workflows override both.
     """
     merged: dict[str, dict[str, object]] = {}
-    for raw in (*_load_builtin_workflows(), *_load_plugin_workflows(), *_load_records()):
+    for raw in (
+        *_load_builtin_workflows(),
+        *_load_entry_point_workflows(),
+        *_load_plugin_workflows(),
+        *_load_records(),
+    ):
         wid = raw.get("id")
         if not isinstance(wid, str) or not wid:
             logger.warning("Skipping workflow with missing or non-string id")
@@ -73,6 +78,9 @@ def get_workflow(process_graph_id: str) -> WorkflowRecord | None:
         if raw.get("id") == process_graph_id:
             return WorkflowRecord.model_validate(raw)
     for raw in _load_plugin_workflows():
+        if raw.get("id") == process_graph_id:
+            return WorkflowRecord.model_validate(raw)
+    for raw in _load_entry_point_workflows():
         if raw.get("id") == process_graph_id:
             return WorkflowRecord.model_validate(raw)
     for raw in _load_builtin_workflows():
@@ -174,6 +182,27 @@ def _load_plugin_workflows() -> list[dict[str, object]]:
             workflows.append(data)
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Skipping workflow file %s: %s", path, exc)
+    return workflows
+
+
+def _load_entry_point_workflows() -> list[dict[str, object]]:
+    """Load workflows/*.json shipped by installed plugin packages (#118)."""
+    from open_climate_service.plugin_discovery import iter_plugin_subdirs
+
+    workflows: list[dict[str, object]] = []
+    for _name, _package, workflows_res in iter_plugin_subdirs("workflows"):
+        for resource in workflows_res.iterdir():
+            if not resource.name.endswith(".json"):
+                continue
+            try:
+                data = json.loads(resource.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("Skipping plugin workflow file %s: %s", resource.name, exc)
+                continue
+            if not isinstance(data, dict):
+                logger.warning("Skipping plugin workflow file %s: expected a JSON object", resource.name)
+                continue
+            workflows.append(data)
     return workflows
 
 

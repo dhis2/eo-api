@@ -119,7 +119,14 @@ class CreateIngestionRequest(BaseModel):
     """Request payload for creating or updating a managed dataset."""
 
     dataset_id: str = Field(description="Source dataset template id from the Open Climate Service registry.")
-    start: str = Field(description="Start period to ingest.")
+    start: str | None = Field(
+        default=None,
+        description=(
+            "Start period to ingest. Required for historical datasets. May be omitted for a "
+            "dataset declaring 'temporal_direction: future' (e.g. a forecast), where it means "
+            "'from now' — a fixed date would be stale by the next day."
+        ),
+    )
     end: str | None = Field(default=None, description="Optional end period to ingest.")
     overwrite: bool = Field(
         default=False,

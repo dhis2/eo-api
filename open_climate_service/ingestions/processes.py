@@ -16,7 +16,7 @@ from open_climate_service.ingestions.schemas import IngestionResponse, SyncRespo
 def execute_ingestion(
     *,
     dataset_id: str,
-    start: str,
+    start: str | None = None,
     end: str | None = None,
     overwrite: bool = False,
     publish: bool = True,
