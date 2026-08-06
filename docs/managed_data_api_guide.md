@@ -331,6 +331,21 @@ Both endpoints are advertised as `assets` in the STAC collection:
 }
 ```
 
+A **pyramided** store advertises one extra media type parameter:
+
+```json
+"type": "application/vnd.zarr; version=3; profile=multiscales"
+```
+
+This is how a client learns the store has resolution levels — the plain Zarr media type cannot
+express it, and clients that only render pyramided stores (STAC Browser, via
+`ol/source/GeoZarr`) will not offer to display a store without it. The parameter is only added
+when the store genuinely has a non-empty `multiscales.layout`; claiming it for a flat store
+would send a renderer looking for levels that do not exist.
+
+It is matched as a literal, not parsed, so the string is byte-for-byte fixed: same parameter
+order, one space after each `;`. Reformatting it silently disables rendering.
+
 ## 10. Access published STAC collections
 
 Published Zarr-backed datasets are exposed through `/stac` for discovery.

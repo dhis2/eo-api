@@ -8,6 +8,10 @@ The Open Climate Service supports three plugin types, all following the same pat
 | Processes | `plugins_dir/processes/` | `.py` |
 | Workflows | `plugins_dir/workflows/` | `.json` |
 
+The same three plugin types can also be packaged and **installed** (`uv add`), so a reusable plugin
+is shared across instances without any `plugins_dir` wiring — see [Installable plugins](installable_plugins.md).
+`plugins_dir` still takes precedence, so it can override an installed plugin locally.
+
 ---
 
 ## Datasets

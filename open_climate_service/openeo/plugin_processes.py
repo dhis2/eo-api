@@ -24,7 +24,8 @@ def load_plugin_processes() -> list[tuple[str, Any]]:
     1. xclim indicators — auto-registered from all indicator modules
     2. earthkit-meteo functions — auto-registered from the curated module list
     3. Built-in file plugins — ``open_climate_service/plugins/processes/``
-    4. Instance plugins — ``plugins_dir/processes/`` (override everything)
+    4. Installed plugin packages — ``<package>/processes/`` (entry-point plugins, #118)
+    5. Instance plugins — ``plugins_dir/processes/`` (override everything)
     """
     found: dict[str, Any] = {}
     for func in xclim_processes.scan():
@@ -36,6 +37,10 @@ def load_plugin_processes() -> list[tuple[str, Any]]:
         if meta:
             found[meta["id"]] = func
     for func in _scan_builtin_processes():
+        meta = get_process_metadata(func)
+        if meta:
+            found[meta["id"]] = func
+    for func in _scan_plugin_package_processes():
         meta = get_process_metadata(func)
         if meta:
             found[meta["id"]] = func
@@ -65,6 +70,24 @@ def _scan_builtin_processes() -> list[Any]:
             funcs.extend(_load_from_module(module_name))
     except (FileNotFoundError, NotADirectoryError):
         pass
+    return funcs
+
+
+def _scan_plugin_package_processes() -> list[Any]:
+    """Scan ``processes/`` in each installed plugin package (#118).
+
+    The package is on ``PYTHONPATH`` (it is installed), so its process modules are
+    imported by their full dotted path — no ``sys.path`` handling like the
+    ``plugins_dir`` scan needs.
+    """
+    from open_climate_service.plugin_discovery import iter_plugin_subdirs
+
+    funcs: list[Any] = []
+    for _name, package, processes_res in iter_plugin_subdirs("processes"):
+        for resource in processes_res.iterdir():
+            if not resource.name.endswith(".py") or resource.name.startswith("_"):
+                continue
+            funcs.extend(_load_from_module(f"{package}.processes.{resource.name[:-3]}"))
     return funcs
 
 
