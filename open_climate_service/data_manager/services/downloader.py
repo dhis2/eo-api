@@ -36,6 +36,34 @@ _PYRAMID_TARGET_TILE_SIZE = 512
 _ROOT_TIME_COORD_MAX_CHUNK = 4096
 
 
+def _uniform_chunks(ds: xr.Dataset) -> xr.Dataset:
+    """Rechunk any dim whose dask chunks are non-uniform except for the final chunk.
+
+    Zarr requires that shape; dask does not. Reversing an axis produces exactly the illegal
+    case — ``raster_contract.ensure_north_up`` flips a south-up source with
+    ``isel(slice(None, None, -1))``, which reverses the chunk *tuple* too, so a legal
+    trailing remainder (244, 244, …, 241) becomes a leading one (241, 244, …) and
+    ``to_zarr`` refuses the write.
+
+    Rechunking to the largest existing chunk restores the source layout, since dask fills
+    uniformly and leaves the remainder last. Only the flat path needs this — the pyramid
+    path materialises through ``load()`` before writing.
+    """
+    targets: dict[Any, int] = {}
+    for var in ds.data_vars.values():
+        for dim, chunks in zip(var.dims, var.chunks or (), strict=False):
+            # Legal already when every chunk but the last matches and the last is no larger.
+            # Checked rather than blanket-rechunked because rechunking a full-resolution grid
+            # costs a graph rewrite and a shuffle for nothing.
+            if len(set(chunks[:-1])) <= 1 and chunks[-1] <= chunks[0]:
+                continue
+            targets[dim] = max(targets.get(dim, 0), max(chunks))
+    if not targets:
+        return ds
+    logger.info("Rechunking to uniform Zarr-legal chunks: %s", targets)
+    return ds.chunk(targets)
+
+
 def _needs_pyramid(ds: xr.Dataset, x_dim: str, y_dim: str) -> bool:
     """Return True when the spatial extent is large enough to benefit from a pyramid."""
     return ds.sizes[x_dim] * ds.sizes[y_dim] > _PYRAMID_PIXEL_THRESHOLD
@@ -443,6 +471,7 @@ def write_to_icechunk_store(
             ds.sizes[y_dim],
         )
         ds = ds.assign_attrs({**ds.attrs, **geozarr_attrs})
+        ds = _uniform_chunks(ds)
         # Bound the time-coordinate chunk so map clients read the axis in a few requests
         # rather than one per timestep (data variables keep their own chunking).
         flat_encoding = {}
