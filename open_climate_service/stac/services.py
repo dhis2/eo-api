@@ -110,9 +110,7 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
     template_links = [_link_to_dict(link) for link in template.links]
     period_type = source_dataset.get("period_type")
 
-    collection_payload = _build_collection_with_xstac(
-        artifact=artifact, template=template, period_type=period_type
-    )
+    collection_payload = _build_collection_with_xstac(artifact=artifact, template=template, period_type=period_type)
     collection_payload["id"] = dataset_id
     collection_payload["type"] = "Collection"
     collection_payload["stac_version"] = STAC_VERSION

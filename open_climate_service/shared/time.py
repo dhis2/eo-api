@@ -42,9 +42,7 @@ _NON_TEMPORAL_PERIOD_TYPES = frozenset({"climatology"})
 # _default_target_end implement. Deriving the two from one set would advertise quarterly as
 # registerable and then fail at ingest, so they are kept apart.
 SUPPORTED_PERIOD_TYPES = (
-    frozenset({"hourly", "daily", "weekly", "monthly", "yearly"})
-    | _IRREGULAR_PERIOD_TYPES
-    | _NON_TEMPORAL_PERIOD_TYPES
+    frozenset({"hourly", "daily", "weekly", "monthly", "yearly"}) | _IRREGULAR_PERIOD_TYPES | _NON_TEMPORAL_PERIOD_TYPES
 )
 
 

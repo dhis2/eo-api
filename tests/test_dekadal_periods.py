@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import calendar
 from datetime import date, datetime
+from typing import Any
 
 import numpy as np
 import pytest
@@ -289,11 +290,11 @@ def test_irregular_cadence_lists_its_timestamps_as_values() -> None:
         {"gpp": (("t", "y", "x"), np.zeros((len(stamps), 2, 2), "f4"))},
         coords={"t": stamps, "y": [1.0, 0.0], "x": [33.0, 34.0]},
     )
-    collection = {"cube:dimensions": {"t": {"type": "temporal", "step": None}}}
+    collection: dict[str, Any] = {"cube:dimensions": {"t": {"type": "temporal", "step": None}}}
 
     _add_temporal_values(collection, ds, "t")
 
-    values = collection["cube:dimensions"]["t"]["values"]
+    values: list[str] = collection["cube:dimensions"]["t"]["values"]
     assert len(values) == len(ids) == 9
     assert values[0] == "2026-01-01T00:00:00Z"
     assert [v[:10] for v in values] == ids
