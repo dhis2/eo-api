@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from open_climate_service import config as api_config
+from open_climate_service.shared.time import SUPPORTED_PERIOD_TYPES, Cadence, period_cadence
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,17 @@ def _validate_dataset_template(dataset: object, *, source: str) -> None:
         raise ValueError(
             f"Dataset template '{dataset_id}' in {source} has unsupported sync.kind "
             f"'{sync_kind}'. Supported values: {supported}"
+        )
+
+    # An unsupported period_type is accepted by every downstream consumer and then
+    # silently ignored — no step, no period normalisation, no error. Reject it here so a
+    # typo or a cadence this version cannot honour fails at registration.
+    period_type = dataset.get("period_type")
+    if period_type is not None and period_cadence(period_type) is Cadence.UNKNOWN:
+        supported = ", ".join(sorted(SUPPORTED_PERIOD_TYPES))
+        raise ValueError(
+            f"Dataset template '{dataset_id}' in {source} has unsupported period_type "
+            f"{period_type!r}. Supported values: {supported}"
         )
 
     direction = dataset.get("temporal_direction")

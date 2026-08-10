@@ -21,7 +21,9 @@ from open_climate_service.ingestions import services as ingestion_services
 from open_climate_service.ingestions.schemas import ArtifactFormat, ArtifactRecord
 from open_climate_service.shared.crs import canonical_crs_code, is_builtin_crs
 from open_climate_service.shared.time import (
+    Cadence,
     parse_period_string_to_datetime,
+    period_cadence,
     period_type_to_iso_step,
     resolve_iso_period_step,
 )
@@ -149,9 +151,11 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
     # Prefer an explicit extents.temporal.resolution; fall back to the dataset's
     # period_type so openEO save_result outputs (which omit the extents block) still
     # get a temporal step — the map viewer needs it to build the time slider.
+    period_type = source_dataset.get("period_type")
     _override_time_step(
         collection_payload,
-        resolve_iso_period_step(source_dataset) or period_type_to_iso_step(source_dataset.get("period_type")),
+        resolve_iso_period_step(source_dataset) or period_type_to_iso_step(period_type),
+        cadence=period_cadence(period_type),
     )
     # Spatial extent comes from the live store (set in _build_collection_with_xstac),
     # not the artifact coverage — see _wgs84_extent_from_store. Temporal still tracks the
@@ -508,8 +512,22 @@ def _abs_url(request: Request, path: str) -> str:
     return f"{str(request.base_url).rstrip('/')}{path}"
 
 
-def _override_time_step(collection: dict[str, Any], step: str | None) -> None:
-    if step is None:
+def _override_time_step(collection: dict[str, Any], step: str | None, *, cadence: Cadence) -> None:
+    """Set the temporal dimension's ``step`` to the duration, or to an explicit null.
+
+    A regular cadence gets its ISO 8601 duration. An **irregular** one gets ``null``,
+    which the datacube extension defines as "irregularly spaced steps" — the only
+    truthful answer for a cadence whose periods differ in length, and better than
+    leaving whatever xstac inferred, which would imply a regular spacing the data does
+    not have.
+
+    The extension has no way to express per-period extent, so an irregular declaration
+    tells a catalogue-only client no more than "read the timestamps". The store carries
+    the detail. ``values`` is deliberately not emitted: it is optional, it would add one
+    ISO string per period to every collection response, and a client that needs exact
+    timestamps is already reading the store.
+    """
+    if step is None and cadence is not Cadence.IRREGULAR:
         return
     dimensions = collection.setdefault("cube:dimensions", {})
     for key, value in dimensions.items():

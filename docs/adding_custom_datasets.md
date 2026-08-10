@@ -152,10 +152,36 @@ from the dimension's metadata, so there's nothing extra to configure.
 
 | Field            | Required | Description                                                                                       |
 | ---------------- | -------- | ------------------------------------------------------------------------------------------------- |
-| `period_type`    | Yes      | Temporal resolution: `hourly`, `daily`, `monthly`, `yearly`                                       |
+| `period_type`    | Yes      | Temporal resolution: `hourly`, `daily`, `dekadal`, `weekly`, `monthly`, `quarterly`, `yearly`, or `climatology`. Validated at registration — an unrecognised value is rejected rather than ignored |
 | `sync.kind`      | Yes      | `temporal` — data grows over time; `release` — versioned releases; `static` — never synced        |
 | `sync.execution` | No       | `append` — new time steps appended to existing store; `rematerialize` — full rebuild on each sync |
 | `temporal_direction` | No   | Which way the periods run relative to now: `past` (default), `future` (a forecast), or `spanning` (crosses now, e.g. WorldPop 2015–2030). See below |
+
+### Dekads: a period type with no fixed length
+
+`dekadal` is 10-daily data, as published by the Copernicus Land Monitoring Service among
+others. It is the one cadence whose periods differ in length: a dekad runs day 1–10, then
+11–20, then **21 to the end of the month**, so the third is 8, 9, 10 or 11 days long. There
+are 36 in a year, not 36.5.
+
+Two consequences worth knowing:
+
+- **Period ids are the dekad's first day** — `2026-01-01`, `2026-01-11`, `2026-01-21`. They
+  sort chronologically and parse as ordinary dates. Any date within a dekad normalises to
+  its start, so `2026-01-15` becomes `2026-01-11`.
+- **There is no ISO 8601 duration for a dekad**, so the STAC temporal dimension declares
+  `step: null` — the datacube extension's encoding for irregular spacing — rather than a
+  fictional `P10D` that would be wrong for every third dekad. Clients read the timestamps
+  instead of extrapolating from a step.
+
+A plugin enumerating dekads should use `shared.time.dekad_period_ids(start, end)`, the
+dekadal counterpart of `daily_period_ids`. `dekad_bounds(period_id)` gives the inclusive
+first and last day, which is the only complete description of a dekad's extent.
+
+Aggregating dekads to months needs care rather than a plain `mean`: three dekads tile a
+month exactly, but they are not equal in length, so an unweighted mean over-weights a short
+third dekad (February's 8-day dekad by nearly 5 percentage points). Sum an accumulated
+total, or day-weight a rate.
 
 ### Which way the periods run: `temporal_direction`
 
