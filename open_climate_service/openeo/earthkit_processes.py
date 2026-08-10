@@ -41,7 +41,7 @@ _MODULES: tuple[str, ...] = ("thermo",)
 
 # The units earthkit-meteo declares in its numpydoc parameter descriptions. Only these are
 # read as unit declarations — other trailing parentheticals are prose (`method`, `eps`).
-_KNOWN_UNITS: frozenset[str] = frozenset({"K", "Pa", "%", "kg/kg"})
+_KNOWN_UNITS: frozenset[str] = frozenset({"K", "Pa", "%", "kg/kg", "Pa/K"})
 
 # Exact conversions into each expected unit, keyed by the normalised CF `units` attribute.
 # An identity entry means "already correct"; anything absent is refused rather than guessed.
@@ -72,6 +72,15 @@ _CONVERSIONS: dict[str, dict[str, Callable[[Any], Any]]] = {
         # CF dimensionless: relative humidity as a 0..1 fraction.
         "1": lambda a: a * 100.0,
     },
+    # d(saturation vapour pressure)/dT — the `es_slope` pre-compute on the *_slope functions.
+    "Pa/K": {
+        "pa/k": lambda a: a,
+        "pa k-1": lambda a: a,
+        "pa k**-1": lambda a: a,
+        "pa/k**1": lambda a: a,
+        "hpa/k": lambda a: a * 100.0,
+        "hpa k-1": lambda a: a * 100.0,
+    },
     "kg/kg": {
         "kg/kg": lambda a: a,
         "kg kg-1": lambda a: a,
@@ -84,6 +93,21 @@ _CONVERSIONS: dict[str, dict[str, Callable[[Any], Any]]] = {
 
 _PARAM_LINE = re.compile(r"^(\w+)\s*:")
 _TRAILING_PAREN = re.compile(r"\(([^()]*)\)\s*$")
+# Parameter *types* that take a cube rather than a scalar. Used to catch a physical input
+# whose unit the docstring scan missed: without a unit it would otherwise be advertised as a
+# plain number and passed through unconverted, which is the silent-wrong-answer case.
+_ARRAY_LIKE_TYPE = re.compile(r"array-like|DataArray|FieldList|\bField\b|ndarray")
+
+# Units the upstream docstring fails to declare in a form `_documented_units` can read.
+# Keyed by function name, then parameter.
+#
+# earthkit-meteo 1.0.0 documents `virtual_temperature.t` as "Temperature (K)s" — a stray
+# trailing "s" that defeats the end-of-line match. Without this the parameter gets no unit,
+# so a degC cube would be handed to earthkit as if it were Kelvin: a plausible number,
+# labelled Kelvin, wrong by 273.15. Drop entries here as upstream fixes them.
+_UNIT_OVERRIDES: dict[str, dict[str, str]] = {
+    "virtual_temperature": {"t": "K"},
+}
 
 
 def _normalise_unit(units: str) -> str:
@@ -116,6 +140,24 @@ def _documented_units(func: Any) -> dict[str, str]:
         if trailing and trailing.group(1) in _KNOWN_UNITS:
             units[match.group(1)] = trailing.group(1)
     return units
+
+
+def _cube_parameters(func: Any) -> set[str]:
+    """Return the parameters whose documented *type* is a cube rather than a scalar.
+
+    The unit scan reads the description line; this reads the type line. Comparing the two
+    is what catches a physical input whose unit went unparsed — see ``_UNIT_OVERRIDES``.
+    """
+    doc = inspect.getdoc(func) or ""
+    block = re.search(r"Parameters\n-+\n(.*?)(?:\n\n|\Z)", doc, re.S)
+    if not block:
+        return set()
+    names: set[str] = set()
+    for line in block.group(1).split("\n"):
+        match = re.match(r"^(\w+)\s*:(.*)$", line)
+        if match and _ARRAY_LIKE_TYPE.search(match.group(2)):
+            names.add(match.group(1))
+    return names
 
 
 def _coerce_units(process_id: str, name: str, value: Any, expected: str) -> Any:
@@ -184,6 +226,22 @@ def _collect() -> list[Any]:
                 logger.debug("Skipping earthkit.meteo.%s.%s: returns multiple cubes", module_name, name)
                 continue
             units = _documented_units(obj)
+            units.update(_UNIT_OVERRIDES.get(name, {}))
+            # Fail closed: a cube-typed parameter with no enforceable unit would be advertised
+            # as a plain number and passed through unconverted, so the answer could be wrong
+            # while looking right. Skipping beats advertising a contract we break — the same
+            # call made above for tuple-returning functions.
+            unitless_cubes = sorted(_cube_parameters(obj) - set(units))
+            if unitless_cubes:
+                logger.warning(
+                    "Skipping earthkit.meteo.%s.%s: cube parameter(s) %s have no unit this "
+                    "version can enforce, so a mis-united input could not be detected. Add an "
+                    "entry to _UNIT_OVERRIDES (or _CONVERSIONS) to register it.",
+                    module_name,
+                    name,
+                    ", ".join(unitless_cubes),
+                )
+                continue
             funcs.append(_make_callable(obj, _metadata(obj, name, signature, units), units))
     return funcs
 
@@ -232,8 +290,10 @@ def _make_callable(func: Any, meta: dict[str, Any], units: dict[str, str]) -> An
         result = func(**coerced)
         # earthkit stamps `units`/`standard_name` on the output but inherits the *input's*
         # name, which mislabels the result (a humidity cube called "t2m"). Name it for the
-        # process that produced it.
-        if hasattr(result, "rename") and getattr(result, "name", None) is not None:
+        # process that produced it — including when the input was unnamed and the inherited
+        # name is therefore None, which otherwise left the result anonymous.
+        # `data_vars` excludes a Dataset, whose `rename` takes a mapping rather than a name.
+        if hasattr(result, "rename") and not hasattr(result, "data_vars"):
             result = result.rename(process_id)
         return result
 
