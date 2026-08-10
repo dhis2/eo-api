@@ -180,8 +180,10 @@ first and last day, which is the only complete description of a dekad's extent.
 
 Aggregating dekads to months needs care rather than a plain `mean`: three dekads tile a
 month exactly, but they are not equal in length, so an unweighted mean over-weights a short
-third dekad (February's 8-day dekad by nearly 5 percentage points). Sum an accumulated
-total, or day-weight a rate.
+third dekad (February's 8-day dekad by nearly 5 percentage points, a 14% relative error on
+its contribution). Use the built-in **`aggregate_dekads_to_period`** workflow, which weights
+each dekad by the days it shares with the target period — `method: mean` for a per-day rate,
+`method: sum` for a per-dekad total, which it conserves exactly.
 
 ### Which way the periods run: `temporal_direction`
 
