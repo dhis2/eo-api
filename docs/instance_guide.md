@@ -267,9 +267,10 @@ read_only: true
 ```
 
 Every state-changing request is then refused with `403`, and the openEO capabilities
-document at `GET /openeo` stops advertising the endpoints that would refuse, so clients
-discover the reduced surface rather than discovering it by failing. `GET /info` reports
-`read_only: true`.
+document at `GET /?f=json` — the instance root under content negotiation — stops advertising
+the endpoints that would refuse, so clients discover the reduced surface rather than
+discovering it by failing. (`/openeo` is a convenience redirect to the hosted openEO Web
+Editor, not the capabilities document.) `GET /info` reports `read_only: true`.
 
 **What stays available**
 
