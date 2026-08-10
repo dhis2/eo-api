@@ -35,6 +35,50 @@ def open_or_create_repo(store_path: Path) -> Any:
     return icechunk.Repository.create(storage)
 
 
+def committed_data_group(store_path: Path) -> str | None:
+    """Return the group holding the committed data variables: ``"0"``, or ``None`` for the root.
+
+    A pyramided store keeps its data in level groups and leaves the root with only the time
+    coordinate and ``spatial_ref``, so every reader and the *appender* have to descend. Getting
+    this wrong is not a degraded read: appending at the root of a pyramided store creates a
+    second, one-timestep ``gpp`` beside the pyramid, after which the root no longer opens at
+    all — ``conflicting sizes for dimension 't'`` — and nothing can repair it in place.
+
+    Returns None for a missing or unreadable store, which callers already treat as "nothing
+    committed to compare against".
+    """
+    import xarray as xr
+
+    if not store_path.exists():
+        return None
+    try:
+        repo = open_or_create_repo(store_path)
+        store = repo.readonly_session("main").store
+        ds = xr.open_zarr(store)
+        try:
+            if ds.data_vars:
+                return None
+        finally:
+            ds.close()
+        # Confirm the level exists rather than assuming the layout.
+        level0 = xr.open_zarr(store, group="0")
+        level0.close()
+        return "0"
+    except Exception:
+        logger.debug("Could not determine the committed data group for %s", store_path, exc_info=True)
+        return None
+
+
+def _open_committed(store_path: Path) -> Any:
+    """Open the committed store at whichever group actually holds the data."""
+    import xarray as xr
+
+    repo = open_or_create_repo(store_path)
+    store = repo.readonly_session("main").store
+    group = committed_data_group(store_path)
+    return xr.open_zarr(store) if group is None else xr.open_zarr(store, group=group)
+
+
 def read_committed_period_ids(store_path: Path, period_type: str, *, time_dim: str = "t") -> set[str]:
     """Return period ids already committed in the store, or an empty set.
 
@@ -43,7 +87,6 @@ def read_committed_period_ids(store_path: Path, period_type: str, *, time_dim: s
     a persisted cursor is stale or missing.
     """
     import pandas as pd
-    import xarray as xr
 
     from open_climate_service.shared.time import datetime_to_period_string
 
@@ -51,9 +94,10 @@ def read_committed_period_ids(store_path: Path, period_type: str, *, time_dim: s
         return set()
 
     try:
-        repo = open_or_create_repo(store_path)
-        session = repo.readonly_session("main")
-        ds = xr.open_zarr(session.store)
+        # Level 0 rather than the root: the root time coordinate of a pyramided store is
+        # rebuilt at the end of a sync, so mid-sync it lags the data and resume would
+        # re-append periods that are already committed.
+        ds = _open_committed(store_path)
         try:
             if time_dim not in ds.coords:
                 return set()
@@ -108,14 +152,15 @@ def read_committed_spatial_coords(store_path: Path, *, x_dim: str = "x", y_dim: 
     longer describe it. The orchestrator compares against these before its first append.
 
     Returns None when there is nothing to compare against (new store, unreadable, no coords).
-    """
-    import xarray as xr
 
+    Reads level 0 for a pyramided store. The root there carries only the time coordinate and
+    ``spatial_ref``, so reading the root returned None and silently disabled the check — on
+    exactly the large stores where a mirrored raster is hardest to spot by eye.
+    """
     if not store_path.exists():
         return None
     try:
-        repo = open_or_create_repo(store_path)
-        ds = xr.open_zarr(repo.readonly_session("main").store)
+        ds = _open_committed(store_path)
         try:
             if x_dim not in ds.coords or y_dim not in ds.coords:
                 return None
