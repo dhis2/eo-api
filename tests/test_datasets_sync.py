@@ -1139,13 +1139,19 @@ def test_maybe_build_pyramid_calls_write_to_icechunk_store(tmp_path: Path, monke
 
     def fake_write(ds_arg: xr.Dataset, path: Path, *a: object, **kw: object) -> None:
         written.append((ds_arg, path))
+        path.mkdir(parents=True, exist_ok=True)  # a real write leaves a store behind
 
     monkeypatch.setattr(downloader, "write_to_icechunk_store", fake_write)
 
     _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "precip"})
 
     assert len(written) == 1
-    assert written[0][1] == icechunk_path
+    # The rewrite cannot target the store it is reading from, so it goes to a sibling and is
+    # swapped in. What matters to callers is where it ends up, and that nothing is left over.
+    assert written[0][1] == icechunk_path.with_name(f"{icechunk_path.name}.rebuild")
+    assert icechunk_path.is_dir()
+    assert not written[0][1].exists()
+    assert not icechunk_path.with_name(f"{icechunk_path.name}.retired").exists()
 
 
 def test_maybe_build_pyramid_skips_rewrite_for_normalized_flat_store(
@@ -1235,3 +1241,37 @@ def test_plan_sync_append_for_icechunk_artifact(
     )
 
     assert result.action == SyncAction.APPEND
+
+
+def test_swap_store_replaces_the_target_and_cleans_up(tmp_path: Path) -> None:
+    from open_climate_service.ingestions.services import _swap_store
+
+    target = tmp_path / "ds.icechunk"
+    target.mkdir()
+    (target / "old.txt").write_text("old", encoding="utf-8")
+    staging = tmp_path / "ds.icechunk.rebuild"
+    staging.mkdir()
+    (staging / "new.txt").write_text("new", encoding="utf-8")
+
+    _swap_store(staging, target)
+
+    assert (target / "new.txt").read_text(encoding="utf-8") == "new"
+    assert not (target / "old.txt").exists()
+    assert not staging.exists()
+    assert not (tmp_path / "ds.icechunk.retired").exists()
+
+
+def test_swap_store_puts_the_original_back_when_the_swap_fails(tmp_path: Path) -> None:
+    """A failed swap must not leave the dataset without a store."""
+    from open_climate_service.ingestions.services import _swap_store
+
+    target = tmp_path / "ds.icechunk"
+    target.mkdir()
+    (target / "old.txt").write_text("old", encoding="utf-8")
+    missing_staging = tmp_path / "ds.icechunk.rebuild"  # never created -> rename raises
+
+    with pytest.raises(OSError):
+        _swap_store(missing_staging, target)
+
+    # The original survived, contents intact.
+    assert (target / "old.txt").read_text(encoding="utf-8") == "old"

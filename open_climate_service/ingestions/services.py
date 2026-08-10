@@ -422,6 +422,25 @@ def _create_streaming_artifact(
         lock.release()
 
 
+def _swap_store(staging: Path, target: Path) -> None:
+    """Move ``staging`` into ``target``'s place, keeping the original until the swap lands.
+
+    Two directory renames on one filesystem rather than a copy. Not a single atomic
+    operation, but the failure windows are narrow and each one is recoverable: if the second
+    rename fails the original is put back, and a leftover ``.retired`` directory is only
+    wasted space, never a half-written store — Icechunk itself is commit-or-nothing.
+    """
+    retired = target.with_name(f"{target.name}.retired")
+    shutil.rmtree(retired, ignore_errors=True)
+    target.rename(retired)
+    try:
+        staging.rename(target)
+    except Exception:
+        retired.rename(target)  # leave the store exactly as it was
+        raise
+    shutil.rmtree(retired, ignore_errors=True)
+
+
 def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
     """Apply GeoZarr conventions and a multiscale pyramid to the committed Icechunk store.
 
@@ -430,14 +449,15 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
     ``write_to_icechunk_store`` to add them, so every Icechunk store follows the
     same GeoZarr layout regardless of size.
 
-    The rewrite must materialise the whole store in memory first, because
-    ``write_to_icechunk_store`` overwrites the very store it is reading from. That
-    is unavoidable on the initial ingest and whenever a pyramid must be rebuilt,
-    but a *temporal append* to an already-normalised flat store produces nothing
-    new: ``spatial_ref`` is a scalar that survives the append and streaming
-    refreshes the root attrs on every commit. We detect that case and skip the
-    read-rewrite, avoiding both the full in-memory load and the write
-    amplification of re-emitting the entire store on every sync.
+    ``write_to_icechunk_store`` would overwrite the very store it is reading from, so the
+    rewrite goes to a sibling store which is then swapped in. That keeps the source readable
+    while topozarr streams the pyramid out of it, which is what lets the build stay lazy
+    instead of materialising the whole store in RAM.
+
+    A *temporal append* to an already-normalised flat store produces nothing new, though:
+    ``spatial_ref`` is a scalar that survives the append and streaming refreshes the root
+    attrs on every commit. We detect that case and skip the read-rewrite entirely, avoiding
+    the write amplification of re-emitting the whole store on every sync.
 
     Errors are logged and swallowed so that the plain flat artifact is still
     registered.
@@ -469,12 +489,21 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
                 store_path.name,
             )
             return
+        # `ds` reads lazily from `store_path`, and the rewrite overwrites that same store —
+        # the aliasing is why this used to materialise everything first. Build into a sibling
+        # store and swap it in, so the source stays readable while topozarr streams the
+        # pyramid out of it. The cost moves from RAM (the whole store: 3.47 GB for Uganda's
+        # GPP) to transient disk (one extra copy, reclaimed on success).
+        staging = store_path.with_name(f"{store_path.name}.rebuild")
+        shutil.rmtree(staging, ignore_errors=True)
         downloader.write_to_icechunk_store(
-            ds.load(),
-            store_path,
+            ds,
+            staging,
             pyramid_method=downloader.resampling_method_from_template(dataset),
             commit_message="Applied GeoZarr conventions",
         )
+        ds.close()  # drop the read session before the directory moves under it
+        _swap_store(staging, store_path)
     except Exception:
         logger.error(
             "GeoZarr/pyramid write failed for '%s'; flat Icechunk artifact will be used as-is",

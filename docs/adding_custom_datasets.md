@@ -242,7 +242,7 @@ Multiple templates can share the same plugin class and differ only in `params`:
 
 #### Pyramid resampling for categorical layers
 
-Layers larger than ~2048×2048 are stored as a multiscale pyramid so the map stays fast when zoomed out. Coarser levels are aggregated from the full-resolution data, and `ingestion.resampling` controls how:
+Layers whose grid exceeds 1024×1024 cells (about 1.05 megapixels, counted as `nx × ny` rather than per axis) are stored as a multiscale pyramid so the map stays fast when zoomed out. Coarser levels sit beside the full-resolution level 0, which analytics keeps reading, so the cost is roughly +33% storage and nothing else. They are aggregated from the full-resolution data, and `ingestion.resampling` controls how:
 
 - **Continuous data** (temperature, precipitation, NDVI, …) — leave the default `mean`.
 - **Binary masks** (0/1 presence) — use `max` ("present anywhere in the block"). Averaging turns a mask into meaningless fractions.
