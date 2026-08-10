@@ -9,6 +9,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, TypeVar
 
+import numpy as np
+import pandas as pd
 import pystac
 import xarray as xr
 from fastapi import HTTPException, Request
@@ -106,8 +108,11 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
         source_dataset=source_dataset,
     )
     template_links = [_link_to_dict(link) for link in template.links]
+    period_type = source_dataset.get("period_type")
 
-    collection_payload = _build_collection_with_xstac(artifact=artifact, template=template)
+    collection_payload = _build_collection_with_xstac(
+        artifact=artifact, template=template, period_type=period_type
+    )
     collection_payload["id"] = dataset_id
     collection_payload["type"] = "Collection"
     collection_payload["stac_version"] = STAC_VERSION
@@ -151,7 +156,6 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
     # Prefer an explicit extents.temporal.resolution; fall back to the dataset's
     # period_type so openEO save_result outputs (which omit the extents block) still
     # get a temporal step — the map viewer needs it to build the time slider.
-    period_type = source_dataset.get("period_type")
     _override_time_step(
         collection_payload,
         resolve_iso_period_step(source_dataset) or period_type_to_iso_step(period_type),
@@ -326,8 +330,13 @@ def _wgs84_extent_from_store(ds: xr.Dataset, store_crs: str, x_dim: str, y_dim: 
         return None
 
 
-def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.Collection) -> dict[str, Any]:
-    cached_payload = _xstac_collection_cache.get(artifact.artifact_id)
+def _build_collection_with_xstac(
+    *, artifact: ArtifactRecord, template: pystac.Collection, period_type: Any = None
+) -> dict[str, Any]:
+    # Keyed on period_type as well as the artifact: correcting a template's cadence
+    # changes the payload (an irregular one gains `values`) without producing a new artifact.
+    cache_key = f"{artifact.artifact_id}:{period_type}"
+    cached_payload = _xstac_collection_cache.get(cache_key)
     if cached_payload is not None:
         return deepcopy(cached_payload)
 
@@ -393,7 +402,9 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
         extent_bbox = _wgs84_extent_from_store(ds, store_crs or "EPSG:4326", x_dimension, y_dimension)
         if extent_bbox is not None:
             payload.setdefault("extent", {}).setdefault("spatial", {})["bbox"] = [extent_bbox]
-        _cache_xstac_collection_payload(artifact.artifact_id, payload)
+        if time_dimension is not None and period_cadence(period_type) is Cadence.IRREGULAR:
+            _add_temporal_values(payload, ds, time_dimension)
+        _cache_xstac_collection_payload(cache_key, payload)
         return deepcopy(payload)
     except HTTPException:
         raise
@@ -521,11 +532,9 @@ def _override_time_step(collection: dict[str, Any], step: str | None, *, cadence
     leaving whatever xstac inferred, which would imply a regular spacing the data does
     not have.
 
-    The extension has no way to express per-period extent, so an irregular declaration
-    tells a catalogue-only client no more than "read the timestamps". The store carries
-    the detail. ``values`` is deliberately not emitted: it is optional, it would add one
-    ISO string per period to every collection response, and a client that needs exact
-    timestamps is already reading the store.
+    A null step alone is not enough for a client, though: without a duration there is
+    nothing to extrapolate from, so the accompanying ``values`` must carry the real
+    timestamps. See ``_add_temporal_values``, which supplies them.
     """
     if step is None and cadence is not Cadence.IRREGULAR:
         return
@@ -535,6 +544,27 @@ def _override_time_step(collection: dict[str, Any], step: str | None, *, cadence
             value["step"] = step
             dimensions[key] = value
             return
+
+
+def _add_temporal_values(collection: dict[str, Any], ds: xr.Dataset, time_dimension: str) -> None:
+    """List the temporal dimension's actual timestamps as ``values``.
+
+    Required for an irregular cadence, not decorative. A client builds its time control
+    either from explicit ``values`` or by stepping ``extent`` by ``step``; with an
+    irregular cadence there is no step to walk, so omitting ``values`` leaves a consumer
+    with a single position and no slider. This mirrors ``_build_ordinal_dimensions``,
+    which lists values for the same reason on a day-of-year axis.
+
+    Only emitted for irregular cadences. A regular one is fully described by extent plus
+    duration, and listing every timestamp would add one ISO string per period to a cached
+    response for no gain — thousands of entries for a multi-year daily store.
+    """
+    dimensions = collection.get("cube:dimensions") or {}
+    dim = dimensions.get(time_dimension)
+    if not isinstance(dim, dict) or dim.get("type") != "temporal":
+        return
+    stamps = pd.DatetimeIndex(np.asarray(ds[time_dimension].values, dtype="datetime64[ns]"))
+    dim["values"] = [f"{s.isoformat()}Z" for s in stamps.tz_localize(None)]
 
 
 def _build_static_cube_dimensions(ds: xr.Dataset, x_dim: str, y_dim: str) -> dict[str, Any]:

@@ -274,3 +274,37 @@ def test_dhis2_export_refuses_a_dekadal_dataset_rather_than_inventing_a_period()
 
     with pytest.raises(ValueError, match="Unsupported period_type 'dekadal'"):
         _format_dhis2_timestamp(pd.Timestamp("2026-01-11"), "dekadal")
+
+
+def test_irregular_cadence_lists_its_timestamps_as_values() -> None:
+    """A null step gives a client nothing to extrapolate from, so `values` must carry
+    the real timestamps — otherwise a time control collapses to a single position."""
+    import xarray as xr
+
+    from open_climate_service.stac.services import _add_temporal_values
+
+    ids = dekad_period_ids("2026-01-01", "2026-03-31")
+    stamps = np.array(ids, dtype="datetime64[ns]")
+    ds = xr.Dataset(
+        {"gpp": (("t", "y", "x"), np.zeros((len(stamps), 2, 2), "f4"))},
+        coords={"t": stamps, "y": [1.0, 0.0], "x": [33.0, 34.0]},
+    )
+    collection = {"cube:dimensions": {"t": {"type": "temporal", "step": None}}}
+
+    _add_temporal_values(collection, ds, "t")
+
+    values = collection["cube:dimensions"]["t"]["values"]
+    assert len(values) == len(ids) == 9
+    assert values[0] == "2026-01-01T00:00:00Z"
+    assert [v[:10] for v in values] == ids
+
+
+def test_temporal_values_are_not_added_to_a_non_temporal_dimension() -> None:
+    import xarray as xr
+
+    from open_climate_service.stac.services import _add_temporal_values
+
+    ds = xr.Dataset({"v": ("t", np.zeros(2, "f4"))}, coords={"t": [0, 1]})
+    collection = {"cube:dimensions": {"t": {"type": "other"}}}
+    _add_temporal_values(collection, ds, "t")
+    assert "values" not in collection["cube:dimensions"]["t"]
