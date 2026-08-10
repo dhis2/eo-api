@@ -35,7 +35,17 @@ _IRREGULAR_PERIOD_TYPES = frozenset({"dekadal"})
 # ordinals (1..366), so asking for their cadence or ISO step is a category error.
 _NON_TEMPORAL_PERIOD_TYPES = frozenset({"climatology"})
 
-SUPPORTED_PERIOD_TYPES = frozenset(_PERIOD_TYPE_ISO_STEP) | _IRREGULAR_PERIOD_TYPES | _NON_TEMPORAL_PERIOD_TYPES
+# Period types a dataset template may declare. Deliberately *not* derived from
+# _PERIOD_TYPE_ISO_STEP: that map exists to give STAC a step for whatever is already in a
+# store, and includes "quarterly", which none of datetime_to_period_string,
+# normalize_period_string, numpy_datetime_to_period_string, _next_period_start or
+# _default_target_end implement. Deriving the two from one set would advertise quarterly as
+# registerable and then fail at ingest, so they are kept apart.
+SUPPORTED_PERIOD_TYPES = (
+    frozenset({"hourly", "daily", "weekly", "monthly", "yearly"})
+    | _IRREGULAR_PERIOD_TYPES
+    | _NON_TEMPORAL_PERIOD_TYPES
+)
 
 
 class Cadence(StrEnum):

@@ -152,7 +152,7 @@ from the dimension's metadata, so there's nothing extra to configure.
 
 | Field            | Required | Description                                                                                       |
 | ---------------- | -------- | ------------------------------------------------------------------------------------------------- |
-| `period_type`    | Yes      | Temporal resolution: `hourly`, `daily`, `dekadal`, `weekly`, `monthly`, `quarterly`, `yearly`, or `climatology`. Validated at registration — an unrecognised value is rejected rather than ignored |
+| `period_type`    | Yes      | Temporal resolution: `hourly`, `daily`, `dekadal`, `weekly`, `monthly`, `yearly`, or `climatology`. Validated at registration — an unrecognised value is rejected rather than silently ignored, and it is required unless `sync.kind` is `static` |
 | `sync.kind`      | Yes      | `temporal` — data grows over time; `release` — versioned releases; `static` — never synced        |
 | `sync.execution` | No       | `append` — new time steps appended to existing store; `rematerialize` — full rebuild on each sync |
 | `temporal_direction` | No   | Which way the periods run relative to now: `past` (default), `future` (a forecast), or `spanning` (crosses now, e.g. WorldPop 2015–2030). See below |

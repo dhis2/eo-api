@@ -93,8 +93,9 @@ def test_a_year_has_thirty_six_dekads_of_three_different_lengths() -> None:
     for period_id in ids:
         first, last = dekad_bounds(period_id)
         lengths[(last - first).days + 1] = lengths.get((last - first).days + 1, 0) + 1
-    # 2026 is a common year: eleven 31-day months give 11-day third dekads (7 of them
-    # after April/June/September/November's 30-day months take 10), February gives 8.
+    # Seven 31-day months give an 11-day third dekad, the four 30-day months give a
+    # 10-day one, and February (28 days in 2026) gives 8. Plus the first two dekads of
+    # every month, always 10 days: 24 + 4 = 28 ten-day dekads.
     assert lengths == {8: 1, 10: 28, 11: 7}
     assert sum(k * v for k, v in lengths.items()) == 365
 
@@ -217,7 +218,6 @@ def test_template_validation_accepts_dekadal_and_rejects_an_unsupported_cadence(
 
     base = {"id": "gpp", "sync": {"kind": "temporal"}, "ingestion": {"plugin": "pkg.Cls"}}
     _validate_dataset_template({**base, "period_type": "dekadal"}, source="t.yaml")
-    _validate_dataset_template(base, source="t.yaml")  # absent stays permitted
 
     with pytest.raises(ValueError, match="unsupported period_type 'dekad'"):
         _validate_dataset_template({**base, "period_type": "dekad"}, source="t.yaml")
@@ -308,3 +308,47 @@ def test_temporal_values_are_not_added_to_a_non_temporal_dimension() -> None:
     collection = {"cube:dimensions": {"t": {"type": "other"}}}
     _add_temporal_values(collection, ds, "t")
     assert "values" not in collection["cube:dimensions"]["t"]
+
+
+def test_irregular_step_is_null_even_when_a_resolution_is_declared() -> None:
+    """No duration can describe a variable-length cadence, so a declared
+    extents.temporal.resolution must not make a dekadal store look regular."""
+    from open_climate_service.stac.services import _override_time_step
+
+    collection = {"cube:dimensions": {"t": {"type": "temporal"}}}
+    _override_time_step(collection, "P10D", cadence=Cadence.IRREGULAR)
+    assert collection["cube:dimensions"]["t"]["step"] is None
+
+
+def test_quarterly_is_not_registerable_though_it_has_a_stac_step() -> None:
+    """The step map serves whatever is already in a store; the registerable set is
+    narrower. Quarterly has a P3M step but no period-string or sync implementation."""
+    assert period_type_to_iso_step("quarterly") == "P3M"
+    assert "quarterly" not in SUPPORTED_PERIOD_TYPES
+    with pytest.raises(ValueError, match="Unsupported period_type 'quarterly'"):
+        datetime_to_period_string(datetime(2026, 1, 1), "quarterly")
+
+
+def test_period_type_is_required_unless_the_dataset_is_static() -> None:
+    """Sync planning and coverage index period_type unguarded, so an absent one on a
+    temporal dataset registers and then raises a KeyError further in. Static is exempt:
+    an openEO save_result output legitimately has no cadence."""
+    from open_climate_service.data_registry.services.datasets import _validate_dataset_template
+
+    temporal = {"id": "x", "sync": {"kind": "temporal"}, "ingestion": {"plugin": "p.C"}}
+    with pytest.raises(ValueError, match="must define period_type"):
+        _validate_dataset_template(temporal, source="t.yaml")
+    _validate_dataset_template({**temporal, "period_type": "dekadal"}, source="t.yaml")
+
+    # An openEO output: static, and period_type may be underivable.
+    _validate_dataset_template({"id": "y", "sync": {"kind": "static"}}, source="t.yaml")
+
+
+def test_quarterly_template_is_rejected_at_registration() -> None:
+    from open_climate_service.data_registry.services.datasets import _validate_dataset_template
+
+    with pytest.raises(ValueError, match="unsupported period_type 'quarterly'"):
+        _validate_dataset_template(
+            {"id": "q", "sync": {"kind": "temporal"}, "ingestion": {"plugin": "p.C"}, "period_type": "quarterly"},
+            source="t.yaml",
+        )

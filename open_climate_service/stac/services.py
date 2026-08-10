@@ -536,7 +536,12 @@ def _override_time_step(collection: dict[str, Any], step: str | None, *, cadence
     nothing to extrapolate from, so the accompanying ``values`` must carry the real
     timestamps. See ``_add_temporal_values``, which supplies them.
     """
-    if step is None and cadence is not Cadence.IRREGULAR:
+    if cadence is Cadence.IRREGULAR:
+        # No duration can describe a variable-length cadence, so a declared
+        # extents.temporal.resolution must not win here: a dekadal template that happens to
+        # declare P10D would otherwise publish it and look regular.
+        step = None
+    elif step is None:
         return
     dimensions = collection.setdefault("cube:dimensions", {})
     for key, value in dimensions.items():
