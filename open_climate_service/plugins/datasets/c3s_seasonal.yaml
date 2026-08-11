@@ -34,9 +34,10 @@
       # Real-time runs carry 51 members and hindcasts 25, so quantiles rather than member
       # indices: they mean the same thing either side of that change.
       quantiles: [0.1, 0.5, 0.9]
-  # An anomaly in kelvin is the same number as an anomaly in degrees Celsius; K is the upstream
-  # unit and needs no conversion, and it reads unambiguously as a difference.
-  units: K
+      # A relabel, not a conversion: these are anomalies, so the values already are degrees
+      # Celsius of difference. `kelvin_to_celsius` would report +1.4 K as -271.75 °C.
+      unit_transform: kelvin_difference_to_celsius
+  units: degC
   cell_methods: "time: mean"
   resolution: 1° x 1° (~110 km)
   source: C3S seasonal forecast anomalies (ECMWF SEAS5.1) via CDS
@@ -67,9 +68,9 @@
       originating_centre: ecmwf
       system: "51"
       quantiles: [0.1, 0.5, 0.9]
-      # Upstream is an anomalous rate in m s-1. x1000 mm/m x 86400 s/day gives mm per day.
-      scale: 86400000
-  units: mm d-1
+      # Upstream is an anomalous rate in m s-1.
+      unit_transform: metres_per_second_to_mm_per_day
+  units: mm/d
   cell_methods: "time: mean"
   resolution: 1° x 1° (~110 km)
   source: C3S seasonal forecast anomalies (ECMWF SEAS5.1) via CDS

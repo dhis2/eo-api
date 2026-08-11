@@ -126,18 +126,52 @@ def test_members_average_when_no_quantiles_are_asked_for(monkeypatch: pytest.Mon
     assert float(ds["t2a"].mean()) == pytest.approx(2.0)
 
 
-def test_scale_converts_the_rate_and_drops_the_stale_unit(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A precipitation anomaly arrives as m s-1; a template scales it to mm/day."""
+def test_a_rate_anomaly_is_converted_to_mm_per_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A precipitation anomaly arrives as m s-1, which is unusable in a dashboard."""
     made, _ = plugin(
         monkeypatch,
         variable="total_precipitation_anomalous_rate_of_accumulation",
-        scale=86400000,
+        unit_transform="metres_per_second_to_mm_per_day",
         upstream_ds=upstream(variable="tpara", members=1, units="m s**-1"),
     )
     ds = made.fetch_period("2026-07", BBOX)
     assert float(ds["tpara"].isel(reference_time=0, lead_time=0, y=0, x=0)) == pytest.approx(86400000.0)
-    # The upstream unit no longer describes the values, so it must not be carried along.
-    assert "units" not in ds["tpara"].attrs
+    assert ds["tpara"].attrs["units"] == "mm/d"
+
+
+def test_a_temperature_anomaly_is_relabelled_not_shifted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One kelvin of difference is one degree Celsius of difference.
+
+    Subtracting 273.15 — what `kelvin_to_celsius` does, correctly, for an absolute temperature —
+    would report a +1.4 K anomaly as −271.75 °C.
+    """
+    made, _ = plugin(
+        monkeypatch,
+        unit_transform="kelvin_difference_to_celsius",
+        upstream_ds=upstream(members=1, units="K"),
+    )
+    ds = made.fetch_period("2026-07", BBOX)
+    assert float(ds["t2a"].isel(reference_time=0, lead_time=0, y=0, x=0)) == pytest.approx(1.0)
+    assert ds["t2a"].attrs["units"] == "degC"
+
+
+def test_the_store_holds_the_units_the_template_advertises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Converted at ingest, as the ERA5-Land plugins do, so no consumer has to know the source's."""
+    made, _ = plugin(monkeypatch, unit_transform="kelvin_difference_to_celsius")
+    ds = made.fetch_period("2026-07", BBOX)
+    assert ds["t2a"].attrs["units"] == "degC"
+
+
+def test_an_unknown_unit_transform_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    made, _ = plugin(monkeypatch, unit_transform="fahrenheit")
+    with pytest.raises(ValueError, match="Unknown unit_transform"):
+        made.fetch_period("2026-07", BBOX)
+
+
+def test_no_unit_transform_leaves_the_upstream_unit(monkeypatch: pytest.MonkeyPatch) -> None:
+    made, _ = plugin(monkeypatch)
+    ds = made.fetch_period("2026-07", BBOX)
+    assert ds["t2a"].attrs["units"] == "K"
 
 
 def test_cfgrib_scalars_do_not_leak_into_the_store(monkeypatch: pytest.MonkeyPatch) -> None:

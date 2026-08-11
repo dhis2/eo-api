@@ -74,7 +74,7 @@ class C3SSeasonalAnomalyPlugin(BaseDatasetPlugin):
         system: str = _DEFAULT_SYSTEM,
         max_lead_months: int = _MAX_LEAD_MONTHS,
         quantiles: list[float] | None = None,
-        scale: float = 1.0,
+        unit_transform: str | None = None,
     ) -> None:
         if not 1 <= max_lead_months <= _MAX_LEAD_MONTHS:
             raise ValueError(f"max_lead_months must lie in 1..{_MAX_LEAD_MONTHS}, got {max_lead_months}")
@@ -85,7 +85,7 @@ class C3SSeasonalAnomalyPlugin(BaseDatasetPlugin):
         self._system = system
         self._max_lead_months = max_lead_months
         self._quantiles = quantiles
-        self._scale = scale
+        self._unit_transform = unit_transform
 
     async def periods(self, start: str, end: str) -> list[str]:
         """Issue months in ``[start, end]`` as ``YYYY-MM``, oldest first.
@@ -177,26 +177,39 @@ class C3SSeasonalAnomalyPlugin(BaseDatasetPlugin):
         for name, standard in forecast.CF_STANDARD_NAMES.items():
             if name in renamed.coords:
                 renamed[name].attrs["standard_name"] = standard
-        if self._scale != 1.0:
-            renamed = self._rescale(renamed)
+        renamed = self._apply_unit_transform(renamed)
         ordered = renamed.transpose(forecast.REFERENCE_DIM, forecast.LEAD_DIM, ..., "y", "x", missing_dims="ignore")
         return self._store_ready(ordered)
 
-    def _rescale(self, ds: xr.Dataset) -> xr.Dataset:
-        """Apply a unit conversion to every data variable, keeping their attributes.
+    def _apply_unit_transform(self, ds: xr.Dataset) -> xr.Dataset:
+        """Convert the stored values to the template's units, as the ERA5-Land plugins do.
 
-        Precipitation anomalies arrive as a rate in ``m s-1``, which is unusable in a dashboard;
-        a template converts to mm/day with ``scale: 86400000``. Temperature needs no conversion —
-        an anomaly in kelvin is the same number as an anomaly in degrees Celsius.
+        Converted at ingest rather than on read, so the store holds the units the catalogue
+        advertises and every consumer — viewer, openEO export, DHIS2 push — agrees without each
+        having to know the source's.
+
+        Note ``kelvin_difference_to_celsius`` rather than ``kelvin_to_celsius`` for temperature:
+        these are anomalies, so the values are already degrees Celsius of difference and
+        subtracting 273.15 would turn +1.4 into −271.75.
         """
-        scaled = {}
-        for name, variable in ds.data_vars.items():
-            attrs = dict(variable.attrs)
-            attrs.pop("units", None)
-            converted = variable * self._scale
-            converted.attrs = attrs
-            scaled[name] = converted
-        return ds.assign(scaled)
+        if self._unit_transform in (None, "", "none"):
+            return ds
+        from open_climate_service.transforms import unit_conversion
+
+        known = {
+            "kelvin_difference_to_celsius": unit_conversion.kelvin_difference_to_celsius,
+            "metres_per_second_to_mm_per_day": unit_conversion.metres_per_second_to_mm_per_day,
+            "kelvin_to_celsius": unit_conversion.kelvin_to_celsius,
+            "metres_to_mm": unit_conversion.metres_to_mm,
+        }
+        convert = known.get(str(self._unit_transform))
+        if convert is None:
+            raise ValueError(f"Unknown unit_transform {self._unit_transform!r}; expected one of {sorted(known)}")
+        # Keyed on the store's variable name, which for a GRIB source is the short name cfgrib
+        # produced (`t2a`, `tpara`) rather than the long CDS request name.
+        for name in list(ds.data_vars):
+            ds = convert(ds, {"variable": name})
+        return ds
 
     @staticmethod
     def _store_ready(ds: xr.Dataset) -> xr.Dataset:

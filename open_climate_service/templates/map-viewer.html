@@ -374,8 +374,30 @@
         return Array.isArray(steps) ? steps.length : steps.count;
       }
 
+      // A date, or a timestamp at exactly midnight UTC. An axis made only of these is daily or
+      // coarser, so the time of day carries no information: "2026-08-11T00:00:00Z" is
+      // "2026-08-11" with nine characters of noise after it.
+      const DATE_OR_MIDNIGHT = /^\d{4}-\d{2}-\d{2}([T ]00:00(:00(\.0+)?)?(Z|\+00:00)?)?$/;
+      // Cached per steps array: an axis can hold tens of thousands of daily steps and every
+      // label would otherwise rescan all of them.
+      const datelikeAxes = new WeakMap();
+
+      function stepsAreDateOnly(steps) {
+        let known = datelikeAxes.get(steps);
+        if (known === undefined) {
+          known = steps.every((v) => typeof v === "string" && DATE_OR_MIDNIGHT.test(v));
+          datelikeAxes.set(steps, known);
+        }
+        return known;
+      }
+
       function stepLabelAt(steps, i) {
-        if (Array.isArray(steps)) return steps[i];
+        // Explicit `values` come through verbatim — an irregular temporal axis (dekads) or a
+        // forecast's issue times. Trimmed only when the whole axis is midnight-aligned, so an
+        // hourly axis keeps its 00:00 step labelled like every other step on it.
+        if (Array.isArray(steps)) {
+          return stepsAreDateOnly(steps) ? String(steps[i]).slice(0, 10) : steps[i];
+        }
         const sd = new Date(steps.start);
         // Label at the granularity of the step: year for P1Y, year-month for P1M,
         // date for daily, date+time for sub-daily — so a yearly axis shows "2026",

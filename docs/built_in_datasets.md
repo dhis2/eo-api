@@ -113,7 +113,7 @@ Requires no credentials, which makes this the easiest way to see forecast handli
 | ---------------------- | ------------------------------------------------------------------------------------------- |
 | **Dataset IDs**        | `c3s_seasonal_temperature_anomaly`, `c3s_seasonal_precipitation_anomaly`                     |
 | **Variables**          | `t2a`, `tpara`                                                                               |
-| **Units**              | K (anomaly), mm/day (anomaly)                                                                |
+| **Units**              | °C (anomaly), mm/day (anomaly)                                                               |
 | **Period**             | Monthly, up to 6 months ahead                                                                |
 | **Spatial coverage**   | Global                                                                                       |
 | **Spatial resolution** | 1° (~110 km)                                                                                 |
@@ -127,7 +127,7 @@ rather than days.
 **Anomalies rather than absolute values** — at 1° a forecast of absolute temperature carries model
 bias that has to be removed before the number means anything locally. C3S publishes the anomaly
 against the system's own 1993–2016 hindcast climatology, which is both the bias-corrected quantity
-and the one a planner acts on: "1.4 K warmer than normal in October" is actionable in a way that
+and the one a planner acts on: "1.4 °C warmer than normal in October" is actionable in a way that
 "23.4 °C at 1°" is not.
 
 **Ensemble spread** — reduced to the 10th, 50th and 90th percentiles. Real-time runs carry 51
