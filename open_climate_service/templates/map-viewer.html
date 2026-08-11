@@ -665,6 +665,7 @@
         const units = collection["cube:variables"]?.[variable]?.unit ?? "";
         metaSource.textContent = source ?? "—";
         metaUnits.textContent = units || "—";
+        renderPinnedDims();
         datasetMeta.classList.remove("hidden");
 
         updateLegend(cm, clim, units);
@@ -683,6 +684,26 @@
         _selectorDebounce = setTimeout(() => {
           layer?.setSelector({ ...selector });
         }, 150);
+      }
+
+      // A single-step axis gets no control, but a forecast's issue time is identity rather than
+      // a choice: with one run ingested, hiding it leaves nothing on the page saying which
+      // forecast is on screen. So it is shown as a static line instead.
+      function renderPinnedDims() {
+        // Cleared first: switching dataset re-runs this, and the Source/Units rows are static
+        // siblings, so appending blindly would stack a new pair on every switch.
+        for (const stale of datasetMeta.querySelectorAll("[data-pinned-dim]")) stale.remove();
+        const pinned = dimStates.filter((d) => d.count === 1 && d.key === "reference_time");
+        for (const d of pinned) {
+          const dt = document.createElement("dt");
+          dt.textContent = d.label;
+          dt.dataset.pinnedDim = d.key;
+          const dd = document.createElement("dd");
+          dd.textContent = stepDisplay(d.key, d.steps, 0);
+          dd.dataset.pinnedDim = d.key;
+          datasetMeta.prepend(dd);
+          datasetMeta.prepend(dt);
+        }
       }
 
       // Render one control per non-spatial dimension with more than one step.

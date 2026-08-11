@@ -378,6 +378,27 @@ def test_manage_page_dropdown_excludes_static_templates(client: TestClient, monk
     assert 'value="worldpop_population_change"' not in response.text
 
 
+def test_inline_js_apps_are_not_cacheable(client: TestClient) -> None:
+    """A cached page runs last week's inline JS against today's STAC payload.
+
+    That reads as a data bug rather than a stale page, and nothing on the server can see it —
+    so these two pages must always be revalidated.
+    """
+    for path in ("/map", "/manage"):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "no-store", path
+
+
+def test_map_viewer_pins_a_single_run_forecast_in_the_metadata(client: TestClient) -> None:
+    """A forecast's issue time is identity, not a choice, so one run must still be named."""
+    response = client.get("/map")
+
+    assert response.status_code == 200
+    assert "function renderPinnedDims()" in response.text
+    assert 'd.count === 1 && d.key === "reference_time"' in response.text
+
+
 def test_map_viewer_initializes_at_latest_timestep(client: TestClient) -> None:
     response = client.get("/map")
 

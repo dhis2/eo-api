@@ -51,11 +51,18 @@ def read_index(request: Request) -> Response:
     return HTMLResponse(render_landing(app_version, base))
 
 
+# These pages are single-file apps: the behaviour lives in inline JS that changes with every
+# release, and the data it renders is fetched separately by XHR. Cached, a browser will happily
+# run last week's JS against today's STAC payload — which reads as a bug in the data rather than
+# a stale page, and cannot be diagnosed from the server side.
+_NO_STORE = {"Cache-Control": "no-store"}
+
+
 @router.get("/map", response_class=HTMLResponse, include_in_schema=False)
 def maps(request: Request) -> HTMLResponse:
     """Return the interactive map viewer."""
     base = str(request.base_url).rstrip("/")
-    return HTMLResponse(render_maps(base))
+    return HTMLResponse(render_maps(base), headers=_NO_STORE)
 
 
 @router.get("/openeo", response_class=HTMLResponse, include_in_schema=False)
@@ -74,7 +81,7 @@ def manage(
 ) -> HTMLResponse:
     """Return the management interface for ingestion and sync operations."""
     base = str(request.base_url).rstrip("/")
-    return HTMLResponse(render_manage(app_version, base, message=message, error=error))
+    return HTMLResponse(render_manage(app_version, base, message=message, error=error), headers=_NO_STORE)
 
 
 @router.post("/manage/ingest", include_in_schema=False)
