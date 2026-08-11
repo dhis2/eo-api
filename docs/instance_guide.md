@@ -259,48 +259,25 @@ dedicated instance Docker guide is planned.
 
 ### Read-only instances
 
-An instance exposed to people who should be able to *browse* the data but not change it —
-a public demo, a shared reference endpoint — should run read-only:
+For an instance that should be browsable but not changeable — a public demo, a shared
+reference endpoint:
 
 ```yaml
 read_only: true
 ```
 
-Every state-changing request is then refused with `403`, and the openEO capabilities
-document at `GET /?f=json` — the instance root under content negotiation — stops advertising
-the endpoints that would refuse, so clients discover the reduced surface rather than
-discovering it by failing. (`/openeo` is a convenience redirect to the hosted openEO Web
-Editor, not the capabilities document.) `GET /info` reports `read_only: true`.
+Every state-changing request is refused with `403`, the openEO capabilities document stops
+advertising the endpoints that would refuse, and `GET /info` reports `read_only: true`.
 
-**What stays available**
+Still available: the catalogue and metadata (`/collections`, `/stac`, `/datasets`,
+`/processes`, `/process_graphs`, `/extent`), the data (`/zarr/…`, `/icechunk/…`, downloads),
+the landing page and `/map`, and `POST /result` for synchronous openEO process graphs.
 
-| | |
-| --- | --- |
-| Catalogue and metadata | `/collections`, `/stac`, `/datasets`, `/processes`, `/process_graphs`, `/extent` |
-| Data | `/zarr/…`, `/icechunk/…`, dataset downloads |
-| Web UI | the landing page and the `/map` viewer |
-| Computation | `POST /result` — synchronous openEO process graphs |
+Refused: ingestion and sync, the `/manage` console, stored process graph writes, and batch
+jobs.
 
-`POST /result` stays open deliberately: it is a POST only because the process graph travels
-in the request body, and it is how anyone actually *uses* the instance. It cannot publish a
-dataset, because the synchronous path rejects Zarr output outright.
-
-**What is refused**
-
-Ingestion and sync, the `/manage` admin console, stored process graphs (`PUT`/`DELETE
-/process_graphs/{id}`), and batch jobs.
-
-Batch jobs are closed entirely rather than merely made read-only. There is no request
-identity yet — `/me` reports `anonymous` for every caller — so the job namespace is shared:
-`GET /jobs` would list every visitor's jobs and `DELETE /jobs/{id}` would let anyone remove
-someone else's. Per-user job isolation arrives with authentication.
-
-**Ingesting on a read-only instance**
-
-Read-only applies to HTTP. Ingestion becomes an operator task performed on the host, which
-is what allows the switch to be absolute — there is no exemption, token or trusted header
-that could be misconfigured into a bypass. Until a dedicated CLI command exists, run the
-ingestion function directly inside the container or virtualenv:
+Read-only applies to HTTP only, so ingestion becomes an operator task on the host. Until a
+CLI command exists, run it inside the container or virtualenv:
 
 ```python
 from open_climate_service.ingestions.processes import execute_ingestion
@@ -308,15 +285,6 @@ from open_climate_service.ingestions.processes import execute_ingestion
 execute_ingestion(dataset_id="era5land_temperature_monthly", start="2016-01", end="2016-12")
 ```
 
-Note in particular that there is deliberately **no** "requests from localhost may write"
-escape hatch. Behind a reverse proxy on the same host every public request arrives from
-`127.0.0.1`, so such an exemption would open the instance to everyone while appearing to
-work during testing.
-
-**Defence in depth**
-
-Read-only mode protects data integrity, not availability. `POST /result` remains an
-unbounded compute endpoint, so a public instance should also sit behind a reverse proxy
-that **allowlists** the routes above — an allowlist, not a denylist, since a denylist
-silently permits every route added in a later release — and applies request timeouts, body
+It protects data integrity, not availability: `POST /result` is still unbounded compute, so
+put a reverse proxy in front that allowlists the routes above and applies timeouts, body
 size limits and per-IP rate limiting.
