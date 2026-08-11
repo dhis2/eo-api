@@ -1275,3 +1275,44 @@ def test_swap_store_puts_the_original_back_when_the_swap_fails(tmp_path: Path) -
 
     # The original survived, contents intact.
     assert (target / "old.txt").read_text(encoding="utf-8") == "old"
+
+
+def test_recover_interrupted_swap_restores_a_store_killed_between_renames(tmp_path: Path) -> None:
+    """A SIGKILL between the two renames leaves the published path missing and the data at
+    `.retired`, which no reader looks for. The exception handler cannot cover that case.
+    """
+    from open_climate_service.ingestions.services import recover_interrupted_swap
+
+    target = tmp_path / "ds.icechunk"
+    retired = tmp_path / "ds.icechunk.retired"
+    retired.mkdir()
+    (retired / "data").write_text("published", encoding="utf-8")
+    assert not target.exists()  # the state a killed swap leaves behind
+
+    assert recover_interrupted_swap(target) is True
+    assert (target / "data").read_text(encoding="utf-8") == "published"
+    assert not retired.exists()
+
+
+def test_recover_interrupted_swap_leaves_a_healthy_store_alone(tmp_path: Path) -> None:
+    """A `.retired` directory alongside a live store is leftover space, not a pending recovery.
+
+    Restoring over a healthy store would roll back a completed swap.
+    """
+    from open_climate_service.ingestions.services import recover_interrupted_swap
+
+    target = tmp_path / "ds.icechunk"
+    target.mkdir()
+    (target / "data").write_text("current", encoding="utf-8")
+    retired = tmp_path / "ds.icechunk.retired"
+    retired.mkdir()
+    (retired / "data").write_text("stale", encoding="utf-8")
+
+    assert recover_interrupted_swap(target) is False
+    assert (target / "data").read_text(encoding="utf-8") == "current"
+
+
+def test_recover_interrupted_swap_is_a_no_op_for_a_brand_new_dataset(tmp_path: Path) -> None:
+    from open_climate_service.ingestions.services import recover_interrupted_swap
+
+    assert recover_interrupted_swap(tmp_path / "never-existed.icechunk") is False

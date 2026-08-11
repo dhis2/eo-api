@@ -19,6 +19,7 @@ from typing import Any
 from geozarr_toolkit import create_geozarr_attrs
 
 from open_climate_service.shared.geozarr import grid_geometry, write_gdal_geotransform
+from open_climate_service.stac.media_types import is_multiscales_convention
 from open_climate_service.streaming.protocol import GridSpec
 
 logger = logging.getLogger(__name__)
@@ -227,6 +228,18 @@ def write_geozarr_attrs(store: Any, *, spec: GridSpec, bbox: list[float]) -> Non
         attrs["spatial:shape"] = geometry["shape"]
         attrs["spatial:bbox"] = geometry["bbox"]
     attrs.update(spec.attrs)
+
+    # An append to a pyramided store must not un-declare its pyramid. `create_geozarr_attrs`
+    # builds `zarr_conventions` for a *flat* store, and the `update` below replaces the list
+    # wholesale — dropping the multiscales entry while the data still lives under `0/`, so the
+    # store would advertise itself as flat while having no root data variables at all. That
+    # then persists if the run aborts before the end-of-sync pyramid rebuild.
+    existing_conventions = root.attrs.get("zarr_conventions")
+    if isinstance(existing_conventions, list):
+        preserved = [c for c in existing_conventions if is_multiscales_convention(c)]
+        if preserved:
+            declared = attrs.get("zarr_conventions")
+            attrs["zarr_conventions"] = ([*declared] if isinstance(declared, list) else []) + preserved
 
     root.attrs.update(attrs)
     if geometry is not None:

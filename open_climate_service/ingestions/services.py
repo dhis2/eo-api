@@ -422,15 +422,51 @@ def _create_streaming_artifact(
         lock.release()
 
 
+def _retired_path(target: Path) -> Path:
+    return target.with_name(f"{target.name}.retired")
+
+
+def recover_interrupted_swap(target: Path) -> bool:
+    """Restore a store left behind by a swap that was killed between its two renames.
+
+    ``_swap_store`` moves the published store aside before moving the rebuilt one in. An
+    exception between the two is handled there, but a SIGKILL or a host restart is not: the
+    published path then does not exist and the data sits at ``<name>.retired``, which no
+    reader looks for. Called before the store is opened, so the next sync heals it rather
+    than reporting an unreadable dataset.
+
+    Returns True when a recovery was performed.
+    """
+    retired = _retired_path(target)
+    if target.exists() or not retired.is_dir():
+        return False
+    retired.rename(target)
+    logger.warning(
+        "Recovered '%s' from '%s': a previous store swap was interrupted between its two "
+        "renames, leaving the published path missing.",
+        target.name,
+        retired.name,
+    )
+    return True
+
+
 def _swap_store(staging: Path, target: Path) -> None:
     """Move ``staging`` into ``target``'s place, keeping the original until the swap lands.
 
-    Two directory renames on one filesystem rather than a copy. Not a single atomic
-    operation, but the failure windows are narrow and each one is recoverable: if the second
-    rename fails the original is put back, and a leftover ``.retired`` directory is only
-    wasted space, never a half-written store — Icechunk itself is commit-or-nothing.
+    Two directory renames on one filesystem rather than a copy, so the cost is metadata
+    rather than bytes. Two caveats, both real:
+
+    * **The target does not exist between the renames.** A reader that opens the store in that
+      window fails. The window is two metadata operations wide, but it is not zero.
+    * **Only an exception is rolled back here.** A process kill or host restart between the
+      renames leaves the published path missing, which :func:`recover_interrupted_swap`
+      repairs on the next sync.
+
+    Neither is fixable by reordering: POSIX has no atomic directory exchange that Python
+    exposes portably. The durable answer is to publish through a pointer that can be switched
+    atomically, which is CLIM-880 — this keeps the window small and recoverable meanwhile.
     """
-    retired = target.with_name(f"{target.name}.retired")
+    retired = _retired_path(target)
     shutil.rmtree(retired, ignore_errors=True)
     target.rename(retired)
     try:
@@ -463,6 +499,10 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
     registered.
     """
     from open_climate_service.data_accessor.services.accessor import open_icechunk_dataset
+
+    # Before the open, not after: a swap interrupted by a kill leaves the published path
+    # missing, so without this the open below would fail and the dataset would stay broken.
+    recover_interrupted_swap(store_path)
 
     try:
         ds = open_icechunk_dataset(store_path)

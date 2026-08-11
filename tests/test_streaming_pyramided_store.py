@@ -129,3 +129,70 @@ def test_spatial_guard_is_active_on_a_pyramided_store(tmp_path: Path) -> None:
     assert stored is not None
     assert stored["y"][0] > stored["y"][-1]  # north-up, per the publication contract
     assert len(stored["x"]) == 1200
+
+
+def test_appending_does_not_un_declare_the_pyramid(tmp_path: Path) -> None:
+    """`write_geozarr_attrs` runs on every commit and rebuilds `zarr_conventions` for a flat
+    store, which used to drop the multiscales entry — leaving a store that advertised itself as
+    flat while having no data variables at the root at all. If the run then aborted before the
+    end-of-sync rebuild, that is how it stayed.
+    """
+    from open_climate_service.stac.media_types import attributes_declare_multiscales
+    from open_climate_service.streaming.protocol import GridSpec
+    from open_climate_service.streaming.store import write_geozarr_attrs
+
+    store_path, repo = _pyramided_store(tmp_path)
+
+    def declared() -> bool:
+        attrs = dict(zarr.open_group(repo.readonly_session("main").store, mode="r").attrs)
+        return attributes_declare_multiscales(attrs)
+
+    assert declared(), "precondition: the built pyramid declares the convention"
+
+    spec = GridSpec(
+        shape=(1500, 1200),
+        crs=4326,
+        dtype=np.dtype("float32"),
+        nodata=None,
+        time_dim="t",
+        x_dim="x",
+        y_dim="y",
+    )
+    session = repo.writable_session("main")
+    _period(3).to_zarr(session.store, group=committed_data_group(store_path), append_dim="t", zarr_format=3)
+    write_geozarr_attrs(session.store, spec=spec, bbox=[29.0, -1.0, 35.0, 4.0])
+    session.commit("append + attrs")
+
+    assert declared(), "the pyramid must still be declared after an append"
+    attrs = dict(zarr.open_group(repo.readonly_session("main").store, mode="r").attrs)
+    names = [c.get("name") for c in attrs["zarr_conventions"] if isinstance(c, dict)]
+    assert names.count("multiscales") == 1, f"declared once, not duplicated per commit: {names}"
+
+
+def test_a_flat_store_does_not_gain_a_multiscales_declaration(tmp_path: Path) -> None:
+    """The preservation must be conditional — a flat store claiming a pyramid is worse."""
+    from open_climate_service.stac.media_types import attributes_declare_multiscales
+    from open_climate_service.streaming.protocol import GridSpec
+    from open_climate_service.streaming.store import write_geozarr_attrs
+
+    flat = tmp_path / "flat.icechunk"
+    repo = icechunk.Repository.open_or_create(icechunk.local_filesystem_storage(str(flat)))
+    session = repo.writable_session("main")
+    _period(1, ny=64, nx=64).to_zarr(session.store, mode="w", zarr_format=3)
+    write_geozarr_attrs(
+        session.store,
+        spec=GridSpec(
+            shape=(64, 64),
+            crs=4326,
+            dtype=np.dtype("float32"),
+            nodata=None,
+            time_dim="t",
+            x_dim="x",
+            y_dim="y",
+        ),
+        bbox=[29.0, -1.0, 35.0, 4.0],
+    )
+    session.commit("flat")
+
+    attrs = dict(zarr.open_group(repo.readonly_session("main").store, mode="r").attrs)
+    assert not attributes_declare_multiscales(attrs)
