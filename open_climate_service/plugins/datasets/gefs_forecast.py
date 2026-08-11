@@ -72,7 +72,7 @@ class GefsForecastPlugin(BaseDatasetPlugin):
         max_lead_days: int = _MAX_LEAD_DAYS,
         resample: str = "mean",
         accumulate: bool = False,
-        accumulated_units: str = "mm",
+        accumulated_units: str = "mm/d",
         quantiles: list[float] | None = None,
     ) -> None:
         if resample not in _RESAMPLE:

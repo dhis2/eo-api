@@ -6,6 +6,7 @@ the network.
 """
 
 import asyncio
+from datetime import date
 
 import numpy as np
 import pytest
@@ -62,20 +63,51 @@ def plugin(monkeypatch: pytest.MonkeyPatch, *, upstream_ds: xr.Dataset | None = 
     return made, captured
 
 
-def test_periods_enumerates_issue_months() -> None:
+@pytest.fixture
+def published_through(monkeypatch: pytest.MonkeyPatch):
+    """Pin the CDS availability lookup so tests never depend on the catalogue or the clock."""
+
+    def _set(cutoff: date) -> None:
+        monkeypatch.setattr(
+            "open_climate_service.plugins.datasets.c3s_seasonal._availability_cutoff",
+            lambda: cutoff,
+        )
+
+    _set(date(2026, 8, 1))
+    return _set
+
+
+def test_periods_enumerates_issue_months(published_through) -> None:  # noqa: ANN001
     made = C3SSeasonalAnomalyPlugin(variable="2m_temperature_anomaly")
     assert asyncio.run(made.periods("2026-05", "2026-08")) == ["2026-05", "2026-06", "2026-07", "2026-08"]
 
 
-def test_periods_clamp_to_the_start_of_the_archive() -> None:
+def test_periods_clamp_to_the_start_of_the_archive(published_through) -> None:  # noqa: ANN001
     """The anomalies product begins in 2017; asking earlier is a request for nothing."""
     made = C3SSeasonalAnomalyPlugin(variable="2m_temperature_anomaly")
     assert asyncio.run(made.periods("2015-11", "2017-02")) == ["2017-01", "2017-02"]
 
 
-def test_periods_cross_a_year_boundary() -> None:
+def test_periods_cross_a_year_boundary(published_through) -> None:  # noqa: ANN001
     made = C3SSeasonalAnomalyPlugin(variable="2m_temperature_anomaly")
     assert asyncio.run(made.periods("2025-11", "2026-02")) == ["2025-11", "2025-12", "2026-01", "2026-02"]
+
+
+def test_periods_clip_to_the_latest_published_run(published_through) -> None:  # noqa: ANN001
+    """`temporal_direction: future` hands the plugin a horizon a year ahead.
+
+    The framework leaves clipping to the plugin, so enumerating the calendar to that horizon
+    would ask for twelve runs that do not exist and fail twelve times over.
+    """
+    published_through(date(2026, 8, 1))
+    made = C3SSeasonalAnomalyPlugin(variable="2m_temperature_anomaly")
+    assert asyncio.run(made.periods("2026-06", "2027-08")) == ["2026-06", "2026-07", "2026-08"]
+
+
+def test_periods_are_empty_when_the_window_starts_after_the_latest_run(published_through) -> None:  # noqa: ANN001
+    published_through(date(2026, 8, 1))
+    made = C3SSeasonalAnomalyPlugin(variable="2m_temperature_anomaly")
+    assert asyncio.run(made.periods("2026-09", "2027-01")) == []
 
 
 def test_fetch_returns_a_forecast_cube_with_a_month_lead(monkeypatch: pytest.MonkeyPatch) -> None:

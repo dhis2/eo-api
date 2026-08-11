@@ -40,6 +40,7 @@ from open_climate_service.streaming import BaseDatasetPlugin
 logger = logging.getLogger(__name__)
 
 _COLLECTION = "seasonal-postprocessed-single-levels"
+_CDS_CATALOGUE_URL = "https://cds.climate.copernicus.eu/api"
 # Six lead months, and lead 0 does not exist upstream: C3S numbers `forecastMonth` from 1, where
 # 1 is the month the run was issued in. Normalised to 0-based here so the generic rule
 # `valid = reference + lead x unit` holds for a seasonal cube exactly as it does for a daily one.
@@ -90,10 +91,14 @@ class C3SSeasonalAnomalyPlugin(BaseDatasetPlugin):
     async def periods(self, start: str, end: str) -> list[str]:
         """Issue months in ``[start, end]`` as ``YYYY-MM``, oldest first.
 
-        Enumerated from the calendar rather than queried: the archive is one run per month with
-        no gaps since 2017, so there is nothing a request could discover that arithmetic cannot.
-        A month whose run is not published yet fails its own fetch, which is the honest place for
-        that to surface — real-time runs appear on the 6th (ECMWF) or the 10th (other centres).
+        Clipped at both ends to what the CDS actually publishes. The upper bound matters:
+        ``temporal_direction: future`` means a request without an end gets a horizon a year ahead,
+        and the framework leaves it to the plugin to clip to its source (see
+        ``ingestions.services._forecast_horizon``). Enumerating the calendar to that horizon would
+        ask for twelve runs that do not exist yet and fail twelve times over.
+
+        Availability comes from the catalogue rather than a rule about publication dates, because
+        the rule differs per centre — the 6th of the month for ECMWF, the 10th for the others.
         """
         first = _as_month(start)
         last = _as_month(end)
@@ -101,6 +106,10 @@ class C3SSeasonalAnomalyPlugin(BaseDatasetPlugin):
         if first < earliest:
             logger.info("C3S seasonal forecasts start at %s; clamping requested start %s", earliest, first)
             first = earliest
+        available = _availability_cutoff()
+        if last > available:
+            logger.info("Latest published C3S seasonal run is %s; clipping requested end %s", available, last)
+            last = available
         months = []
         cursor = first
         while cursor <= last:
@@ -239,6 +248,22 @@ def _cds_client() -> Any:
     from ecmwf.datastores import Client
 
     return Client()
+
+
+def _availability_cutoff() -> date:
+    """The latest issue month the CDS has published, from the collection's declared end.
+
+    The same catalogue lookup the ERA5-Land plugins use for their cutoffs, so "what exists" has
+    one source of truth rather than a per-plugin guess. Raises rather than assuming a bound: a
+    wrong guess either silently truncates the archive or asks for runs that do not exist.
+    """
+    from ecmwf.datastores import Client
+
+    collection = Client(url=_CDS_CATALOGUE_URL, key="").get_collection(_COLLECTION)
+    end = collection.end_datetime
+    if end is None:
+        raise RuntimeError(f"CDS collection '{_COLLECTION}' returned no end_datetime")
+    return date(end.year, end.month, 1)
 
 
 def _as_month(value: str) -> date:

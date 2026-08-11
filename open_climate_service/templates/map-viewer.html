@@ -716,6 +716,15 @@
           dimControls.classList.add("hidden");
           return;
         }
+        // One axis's label can depend on another's position: a forecast lead is labelled with
+        // the date it describes, which is the *selected* issue time plus the lead. So every
+        // control re-renders its own label whenever any of them moves, rather than only the one
+        // that was touched — otherwise moving "Forecast issued" leaves the lead steps showing
+        // the previous run's dates.
+        const refreshers = [];
+        const refreshAll = () => {
+          for (const refresh of refreshers) refresh();
+        };
         for (const d of stepping) {
           const block = document.createElement("div");
           block.style.marginBottom = "0.8rem";
@@ -738,6 +747,10 @@
             valueEl.textContent = stepDisplay(d.key, d.steps, d.index);
             valueWrap.append(valueEl);
             count.textContent = `${d.index + 1} / ${d.count}`;
+            refreshers.push(() => {
+              valueEl.textContent = stepDisplay(d.key, d.steps, d.index) ?? "—";
+              count.textContent = `${d.index + 1} / ${d.count}`;
+            });
 
             const slider = document.createElement("input");
             slider.type = "range";
@@ -749,8 +762,7 @@
               const i = parseInt(e.target.value, 10);
               d.index = i;
               selector[d.key] = i;
-              valueEl.textContent = stepDisplay(d.key, d.steps, i) ?? "—";
-              count.textContent = `${i + 1} / ${d.count}`;
+              refreshAll();
               applySelector();
             });
             block.append(valueWrap, slider);
@@ -763,10 +775,17 @@
               if (i === d.index) opt.selected = true;
               select.append(opt);
             }
+            // Option text can depend on another axis too, so it is rebuilt on any change.
+            refreshers.push(() => {
+              for (let i = 0; i < d.count; i++) select.options[i].textContent = stepDisplay(d.key, d.steps, i);
+              count.textContent = `${d.index + 1} / ${d.count}`;
+            });
+            count.textContent = `${d.index + 1} / ${d.count}`;
             select.addEventListener("change", (e) => {
               const i = parseInt(e.target.value, 10);
               d.index = i;
               selector[d.key] = i;
+              refreshAll();
               applySelector();
             });
             block.append(select);

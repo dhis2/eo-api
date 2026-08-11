@@ -111,7 +111,9 @@ def test_quantiles_become_an_axis_and_keep_the_spread(monkeypatch: pytest.Monkey
 def test_accumulate_integrates_a_rate_into_a_daily_total(monkeypatch: pytest.MonkeyPatch) -> None:
     ds = plugin(monkeypatch, accumulate=True).fetch_period("2026-01-01 00:00:00", BBOX)
     variable = ds["precipitation_surface"]
-    assert variable.attrs["units"] == "mm"
+    # mm/d, matching CHIRPS: a daily total in mm is the same number as the mean daily rate, and
+    # the rate spelling says which period the total is over.
+    assert variable.attrs["units"] == "mm/d"
     assert variable.attrs["cell_methods"] == "time: sum"
     # A constant mean rate of 2 kg m-2 s-1 over a day is 2 * 86400 mm.
     assert float(variable.isel(reference_time=0, lead_time=0, y=0, x=0)) == pytest.approx(2.0 * 86400)

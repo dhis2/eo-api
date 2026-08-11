@@ -55,7 +55,9 @@
       # integrated over the day — not a sum of its steps.
       accumulate: true
       quantiles: [0.1, 0.5, 0.9]
-  units: mm
+  # mm/d rather than mm, matching CHIRPS: a daily total in mm is the same number as the mean
+  # daily rate, and the rate spelling says which period the total is over.
+  units: mm/d
   cell_methods: "time: sum"
   resolution: 0.25° x 0.25° (~28 km)
   source: NOAA GEFS via dynamical.org
