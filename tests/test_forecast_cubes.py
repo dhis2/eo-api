@@ -1,0 +1,175 @@
+"""Forecast cubes: two temporal axes, and what each surface must do with them.
+
+The recurring failure these pin is a forecast being described by the wrong axis — coverage
+reporting when runs were made rather than what they cover, or a request that selects runs being
+compared against the dates those runs speak to.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+xr = pytest.importorskip("xarray")
+pytest.importorskip("icechunk")
+
+from open_climate_service.data_manager.services.utils import get_time_dim  # noqa: E402
+from open_climate_service.shared import forecast  # noqa: E402
+
+
+def _cube(inits: list[str], leads: int = 5, *, with_valid_coord: bool = True):  # `xr` is an importorskip variable
+    ny, nx = 4, 3
+    reference = np.array(inits, dtype="datetime64[ns]")
+    lead = np.arange(1, leads + 1, dtype="int32")
+    data = np.arange(len(inits) * leads * ny * nx, dtype="float32").reshape(len(inits), leads, ny, nx)
+    coords: dict = {
+        forecast.REFERENCE_DIM: reference,
+        forecast.LEAD_DIM: lead,
+        "y": np.linspace(-9.0, -12.0, ny),
+        "x": np.linspace(32.0, 34.0, nx),
+    }
+    if with_valid_coord:
+        offsets = lead.astype("timedelta64[D]").astype("timedelta64[ns]")
+        coords[forecast.VALID_COORD] = (
+            (forecast.REFERENCE_DIM, forecast.LEAD_DIM),
+            reference[:, None] + offsets[None, :],
+        )
+    return xr.Dataset({"tfc": ((forecast.REFERENCE_DIM, forecast.LEAD_DIM, "y", "x"), data)}, coords=coords)
+
+
+def test_both_axes_are_required_to_be_a_forecast_cube() -> None:
+    """One axis alone is a different thing, not a partial forecast.
+
+    A cube with only `lead_time` is a single run that has lost its issue time; one with only
+    `reference_time` is a time series whose axis is misnamed. Treating either as an archive
+    would produce a coverage or a slider that means something other than it says.
+    """
+    assert forecast.is_forecast_cube(_cube(["2026-03-01"]))
+    assert not forecast.is_forecast_cube(_cube(["2026-03-01"]).isel({forecast.LEAD_DIM: 0}, drop=True))
+    assert not forecast.is_forecast_cube(_cube(["2026-03-01"]).isel({forecast.REFERENCE_DIM: 0}, drop=True))
+    assert not forecast.is_forecast_cube(xr.Dataset({"v": ("t", [1.0])}, coords={"t": [np.datetime64("2026-01-01")]}))
+
+
+def test_get_time_dim_refuses_a_forecast_cube() -> None:
+    """The deliberate loud failure: neither axis means "the period this value describes".
+
+    Every module that resolves a time dimension has to opt in, rather than silently keying on
+    the issue times and reporting when forecasts were made.
+    """
+    with pytest.raises(ValueError, match="Unable to find time dimension"):
+        get_time_dim(_cube(["2026-03-01"]))
+
+
+def test_valid_time_is_recomputed_when_the_store_did_not_publish_it() -> None:
+    published = forecast.valid_time(_cube(["2026-03-01"], leads=3))
+    derived = forecast.valid_time(_cube(["2026-03-01"], leads=3, with_valid_coord=False))
+    assert derived.dims == (forecast.REFERENCE_DIM, forecast.LEAD_DIM)
+    np.testing.assert_array_equal(np.asarray(derived.values), np.asarray(published.values))
+    # Lead 1 from a 1 March run is 2 March, not 1 March.
+    assert str(np.asarray(derived.values)[0, 0])[:10] == "2026-03-02"
+
+
+def test_coverage_bounds_span_the_forecast_horizon_not_the_issue_times() -> None:
+    """Three daily runs reaching five days ahead cover past the last run, by design."""
+    first, last = forecast.valid_time_bounds(_cube(["2026-03-01", "2026-03-02", "2026-03-03"], leads=5))
+    assert str(first)[:10] == "2026-03-02"
+    assert str(last)[:10] == "2026-03-08"
+
+
+def test_latest_reference_view_is_an_ordinary_time_cube() -> None:
+    """The escape hatch: existing consumers work on a slice with no forecast awareness."""
+    view = forecast.latest_reference_view(_cube(["2026-03-01", "2026-03-02", "2026-03-03"], leads=4))
+
+    assert "t" in view.dims and forecast.LEAD_DIM not in view.dims
+    assert view.sizes["t"] == 4
+    assert get_time_dim(view) == "t"  # resolvable again
+    # The latest run, and its valid times run from the day after it.
+    assert str(np.asarray(view[forecast.REFERENCE_DIM].values))[:10] == "2026-03-03"
+    assert str(np.asarray(view["t"].values)[0])[:10] == "2026-03-04"
+    # Lead survives as a coordinate, so "how far ahead was this" stays answerable.
+    assert forecast.LEAD_DIM in view.coords
+
+
+def test_latest_reference_view_can_select_an_earlier_run() -> None:
+    """What verification needs: the forecast as it stood on a given day."""
+    cube = _cube(["2026-03-01", "2026-03-02", "2026-03-03"], leads=4)
+    view = forecast.latest_reference_view(cube, reference="2026-03-01")
+    assert str(np.asarray(view["t"].values)[0])[:10] == "2026-03-02"
+
+
+def test_latest_reference_view_passes_a_plain_cube_through() -> None:
+    plain = xr.Dataset(
+        {"v": ("t", [1.0, 2.0])}, coords={"t": np.array(["2026-01-01", "2026-01-02"], dtype="datetime64[ns]")}
+    )
+    assert forecast.latest_reference_view(plain) is plain
+
+
+def test_period_bounds_are_dataset_native_period_strings() -> None:
+    start, end = forecast.period_bounds_as_strings(_cube(["2026-03-01", "2026-03-02"], leads=3), "daily")
+    assert (start, end) == ("2026-03-02", "2026-03-05")
+
+
+def test_coverage_reports_the_horizon_and_the_issue_times_separately(tmp_path: Path) -> None:
+    """Coverage answers "what does it cover"; the scope check needs "which runs are these".
+
+    Conflating them rejects every forecast ingest, since coverage legitimately reaches past the
+    requested window.
+    """
+    import icechunk
+
+    from open_climate_service.data_accessor.services.accessor import _coverage_from_dataset
+
+    cube = _cube(["2026-03-01", "2026-03-02", "2026-03-03"], leads=5)
+    store = tmp_path / "fc.icechunk"
+    repo = icechunk.Repository.create(icechunk.local_filesystem_storage(str(store)))
+    session = repo.writable_session("main")
+    cube.to_zarr(session.store, mode="w", zarr_format=3)
+    session.commit("fc")
+
+    result = _coverage_from_dataset(ds=cube, period_type="daily")
+
+    assert result["coverage"]["temporal"] == {"start": "2026-03-02", "end": "2026-03-08"}
+    assert result["forecast_reference"] == {"start": "2026-03-01", "end": "2026-03-03"}
+
+
+def test_coverage_omits_the_issue_times_for_a_plain_cube() -> None:
+    """`forecast_reference` present would make the scope check use the wrong axis."""
+    from open_climate_service.data_accessor.services.accessor import _coverage_from_dataset
+
+    plain = xr.Dataset(
+        {"v": (("t", "y", "x"), np.zeros((2, 4, 3), dtype="float32"))},
+        coords={
+            "t": np.array(["2026-01-01", "2026-01-02"], dtype="datetime64[ns]"),
+            "y": np.linspace(-9.0, -12.0, 4),
+            "x": np.linspace(32.0, 34.0, 3),
+        },
+    )
+    result = _coverage_from_dataset(ds=plain, period_type="daily")
+    assert result["forecast_reference"] is None
+    assert result["coverage"]["temporal"] == {"start": "2026-01-01", "end": "2026-01-02"}
+
+
+def test_stac_declares_both_axes_with_the_issue_times_as_the_temporal_one() -> None:
+    from open_climate_service.stac.services import _build_forecast_dimensions
+
+    dims = _build_forecast_dimensions(_cube(["2026-03-01", "2026-03-02"], leads=3))
+
+    reference = dims[forecast.REFERENCE_DIM]
+    assert reference["type"] == "temporal"
+    assert reference["extent"] == ["2026-03-01T00:00:00Z", "2026-03-02T00:00:00Z"]
+    assert len(reference["values"]) == 2
+
+    lead = dims[forecast.LEAD_DIM]
+    assert lead["values"] == [1, 2, 3]
+    assert lead["unit"] == "day"
+    # Without the hint a viewer offers a dropdown of horizons rather than stepping them.
+    assert lead["open_climate_service:control"] == "slider"
+
+
+def test_stac_declares_nothing_for_a_plain_cube() -> None:
+    plain = xr.Dataset({"v": ("t", [1.0])}, coords={"t": np.array(["2026-01-01"], dtype="datetime64[ns]")})
+    from open_climate_service.stac.services import _build_forecast_dimensions
+
+    assert _build_forecast_dimensions(plain) == {}

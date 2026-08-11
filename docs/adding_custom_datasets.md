@@ -115,6 +115,53 @@ with a regular numeric `step`, e.g. `dayofyear`), and a **dropdown** for a categ
 irregularly-spaced one (e.g. `sex`, or the irregular age bands). The control type follows
 from the dimension's metadata, so there's nothing extra to configure.
 
+### Forecast datasets: two temporal axes
+
+A forecast is not a time series. The same date has as many values as there are runs that
+predicted it, so a store keyed on the date being predicted overwrites yesterday's forecast on
+every refresh and cannot say which run a value came from. Forecast plugins therefore return
+
+```
+(reference_time, lead_time, y, x)
+```
+
+where `reference_time` is when the forecast was issued and `lead_time` is how many days ahead
+each step reaches. The date a value describes is `reference_time + lead_time`, published as the
+`forecast_valid_time` auxiliary coordinate.
+
+Two things follow for a plugin author:
+
+- **`periods()` returns issue times, not forecast dates**, and `fetch_period()` returns that
+  one run's whole lead block. Set `time_dim = "reference_time"` on the plugin class so the
+  framework appends along it — each run becomes one appended chunk, so refreshing never
+  overwrites and the archive of past forecasts accumulates on its own.
+- **Name the axes exactly as above.** Coverage, STAC and the map viewer key on those names, and
+  `get_time_dim` deliberately *fails* on a forecast cube so nothing silently treats the issue
+  times as the dates being forecast.
+
+```python
+class MyForecastPlugin(BaseDatasetPlugin):
+    time_dim = "reference_time"
+
+    async def periods(self, start: str, end: str) -> list[str]:
+        return ["2026-03-01"]          # issue times
+
+    def fetch_period(self, period_id, bbox, **params):
+        # one run: (reference_time=1, lead_time=N, y, x)
+        ...
+```
+
+Declare `temporal_direction: future` in the template. Coverage then reports what the forecast
+covers — the valid-time horizon, which reaches past the last run — while the ingest request
+still selects runs, so asking for three days of runs and materialising ten days of forecast is
+not an overshoot.
+
+The viewer defaults to the latest issue time, sliders `lead_time` starting at the nearest day,
+and labels each step with the date it describes. A consumer that only wants "the current
+forecast" can collapse a cube to an ordinary `(t, y, x)` dataset with
+`shared.forecast.latest_reference_view`, which is what the DHIS2 and CHAP exports and the
+aggregation processes use — they need no forecast awareness.
+
 ## Step 2: Create a dataset template YAML
 
 ```yaml

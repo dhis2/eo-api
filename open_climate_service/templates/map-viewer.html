@@ -277,14 +277,36 @@
       }
 
       function dimLabel(key, dim) {
+        // A forecast cube has two temporal axes; calling either one "Time step" invites the
+        // reading that it is the date being predicted, which neither is.
+        if (key === "reference_time") return "Forecast issued";
+        if (key === "lead_time") return "Forecast day";
         if (dim.type === "temporal") return "Time step";
         if (key === "dayofyear") return "Day of year";
         return key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " ");
       }
 
+      // The date a lead step describes: the selected issue time plus the lead in days.
+      // Returns null when there is no issue-time axis to add to, so a lead-only cube still
+      // labels its steps rather than showing nothing.
+      function validDateForLead(leadDays) {
+        const ref = dimStates.find((d) => d.key === "reference_time");
+        if (!ref || !Number.isFinite(leadDays)) return null;
+        const issued = new Date(String(stepLabelAt(ref.steps, ref.index)).replace(" ", "T"));
+        if (Number.isNaN(issued.getTime())) return null;
+        issued.setUTCDate(issued.getUTCDate() + leadDays);
+        return issued.toISOString().slice(0, 10);
+      }
+
       // Human label for one step. Integer age bands render as ranges (0, 1–4, …, 90+).
       function stepDisplay(key, steps, i) {
         const v = stepLabelAt(steps, i);
+        if (key === "lead_time" && Array.isArray(steps)) {
+          // Show the date the step is about, derived from the selected issue time, with the
+          // lead kept in view so "how far ahead is this" stays answerable.
+          const valid = validDateForLead(Number(v));
+          return valid ? `${valid} (+${v}d)` : `+${v}d`;
+        }
         if (key === "age_group" && Array.isArray(steps)) {
           const next = steps[i + 1];
           if (next === undefined) return `${v}+`;
@@ -521,7 +543,9 @@
           const control = controlForDim(dim);
           const count = stepCount(steps);
           // A slider defaults to its last step (e.g. latest time); a dropdown to its first.
-          const index = control === "slider" ? Math.max(0, count - 1) : 0;
+          // `lead_time` is the exception: its last step is the furthest ahead and least
+          // reliable, so a forecast opens on the nearest day.
+          const index = key === "lead_time" ? 0 : control === "slider" ? Math.max(0, count - 1) : 0;
           return { key, dim, steps, control, count, label: dimLabel(key, dim), index };
         });
         selector = {};
