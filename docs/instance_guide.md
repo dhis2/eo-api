@@ -284,7 +284,3 @@ from open_climate_service.ingestions.processes import execute_ingestion
 
 execute_ingestion(dataset_id="era5land_temperature_monthly", start="2016-01", end="2016-12")
 ```
-
-It protects data integrity, not availability: `POST /result` is still unbounded compute, so
-put a reverse proxy in front that allowlists the routes above and applies timeouts, body
-size limits and per-IP rate limiting.
