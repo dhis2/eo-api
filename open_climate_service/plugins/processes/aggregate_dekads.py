@@ -70,6 +70,18 @@ def _dekad_dates(data: xr.DataArray, time_dim: str) -> list[date]:
 
     Guarding rather than trusting: run on a daily or monthly cube the weighting would
     produce plausible-looking nonsense, so refuse anything that is not dekadal.
+
+    Two checks, because the first is not sufficient. Every dekad starts on the 1st, 11th or
+    21st — but so does every *month*, so a monthly cube passes a per-timestamp day test and is
+    then spread across the first dekad of each month: with ``period="week"`` that yields a
+    fully populated weekly series covering only the first ten days of each month. A real
+    dekadal series visits the 11th or the 21st, so requiring that separates the two.
+
+    Gap-based detection cannot: January 1 to February 1 is 31 days, which is exactly three
+    dekads, so a monthly series is indistinguishable from a dekadal one with two missing
+    dekads. Missing dekads are legitimate here (a partially covered period is computed from
+    what exists), so the day-of-month set is the only discriminator that does not also reject
+    valid input.
     """
     stamps = pd.DatetimeIndex(np.asarray(data[time_dim].values, dtype="datetime64[ns]"))
     days = [d.date() for d in stamps]
@@ -79,6 +91,13 @@ def _dekad_dates(data: xr.DataArray, time_dim: str) -> list[date]:
             "aggregate_dekads expects a dekadal cube: every timestep must start a dekad "
             f"(day {', '.join(str(d) for d in DEKAD_START_DAYS)}). Offending timesteps: "
             f"{', '.join(offenders[:5])}{' …' if len(offenders) > 5 else ''}"
+        )
+    if len(days) > 1 and all(d.day == DEKAD_START_DAYS[0] for d in days):
+        raise ValueError(
+            "aggregate_dekads expects a dekadal cube, but every timestep falls on the 1st "
+            f"({len(days)} of them, {days[0].isoformat()} to {days[-1].isoformat()}), which is "
+            "monthly, quarterly or yearly spacing rather than dekadal. A dekadal series also "
+            "visits the 11th and 21st. Aggregate this with aggregate_temporal_period instead."
         )
     return days
 

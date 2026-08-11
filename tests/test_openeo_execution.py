@@ -1463,7 +1463,6 @@ def test_derive_variable_raises_for_multiple_vars_without_option() -> None:
         (1, "daily"),
         (7, "weekly"),
         (30, "monthly"),
-        (90, "quarterly"),
         (365, "yearly"),
     ],
 )
@@ -1475,6 +1474,20 @@ def test_infer_period_type(timedelta_days: int, expected: str) -> None:
 
 def test_infer_period_type_returns_none_for_single_timestep() -> None:
     ds = xr.Dataset({"v": ("t", [1.0])}, coords={"t": np.array(["2025-01-01"], dtype="datetime64[D]")})
+    assert _infer_period_type(ds, "t") is None
+
+
+def test_infer_period_type_does_not_infer_quarterly() -> None:
+    """Quarterly is in the STAC step map but unimplemented for ingest and coverage.
+
+    `datetime_to_period_string` raises on it and `numpy_datetime_to_period_string` KeyErrors,
+    so inferring it attached a cadence that failed the moment the artifact was written — and
+    once it is rejected at registration, auto-registering a quarterly openEO result would fail
+    outright. None is legal here: a managed output is static, and a static template may carry
+    no cadence.
+    """
+    t = np.arange(3).astype("timedelta64[D]") * 90 + np.datetime64("2025-01-01", "D")
+    ds = xr.Dataset({"v": ("t", [1.0, 2.0, 3.0])}, coords={"t": t})
     assert _infer_period_type(ds, "t") is None
 
 

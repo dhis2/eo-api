@@ -216,3 +216,28 @@ def test_fully_covered_months_are_not_flagged(ocs_logs: Any) -> None:
     cube = _cube(dekad_period_ids("2026-01-01", "2026-12-31"), units="gC/m2")
     aggregate_dekads(cube, period="month", method="sum")
     assert "partial total" not in ocs_logs.text
+
+
+def test_a_monthly_cube_is_refused_even_though_the_1st_starts_a_dekad() -> None:
+    """The day-of-month test alone passes a monthly cube, since every month starts a dekad.
+
+    Left unguarded it produced a fully populated weekly series covering only the first ten
+    days of each month — plausible, and wrong.
+    """
+    monthly = _cube([f"2026-{m:02d}-01" for m in range(1, 7)])
+    with pytest.raises(ValueError, match="every timestep falls on the 1st"):
+        aggregate_dekads(monthly, period="week")
+    with pytest.raises(ValueError, match="monthly, quarterly or yearly spacing"):
+        aggregate_dekads(monthly, period="month")
+
+
+def test_a_single_first_dekad_is_still_accepted() -> None:
+    """One timestep carries no spacing information, and is what partial coverage looks like."""
+    result = aggregate_dekads(_cube(["2026-01-01"]), period="month")
+    assert result.sizes["t"] == 1
+
+
+def test_a_dekadal_cube_of_only_first_and_second_dekads_is_accepted() -> None:
+    """The check is "visits the 11th or 21st", not "has all three dekads of every month"."""
+    result = aggregate_dekads(_cube(["2026-01-01", "2026-01-11"]), period="month")
+    assert result.sizes["t"] == 1

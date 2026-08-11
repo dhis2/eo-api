@@ -920,8 +920,13 @@ def _infer_period_type(ds: Any, t_dim: str) -> str | None:
         return "weekly"
     if median_seconds <= 32 * 86400:
         return "monthly"
-    if 80 * 86400 <= median_seconds <= 100 * 86400:
-        return "quarterly"
+    # Deliberately no "quarterly" branch. It is in the STAC step map (so a store that already
+    # carries it still gets P3M) but is not implemented for ingest or coverage:
+    # `datetime_to_period_string` raises on it and `numpy_datetime_to_period_string` KeyErrors,
+    # so inferring it attached a cadence that fails the moment the artifact is written — and
+    # since it is now rejected at registration, it would fail auto-registration outright.
+    # Returning None instead is honest and legal: a managed openEO output is static, and a
+    # static template may carry no cadence. Add the branch back with quarterly support.
     if 330 * 86400 <= median_seconds <= 370 * 86400:
         return "yearly"
     return None
