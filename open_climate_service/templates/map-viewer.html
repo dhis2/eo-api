@@ -280,21 +280,35 @@
         // A forecast cube has two temporal axes; calling either one "Time step" invites the
         // reading that it is the date being predicted, which neither is.
         if (key === "reference_time") return "Forecast issued";
-        if (key === "lead_time") return "Forecast day";
+        // "day" for a medium-range run, "month" for a seasonal one — the axis declares which.
+        if (key === "lead_time") return "Forecast " + (dim?.unit === "month" ? "month" : "day");
         if (dim.type === "temporal") return "Time step";
         if (key === "dayofyear") return "Day of year";
         return key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " ");
       }
 
-      // The date a lead step describes: the selected issue time plus the lead in days.
-      // Returns null when there is no issue-time axis to add to, so a lead-only cube still
-      // labels its steps rather than showing nothing.
-      function validDateForLead(leadDays) {
+      // The unit the lead axis counts in, as STAC declares it. A seasonal forecast steps in
+      // months, so nothing below may assume days.
+      function leadUnit() {
+        const lead = dimStates.find((d) => d.key === "lead_time");
+        return lead?.dim?.unit === "month" ? "month" : "day";
+      }
+
+      // The period a lead step describes: the selected issue time plus the lead. Returns null
+      // when there is no issue-time axis to add to, so a lead-only cube still labels its steps
+      // rather than showing nothing.
+      function validDateForLead(lead) {
         const ref = dimStates.find((d) => d.key === "reference_time");
-        if (!ref || !Number.isFinite(leadDays)) return null;
+        if (!ref || !Number.isFinite(lead)) return null;
         const issued = new Date(String(stepLabelAt(ref.steps, ref.index)).replace(" ", "T"));
         if (Number.isNaN(issued.getTime())) return null;
-        issued.setUTCDate(issued.getUTCDate() + leadDays);
+        if (leadUnit() === "month") {
+          // Day 1 first: adding a month to the 31st otherwise lands two months out.
+          issued.setUTCDate(1);
+          issued.setUTCMonth(issued.getUTCMonth() + lead);
+          return issued.toISOString().slice(0, 7);
+        }
+        issued.setUTCDate(issued.getUTCDate() + lead);
         return issued.toISOString().slice(0, 10);
       }
 
@@ -304,8 +318,9 @@
         if (key === "lead_time" && Array.isArray(steps)) {
           // Show the date the step is about, derived from the selected issue time, with the
           // lead kept in view so "how far ahead is this" stays answerable.
+          const suffix = leadUnit() === "month" ? "m" : "d";
           const valid = validDateForLead(Number(v));
-          return valid ? `${valid} (+${v}d)` : `+${v}d`;
+          return valid ? `${valid} (+${v}${suffix})` : `+${v}${suffix}`;
         }
         if (key === "age_group" && Array.isArray(steps)) {
           const next = steps[i + 1];

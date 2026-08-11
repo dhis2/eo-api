@@ -187,10 +187,10 @@ def _timedelta_lead_cube(inits: list[str], leads: int = 3):
     return cube.assign_coords({forecast.LEAD_DIM: offsets.astype("timedelta64[ns]")})
 
 
-def test_lead_days_reads_both_spellings_of_the_lead_axis() -> None:
+def test_lead_values_reads_both_spellings_of_the_lead_axis() -> None:
     """The axis is integer days in a plugin and timedelta64 in a reader."""
-    assert list(forecast.lead_days(_cube(["2026-03-01"], leads=3))) == [1, 2, 3]
-    assert list(forecast.lead_days(_timedelta_lead_cube(["2026-03-01"], leads=3))) == [1, 2, 3]
+    assert list(forecast.lead_values(_cube(["2026-03-01"], leads=3))) == [1, 2, 3]
+    assert list(forecast.lead_values(_timedelta_lead_cube(["2026-03-01"], leads=3))) == [1, 2, 3]
 
 
 def test_stac_publishes_days_not_nanoseconds() -> None:
@@ -250,3 +250,66 @@ def test_committed_periods_of_a_forecast_store_are_its_issue_times(tmp_path: Pat
     session.commit("fc")
 
     assert read_committed_period_ids(store, "daily") == {"2026-03-01", "2026-03-02"}
+
+
+def _month_lead_cube(inits: list[str], leads: int = 6):
+    """A cube whose lead axis counts months — a seasonal forecast rather than a daily one."""
+    cube = _cube(inits, leads=leads, with_valid_coord=False)
+    zero_based = np.arange(leads, dtype="int32")
+    cube = cube.assign_coords({forecast.LEAD_DIM: zero_based})
+    cube[forecast.LEAD_DIM].attrs["units"] = "months"
+    return cube
+
+
+def test_the_lead_unit_comes_from_the_axis_not_from_the_code() -> None:
+    assert forecast.lead_unit(_cube(["2026-03-01"])) == "day"  # no units attr: days
+    assert forecast.lead_unit(_month_lead_cube(["2026-03-01"])) == "month"
+
+
+def test_an_unknown_lead_unit_raises_rather_than_defaulting() -> None:
+    """Treating an unrecognised unit as days would put a six-month outlook inside one week."""
+    cube = _month_lead_cube(["2026-03-01"])
+    cube[forecast.LEAD_DIM].attrs["units"] = "fortnights"
+    with pytest.raises(ValueError, match="Unsupported lead_time unit"):
+        forecast.lead_unit(cube)
+
+
+def test_month_leads_use_calendar_arithmetic() -> None:
+    """A month is not a fixed duration, so a timedelta cannot express it.
+
+    From 31 January, five successive month-steps land on the 31st of each month that has one and
+    on the last of those that do not — never in the following month, which is what adding 30 or
+    31 days would do.
+    """
+    grid = forecast.valid_times_for(np.array(["2026-01-31"], dtype="datetime64[ns]"), np.arange(6), "month")
+    assert [str(value)[:7] for value in grid[0]] == [
+        "2026-01",
+        "2026-02",
+        "2026-03",
+        "2026-04",
+        "2026-05",
+        "2026-06",
+    ]
+
+
+def test_valid_time_of_a_seasonal_cube_is_the_six_months_from_the_issue_month() -> None:
+    cube = _month_lead_cube(["2026-07-01"], leads=6)
+    months = [str(value)[:7] for value in np.asarray(forecast.valid_time(cube).values).ravel()]
+    assert months == ["2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12"]
+
+
+def test_coverage_of_a_seasonal_cube_spans_the_months_it_describes() -> None:
+    lo, hi = forecast.valid_time_bounds(_month_lead_cube(["2026-07-01"], leads=6))
+    assert str(lo)[:7] == "2026-07"
+    assert str(hi)[:7] == "2026-12"
+
+
+def test_stac_declares_the_lead_unit_it_finds() -> None:
+    from open_climate_service.stac.services import _build_forecast_dimensions
+
+    daily = _build_forecast_dimensions(_cube(["2026-03-01"], leads=3))[forecast.LEAD_DIM]
+    seasonal = _build_forecast_dimensions(_month_lead_cube(["2026-07-01"], leads=6))[forecast.LEAD_DIM]
+    assert daily["unit"] == "day"
+    assert seasonal["unit"] == "month"
+    assert seasonal["values"] == [0, 1, 2, 3, 4, 5]
+    assert "Months ahead" in seasonal["description"]

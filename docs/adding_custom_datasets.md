@@ -125,11 +125,11 @@ every refresh and cannot say which run a value came from. Forecast plugins there
 (reference_time, lead_time, y, x)
 ```
 
-where `reference_time` is when the forecast was issued and `lead_time` is how many days ahead
-each step reaches. The date a value describes is `reference_time + lead_time`, published as the
+where `reference_time` is when the forecast was issued and `lead_time` is how far ahead each step
+reaches. The period a value describes is `reference_time + lead_time`, published as the
 `forecast_valid_time` auxiliary coordinate.
 
-Two things follow for a plugin author:
+Three things follow for a plugin author:
 
 - **`periods()` returns issue times, not forecast dates**, and `fetch_period()` returns that
   one run's whole lead block. Set `time_dim = "reference_time"` on the plugin class so the
@@ -138,6 +138,11 @@ Two things follow for a plugin author:
 - **Name the axes exactly as above.** Coverage, STAC and the map viewer key on those names, and
   `get_time_dim` deliberately *fails* on a forecast cube so nothing silently treats the issue
   times as the dates being forecast.
+- **Say what the lead counts in**, as a `units` attribute on the axis: `days` or `months`.
+  A medium-range run steps in days, a seasonal one in months, and a month is not a fixed
+  duration — so the valid time has to be calendar arithmetic, and the code cannot guess. Count
+  from **0**, where lead 0 is the period the run was issued in; sources that number from 1 need
+  normalising. An unrecognised unit raises rather than falling back to days.
 
 ```python
 class MyForecastPlugin(BaseDatasetPlugin):
@@ -156,8 +161,8 @@ covers — the valid-time horizon, which reaches past the last run — while the
 still selects runs, so asking for three days of runs and materialising ten days of forecast is
 not an overshoot.
 
-The viewer defaults to the latest issue time, sliders `lead_time` starting at the nearest day,
-and labels each step with the date it describes. A consumer that only wants "the current
+The viewer defaults to the latest issue time, sliders `lead_time` starting at the nearest step,
+and labels each step with the period it describes. A consumer that only wants "the current
 forecast" can collapse a cube to an ordinary `(t, y, x)` dataset with
 `shared.forecast.latest_reference_view`, which is what the DHIS2 and CHAP exports and the
 aggregation processes use — they need no forecast awareness.

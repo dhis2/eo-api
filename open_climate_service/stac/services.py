@@ -569,9 +569,11 @@ def _build_forecast_dimensions(ds: xr.Dataset) -> dict[str, Any]:
         return {}
     reference = pd.DatetimeIndex(np.asarray(ds[forecast.REFERENCE_DIM].values, dtype="datetime64[ns]"))
     stamps = [f"{value.isoformat()}Z" for value in reference.tz_localize(None)]
-    # Through `lead_days`, never the raw values: a store round-trips the axis as timedelta64,
-    # so `int()` on it would publish nanoseconds against `"unit": "day"`.
-    leads = [int(value) for value in forecast.lead_days(ds)]
+    # Through `lead_values`, never the raw values: a store round-trips the axis as timedelta64,
+    # so `int()` on it would publish nanoseconds against the declared unit.
+    leads = [int(value) for value in forecast.lead_values(ds)]
+    # The unit is the axis's, not always "day" — a seasonal forecast steps in months.
+    unit = forecast.lead_unit(ds)
     return {
         forecast.REFERENCE_DIM: {
             "type": "temporal",
@@ -582,8 +584,11 @@ def _build_forecast_dimensions(ds: xr.Dataset) -> dict[str, Any]:
         forecast.LEAD_DIM: {
             "type": "other",
             "values": leads,
-            "unit": "day",
-            "description": "Days ahead of the issue time. The date described is reference_time + lead_time.",
+            "unit": unit,
+            "description": (
+                f"{unit.capitalize()}s ahead of the issue time. "
+                f"The period described is reference_time plus lead_time {unit}s."
+            ),
             "open_climate_service:control": "slider",
         },
     }

@@ -43,7 +43,7 @@ REFERENCE_DIM = "reference_time"
 """Issue time: when the forecast was produced. CF ``forecast_reference_time``."""
 
 LEAD_DIM = "lead_time"
-"""How far ahead each step reaches, in days. CF ``forecast_period``."""
+"""How far ahead each step reaches, counted in :data:`LEAD_UNITS`. CF ``forecast_period``."""
 
 VALID_COORD = "forecast_valid_time"
 """The date each value describes, as a ``(reference_time, lead_time)`` auxiliary coordinate."""
@@ -52,6 +52,18 @@ CF_STANDARD_NAMES = {
     REFERENCE_DIM: "forecast_reference_time",
     LEAD_DIM: "forecast_period",
 }
+
+LEAD_UNITS = {"day": "D", "month": "M"}
+"""Units a lead may be counted in, mapped onto the matching numpy datetime64 unit.
+
+A lead is not always in days. A medium-range run steps in days (GEFS: 35 of them); a seasonal
+forecast steps in *months* (C3S: 6 of them), and a month is not a fixed duration, so it cannot be
+a ``timedelta64`` at all — the arithmetic has to be calendar arithmetic. The unit is therefore a
+property of the axis, read from its ``units`` attribute, rather than a constant in the code.
+"""
+
+DEFAULT_LEAD_UNIT = "day"
+"""Assumed when the axis does not say. Days is what a store written before this was added holds."""
 
 
 def is_forecast_cube(ds: Any) -> bool:
@@ -67,37 +79,81 @@ def is_forecast_cube(ds: Any) -> bool:
     return REFERENCE_DIM in sizes and LEAD_DIM in sizes
 
 
-def lead_days(ds: xr.Dataset | xr.DataArray) -> np.ndarray:
-    """``lead_time`` as whole days, whichever way the store spelled it.
+def lead_unit(ds: xr.Dataset | xr.DataArray) -> str:
+    """The unit ``lead_time`` counts in — a key of :data:`LEAD_UNITS`.
 
-    A lead is written as an integer count of days with ``units: days``, which is the CF encoding
-    for ``forecast_period`` — and which xarray then decodes back to ``timedelta64`` on read. So
-    the same axis is integer days in a plugin and nanoseconds in a reader, and anything taking
-    the raw values as a day count publishes ``lead_time: 86400000000000``. Both spellings are
-    legitimate, so every consumer that wants a number of days comes through here.
+    Read from the axis's ``units`` attribute, which is where CF puts it, accepting the plural
+    spelling a plugin naturally writes (``days``). An unrecognised unit raises rather than
+    defaulting: silently treating months as days would put a six-month outlook inside one week.
+    """
+    declared = str(ds.coords[LEAD_DIM].attrs.get("units", DEFAULT_LEAD_UNIT)).strip().lower()
+    singular = declared[:-1] if declared.endswith("s") else declared
+    if singular not in LEAD_UNITS:
+        raise ValueError(f"Unsupported {LEAD_DIM} unit {declared!r}; expected one of {sorted(LEAD_UNITS)}")
+    return singular
+
+
+def lead_values(ds: xr.Dataset | xr.DataArray) -> np.ndarray:
+    """``lead_time`` as whole steps of :func:`lead_unit`, whichever way the store spelled it.
+
+    A day-based lead is written as an integer with ``units: days``, the CF encoding for
+    ``forecast_period`` — which xarray then decodes back to ``timedelta64`` on read. So the same
+    axis is integers in a plugin and nanoseconds in a reader, and anything taking the raw values
+    as a step count publishes ``lead_time: 86400000000000``. Both spellings are legitimate, so
+    every consumer that wants a number of steps comes through here.
     """
     values = np.asarray(ds.coords[LEAD_DIM].values)
     if np.issubdtype(values.dtype, np.timedelta64):
-        return (values / np.timedelta64(1, "D")).astype("int64")
+        # Only a fixed-duration unit decodes to timedelta64 at all: xarray leaves ``months``
+        # as integers because a month has no fixed length. So days is the only case here, and
+        # a month axis that somehow arrived as a duration is corrupt rather than convertible.
+        unit = lead_unit(ds)
+        if unit != "day":
+            raise ValueError(f"A {unit} lead cannot be a duration; {LEAD_DIM} should hold integers, not timedelta64")
+        counts: np.ndarray = (values / np.timedelta64(1, "D")).astype("int64")
+        return counts
     return values.astype("int64")
 
 
-def lead_offsets(ds: xr.Dataset | xr.DataArray) -> np.ndarray:
-    """``lead_time`` as ``timedelta64[ns]`` offsets, for adding to an issue time."""
-    return lead_days(ds).astype("timedelta64[D]").astype("timedelta64[ns]")
+def valid_times_for(reference: np.ndarray, leads: np.ndarray, unit: str) -> np.ndarray:
+    """``(reference, lead)`` grid of the dates being described, as ``datetime64[ns]``.
+
+    Month leads are calendar arithmetic, not duration arithmetic: adding "one month" to 31 March
+    is a different number of days than adding it to 30 April, so a fixed offset cannot express
+    it. Numpy's ``datetime64[M]`` does the calendar step, and truncating the issue time to its
+    month first is correct for a monthly forecast — the value describes the month, not the hour
+    the run started.
+    """
+    issued = np.asarray(reference, dtype="datetime64[ns]")
+    steps = np.asarray(leads, dtype="int64")
+    if unit == "month":
+        months = issued.astype("datetime64[M]")[:, None] + steps[None, :].astype("timedelta64[M]")
+        grid: np.ndarray = months.astype("datetime64[ns]")
+        return grid
+    offsets = steps.astype(f"timedelta64[{LEAD_UNITS[unit]}]").astype("timedelta64[ns]")
+    stamps: np.ndarray = issued[:, None] + offsets[None, :]
+    return stamps
 
 
 def valid_time(ds: xr.Dataset | xr.DataArray) -> xr.DataArray:
     """Return the valid-time coordinate, computing it if the store did not publish one.
 
     Recomputed rather than required, so a cube written by a plugin that omitted the auxiliary
-    coordinate is still describable. ``lead_time`` is taken as whole days.
+    coordinate is still describable. Leads count in :func:`lead_unit`.
     """
     if VALID_COORD in getattr(ds, "coords", {}):
         return ds.coords[VALID_COORD]
-    reference = ds.coords[REFERENCE_DIM]
-    offsets = xr.DataArray(lead_offsets(ds), dims=(LEAD_DIM,), coords={LEAD_DIM: ds.coords[LEAD_DIM]})
-    return (reference + offsets).rename(VALID_COORD)
+    grid = valid_times_for(
+        np.asarray(ds.coords[REFERENCE_DIM].values, dtype="datetime64[ns]"),
+        lead_values(ds),
+        lead_unit(ds),
+    )
+    return xr.DataArray(
+        grid,
+        dims=(REFERENCE_DIM, LEAD_DIM),
+        coords={REFERENCE_DIM: ds.coords[REFERENCE_DIM], LEAD_DIM: ds.coords[LEAD_DIM]},
+        name=VALID_COORD,
+    )
 
 
 def valid_time_bounds(ds: xr.Dataset | xr.DataArray) -> tuple[np.datetime64, np.datetime64]:

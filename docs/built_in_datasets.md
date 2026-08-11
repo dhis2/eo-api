@@ -107,6 +107,42 @@ Requires no credentials, which makes this the easiest way to see forecast handli
 
 ---
 
+## C3S seasonal forecast — temperature and precipitation anomalies
+
+| Property               | Value                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------- |
+| **Dataset IDs**        | `c3s_seasonal_temperature_anomaly`, `c3s_seasonal_precipitation_anomaly`                     |
+| **Variables**          | `t2a`, `tpara`                                                                               |
+| **Units**              | K (anomaly), mm/day (anomaly)                                                                |
+| **Period**             | Monthly, up to 6 months ahead                                                                |
+| **Spatial coverage**   | Global                                                                                       |
+| **Spatial resolution** | 1° (~110 km)                                                                                 |
+| **Record start**       | 2017-01                                                                                      |
+| **Source**             | [C3S seasonal forecast anomalies](https://cds.climate.copernicus.eu/datasets/seasonal-postprocessed-single-levels) |
+
+A 51-member seasonal forecast from ECMWF SEAS5.1, issued once a month and reaching six months
+ahead. Like the GEFS dataset these are **forecast cubes**, but the lead is counted in *months*
+rather than days.
+
+**Anomalies rather than absolute values** — at 1° a forecast of absolute temperature carries model
+bias that has to be removed before the number means anything locally. C3S publishes the anomaly
+against the system's own 1993–2016 hindcast climatology, which is both the bias-corrected quantity
+and the one a planner acts on: "1.4 K warmer than normal in October" is actionable in a way that
+"23.4 °C at 1°" is not.
+
+**Ensemble spread** — reduced to the 10th, 50th and 90th percentiles. Real-time runs carry 51
+members while hindcasts carry 25; quantiles mean the same thing either side of that change, where
+a member index would not.
+
+**Credentials** — needs a CDS account, the same `~/.cdsapirc` or `CDSAPI_URL` / `CDSAPI_KEY` as
+the ERA5-Land datasets. Real-time runs publish on the 6th of the month for ECMWF (the 10th for
+other centres), so a sync run earlier in the month finds nothing new.
+
+**Resolution caveat** — 1° is a handful of cells for a country the size of Malawi. Sound for a
+national seasonal outlook, not for district-level maps.
+
+---
+
 ## Temporal resampling
 
 Any ingested dataset can be resampled to a coarser temporal resolution (e.g. hourly → daily, daily → monthly) using the standard openEO `aggregate_temporal_period` process in a process graph. See [Processes](processes.md) for an example.
