@@ -18,6 +18,7 @@ import pytest
 from open_climate_service.shared.time import (
     SUPPORTED_PERIOD_TYPES,
     Cadence,
+    daily_period_ids,
     datetime_to_period_string,
     dekad_bounds,
     dekad_period_ids,
@@ -353,3 +354,23 @@ def test_quarterly_template_is_rejected_at_registration() -> None:
             {"id": "q", "sync": {"kind": "temporal"}, "ingestion": {"plugin": "p.C"}, "period_type": "quarterly"},
             source="t.yaml",
         )
+
+
+def test_dekad_period_ids_matches_daily_on_an_inverted_range() -> None:
+    """Snapping the start back into its dekad must not make an empty range non-empty.
+
+    `dekad_period_ids` documents itself as the dekadal counterpart of `daily_period_ids`, and
+    an inverted range overlaps no dekad, so both must return nothing.
+    """
+    assert daily_period_ids("2024-03-10", "2024-03-05") == []
+    assert dekad_period_ids("2024-03-10", "2024-03-05") == []
+
+
+def test_dekad_period_ids_is_empty_when_the_cutoff_precedes_the_start() -> None:
+    """The realistic inverted case: a sync asking for periods past the available data."""
+    assert dekad_period_ids("2026-08-01", "2026-12-31", cutoff="2026-07-21") == []
+
+
+def test_dekad_period_ids_still_snaps_a_mid_dekad_start_forward_of_the_cutoff() -> None:
+    """The guard must not swallow a legitimately overlapping dekad."""
+    assert dekad_period_ids("2026-01-15", "2026-01-25") == ["2026-01-11", "2026-01-21"]

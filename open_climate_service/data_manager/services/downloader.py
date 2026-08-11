@@ -46,8 +46,17 @@ def _uniform_chunks(ds: xr.Dataset) -> xr.Dataset:
     ``to_zarr`` refuses the write.
 
     Rechunking to the largest existing chunk restores the source layout, since dask fills
-    uniformly and leaves the remainder last. Only the flat path needs this — the pyramid
-    path materialises through ``load()`` before writing.
+    uniformly and leaves the remainder last.
+
+    Only the flat path needs this. The pyramid path is unaffected because topozarr plans its
+    own chunk layout per level from ``target_chunk_bytes`` rather than inheriting the source's,
+    so a reversed tuple never reaches the write. (Deliberately not "because the pyramid path
+    calls ``load()``" — it does today, but that materialisation is being removed, and this
+    would then read as a guarantee that no longer holds.)
+
+    Applied per dimension across the whole dataset, so a variable with a legal layout can be
+    rechunked because a sibling on the same dim was illegal. Harmless, and only when at least
+    one variable needs it.
     """
     targets: dict[Any, int] = {}
     for var in ds.data_vars.values():

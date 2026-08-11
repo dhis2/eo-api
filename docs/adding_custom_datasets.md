@@ -157,6 +157,18 @@ from the dimension's metadata, so there's nothing extra to configure.
 | `sync.execution`     | No       | `append` — new time steps appended to existing store; `rematerialize` — full rebuild on each sync                                                                                                                                                 |
 | `temporal_direction` | No       | Which way the periods run relative to now: `past` (default), `future` (a forecast), or `spanning` (crosses now, e.g. WorldPop 2015–2030). See below                                                                                               |
 
+!!! warning "A rejected template stops its whole file from loading"
+
+    Template validation raises rather than skipping, and the error propagates: one invalid
+    template aborts loading of **every template in that YAML file** (or that plugin), not just
+    its own. This is deliberate — a partially loaded registry is harder to diagnose than a
+    refusal — but it means a single typo takes out its neighbours.
+
+    `period_type` became required for non-`static` datasets and validated against the list
+    above, so a template that omitted it, or carried an unsupported value such as `quarterly`,
+    registered before and is now rejected. If you maintain your own dataset plugins, check
+    them before upgrading.
+
 ### Dekads: a period type with no fixed length
 
 `dekadal` is 10-daily data, and is the one cadence whose periods differ in length: a dekad

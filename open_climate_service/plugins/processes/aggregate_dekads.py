@@ -109,13 +109,24 @@ def aggregate_dekads(
     dekad, converts it to a daily rate, and sums over the target's days — exact regardless
     of dekad length.
 
-    Both are NaN-aware per pixel: a dekad that is missing over part of the grid is dropped
-    from the weights *there* and the remainder renormalised, rather than poisoning the whole
-    target period.
+    Both are NaN-aware per pixel — a dekad missing over part of the grid does not poison the
+    whole target period there — but they handle the gap differently, because the right answer
+    differs:
 
-    Only dekads that actually overlap a target period contribute, so a partially covered
-    period at either end of the record is computed from what exists rather than returning
-    NaN — its weights simply sum to less than the period's length.
+    * ``mean`` **renormalises**: the missing dekad's weight leaves the denominator, so the
+      result is the day-weighted mean of the dekads that do exist. A rate estimated from two
+      dekads is still a rate.
+    * ``sum`` **omits**: the missing dekad contributes nothing and the rest are not scaled up,
+      so the result is a *partial* total. Renormalising would be extrapolation — inventing
+      accumulation that was never observed — so the total reports only what is there.
+
+    A pixel with no data at all in a target period stays NaN rather than becoming 0.
+
+    The same asymmetry applies to a partially covered period at either end of the record,
+    where only some of its dekads were loaded: the ``mean`` is well defined, while a ``sum``
+    is a partial total. That case is detectable from the weights alone rather than per pixel,
+    so it is logged — silently returning a month's total computed from one dekad is the kind
+    of number that gets published.
     """
     if period not in _PERIODS:
         raise ValueError(f"Unknown period '{period}'; expected one of {list(_PERIODS)}")
@@ -150,9 +161,15 @@ def aggregate_dekads(
             day = _target_end(start, period) + timedelta(days=1)
 
     slices: list[xr.DataArray] = []
+    incomplete: list[str] = []
     for start in sorted(contributions):
         indices = [i for i, _ in contributions[start]]
         weights = [w for _, w in contributions[start]]
+        # Only `sum` is misread when a period is short of dekads: it yields a partial total
+        # that looks like a whole one. A `mean` over fewer dekads is still a valid mean.
+        period_days = (_target_end(start, period) - start).days + 1
+        if method == "sum" and sum(weights) < period_days:
+            incomplete.append(start.isoformat())
         subset = data.isel({time_dim: indices})
         lengths = [(spans[i][1] - spans[i][0]).days + 1 for i in indices]
         # Per-day rate: `mean` inputs already are one, `sum` inputs are a dekad total.
@@ -165,6 +182,17 @@ def aggregate_dekads(
         # All-NaN pixels would divide by zero above; keep them NaN rather than 0 or inf.
         aggregated = aggregated.where(effective > 0)
         slices.append(aggregated.assign_coords({time_dim: np.datetime64(start, "ns")}).expand_dims(time_dim))
+
+    if incomplete:
+        logger.warning(
+            "aggregate_dekads: %d of %d target period(s) are not fully covered by the loaded "
+            "dekads, so method='sum' reports a partial total for them (%s%s). Widen "
+            "temporal_extent to cover whole periods, or use method='mean'.",
+            len(incomplete),
+            len(contributions),
+            ", ".join(incomplete[:5]),
+            " …" if len(incomplete) > 5 else "",
+        )
 
     if not slices:
         raise ValueError("aggregate_dekads produced no target periods — the input cube has no timesteps")

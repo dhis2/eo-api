@@ -267,12 +267,16 @@ def dekad_period_ids(start: str | date, end: str | date, *, cutoff: str | date |
     the data has, so overlapping it means it is needed. The dekadal counterpart of
     :func:`daily_period_ids`, including the ``cutoff`` availability clamp.
     """
-    first = dekad_start(start)
+    requested_start = _as_date(start)
     last = _as_date(end)
     if cutoff is not None:
         last = min(last, _as_date(cutoff))
-    if first > last:
+    # Tested against the *requested* start, not the snapped one: an inverted or
+    # cutoff-exhausted range covers nothing, and snapping back into the containing dekad
+    # must not turn it into a hit. `daily_period_ids` returns [] for the same input.
+    if requested_start > last:
         return []
+    first = dekad_start(requested_start)
     out: list[str] = []
     current = first
     while current <= last:

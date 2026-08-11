@@ -173,3 +173,46 @@ def test_the_process_is_registered_and_the_workflow_wires_to_it() -> None:
     # not openEO-spec-compliant and was removed from the other aggregate workflows.
     assert graph["aggregated"]["process_id"] == "aggregate_dekads"
     assert graph["aggregated"]["arguments"]["period"] == {"from_parameter": "period"}
+
+
+def test_sum_omits_a_missing_dekad_rather_than_scaling_the_rest_up() -> None:
+    """`sum` and `mean` treat a gap differently on purpose, so pin both.
+
+    Renormalising a total would invent accumulation that was never observed, so `sum` reports
+    a partial total. `mean` renormalises, because a rate from two dekads is still a rate.
+    """
+    ids = dekad_period_ids("2026-02-01", "2026-02-28")  # lengths 10, 10, 8
+    cube = _cube(ids, values=np.array([10.0, 10.0, 10.0]), units="gC/m2")
+    holed = cube.where(cube["t"] != cube["t"][1])  # middle dekad missing everywhere
+
+    assert float(aggregate_dekads(cube, method="sum").isel(t=0, y=0, x=0)) == pytest.approx(30.0)
+    # 10 days of 1/day + 8 days of 1.25/day, the middle dekad simply absent.
+    assert float(aggregate_dekads(holed, method="sum").isel(t=0, y=0, x=0)) == pytest.approx(20.0)
+
+    # The same input under `mean` is unchanged, because the weights are renormalised.
+    rate = _cube(ids, values=np.array([10.0, 10.0, 10.0]))
+    rate_holed = rate.where(rate["t"] != rate["t"][1])
+    assert float(aggregate_dekads(rate_holed, method="mean").isel(t=0, y=0, x=0)) == pytest.approx(10.0)
+
+
+def test_sum_warns_when_a_target_period_is_only_partly_covered(ocs_logs: Any) -> None:
+    """A month's "total" computed from one dekad is the kind of number that gets published."""
+    cube = _cube(["2026-01-21"], units="gC/m2")  # the last dekad of January only
+
+    result = aggregate_dekads(cube, period="month", method="sum")
+
+    assert result.sizes["t"] == 1
+    assert "partial total" in ocs_logs.text
+    assert "2026-01-01" in ocs_logs.text
+
+
+def test_mean_does_not_warn_about_partial_coverage(ocs_logs: Any) -> None:
+    """A day-weighted mean over the dekads that exist is well defined, so it is not flagged."""
+    aggregate_dekads(_cube(["2026-01-21"]), period="month", method="mean")
+    assert "partial total" not in ocs_logs.text
+
+
+def test_fully_covered_months_are_not_flagged(ocs_logs: Any) -> None:
+    cube = _cube(dekad_period_ids("2026-01-01", "2026-12-31"), units="gC/m2")
+    aggregate_dekads(cube, period="month", method="sum")
+    assert "partial total" not in ocs_logs.text
