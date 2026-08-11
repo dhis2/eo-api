@@ -217,6 +217,7 @@
       <div class="card">
         <h2>Explore</h2>
         <ul class="links-list">
+          {% if not read_only %}
           <li>
             <span class="link-label"
               ><a href="{{ base }}/manage">Manage</a></span
@@ -225,6 +226,7 @@
               >Ingest and sync datasets without using the API directly</span
             >
           </li>
+          {% endif %}
           <li>
             <span class="link-label"
               ><a href="{{ base }}/docs">API documentation</a></span

@@ -164,6 +164,8 @@ def render_landing(version: str, base: str) -> str:
         extent=_load_extent(),
         datasets=_load_datasets(),
         templates=_load_templates(),
+        # Read-only instances refuse /manage, so offering the link would advertise a 403.
+        read_only=api_config.is_read_only(),
     )
 
 

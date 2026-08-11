@@ -240,4 +240,5 @@ def info() -> AppInfo:
         app_version=_pkg_version("open-climate-service"),
         python_version=sys.version,
         uvicorn_version=_pkg_version("uvicorn"),
+        read_only=api_config.is_read_only(),
     )
