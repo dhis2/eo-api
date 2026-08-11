@@ -41,10 +41,16 @@ def read_committed_period_ids(store_path: Path, period_type: str, *, time_dim: s
     Resume correctness is store-first: if the repository already contains a
     committed time step, the orchestrator treats that as authoritative even when
     a persisted cursor is stale or missing.
+
+    A forecast store has no ``t``, and its committed steps are its issue times, so the default
+    ``time_dim`` resolves against ``reference_time`` there. Without that a caller reading the
+    store's progress sees an empty set and takes the coverage horizon as the answer instead —
+    which for a forecast is 35 days in the future, so no new run ever looks due.
     """
     import pandas as pd
     import xarray as xr
 
+    from open_climate_service.shared import forecast
     from open_climate_service.shared.time import datetime_to_period_string
 
     if not store_path.exists():
@@ -55,6 +61,8 @@ def read_committed_period_ids(store_path: Path, period_type: str, *, time_dim: s
         session = repo.readonly_session("main")
         ds = xr.open_zarr(session.store)
         try:
+            if time_dim not in ds.coords and forecast.is_forecast_cube(ds):
+                time_dim = forecast.REFERENCE_DIM
             if time_dim not in ds.coords:
                 return set()
             coord = ds[time_dim]

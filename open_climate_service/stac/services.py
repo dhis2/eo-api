@@ -569,7 +569,9 @@ def _build_forecast_dimensions(ds: xr.Dataset) -> dict[str, Any]:
         return {}
     reference = pd.DatetimeIndex(np.asarray(ds[forecast.REFERENCE_DIM].values, dtype="datetime64[ns]"))
     stamps = [f"{value.isoformat()}Z" for value in reference.tz_localize(None)]
-    leads = [int(value) for value in np.asarray(ds[forecast.LEAD_DIM].values)]
+    # Through `lead_days`, never the raw values: a store round-trips the axis as timedelta64,
+    # so `int()` on it would publish nanoseconds against `"unit": "day"`.
+    leads = [int(value) for value in forecast.lead_days(ds)]
     return {
         forecast.REFERENCE_DIM: {
             "type": "temporal",

@@ -67,6 +67,26 @@ def is_forecast_cube(ds: Any) -> bool:
     return REFERENCE_DIM in sizes and LEAD_DIM in sizes
 
 
+def lead_days(ds: xr.Dataset | xr.DataArray) -> np.ndarray:
+    """``lead_time`` as whole days, whichever way the store spelled it.
+
+    A lead is written as an integer count of days with ``units: days``, which is the CF encoding
+    for ``forecast_period`` — and which xarray then decodes back to ``timedelta64`` on read. So
+    the same axis is integer days in a plugin and nanoseconds in a reader, and anything taking
+    the raw values as a day count publishes ``lead_time: 86400000000000``. Both spellings are
+    legitimate, so every consumer that wants a number of days comes through here.
+    """
+    values = np.asarray(ds.coords[LEAD_DIM].values)
+    if np.issubdtype(values.dtype, np.timedelta64):
+        return (values / np.timedelta64(1, "D")).astype("int64")
+    return values.astype("int64")
+
+
+def lead_offsets(ds: xr.Dataset | xr.DataArray) -> np.ndarray:
+    """``lead_time`` as ``timedelta64[ns]`` offsets, for adding to an issue time."""
+    return lead_days(ds).astype("timedelta64[D]").astype("timedelta64[ns]")
+
+
 def valid_time(ds: xr.Dataset | xr.DataArray) -> xr.DataArray:
     """Return the valid-time coordinate, computing it if the store did not publish one.
 
@@ -76,8 +96,7 @@ def valid_time(ds: xr.Dataset | xr.DataArray) -> xr.DataArray:
     if VALID_COORD in getattr(ds, "coords", {}):
         return ds.coords[VALID_COORD]
     reference = ds.coords[REFERENCE_DIM]
-    lead = ds.coords[LEAD_DIM]
-    offsets = lead.astype("int64").astype("timedelta64[D]").astype("timedelta64[ns]")
+    offsets = xr.DataArray(lead_offsets(ds), dims=(LEAD_DIM,), coords={LEAD_DIM: ds.coords[LEAD_DIM]})
     return (reference + offsets).rename(VALID_COORD)
 
 

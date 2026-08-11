@@ -173,3 +173,80 @@ def test_stac_declares_nothing_for_a_plain_cube() -> None:
     from open_climate_service.stac.services import _build_forecast_dimensions
 
     assert _build_forecast_dimensions(plain) == {}
+
+
+def _timedelta_lead_cube(inits: list[str], leads: int = 3):
+    """A cube whose lead axis is ``timedelta64`` — what a reader gets back from a store.
+
+    A lead is written as integer days with ``units: days``, the CF encoding for
+    ``forecast_period``, and xarray decodes that back to ``timedelta64``. So both spellings of
+    the same axis occur in normal operation and every consumer meets both.
+    """
+    cube = _cube(inits, leads=leads, with_valid_coord=False)
+    offsets = np.asarray(cube[forecast.LEAD_DIM].values, dtype="int64").astype("timedelta64[D]")
+    return cube.assign_coords({forecast.LEAD_DIM: offsets.astype("timedelta64[ns]")})
+
+
+def test_lead_days_reads_both_spellings_of_the_lead_axis() -> None:
+    """The axis is integer days in a plugin and timedelta64 in a reader."""
+    assert list(forecast.lead_days(_cube(["2026-03-01"], leads=3))) == [1, 2, 3]
+    assert list(forecast.lead_days(_timedelta_lead_cube(["2026-03-01"], leads=3))) == [1, 2, 3]
+
+
+def test_stac_publishes_days_not_nanoseconds() -> None:
+    """`int()` on a decoded lead axis publishes 86400000000000 against `"unit": "day"`."""
+    from open_climate_service.stac.services import _build_forecast_dimensions
+
+    dims = _build_forecast_dimensions(_timedelta_lead_cube(["2026-03-01"], leads=3))
+    assert dims[forecast.LEAD_DIM]["values"] == [1, 2, 3]
+
+
+def test_valid_time_recompute_handles_a_decoded_lead_axis() -> None:
+    """Taking timedelta nanoseconds as a count of days lands ~274,000 years out."""
+    cube = _timedelta_lead_cube(["2026-03-01"], leads=3)
+    valid = forecast.valid_time(cube)
+    assert [str(value)[:10] for value in np.asarray(valid.values).ravel()] == [
+        "2026-03-02",
+        "2026-03-03",
+        "2026-03-04",
+    ]
+
+
+def test_the_layout_contract_accepts_a_forecast_cube() -> None:
+    """A forecast store has no `t` by design, so the contract must not read that as a defect."""
+    from open_climate_service.shared.raster_contract import ContractViolation, published_contract_violations
+
+    kinds = [v.kind for v in published_contract_violations(_cube(["2026-03-01"]))]
+    assert ContractViolation.TEMPORAL_DIM_NAME not in kinds
+
+
+def test_the_contract_still_requires_t_on_a_plain_cube() -> None:
+    from open_climate_service.shared.raster_contract import ContractViolation, published_contract_violations
+
+    plain = xr.Dataset(
+        {"v": (("time", "y", "x"), np.zeros((1, 4, 3), dtype="float32"))},
+        coords={
+            "time": np.array(["2026-01-01"], dtype="datetime64[ns]"),
+            "y": np.linspace(-9.0, -12.0, 4),
+            "x": np.linspace(32.0, 34.0, 3),
+        },
+    )
+    kinds = [v.kind for v in published_contract_violations(plain)]
+    assert ContractViolation.TEMPORAL_DIM_NAME in kinds
+
+
+def test_committed_periods_of_a_forecast_store_are_its_issue_times(tmp_path: Path) -> None:
+    """Read against `t`, a forecast store looks empty — and sync then takes the coverage
+    horizon as "already ingested", which is 35 days ahead, so no new run is ever due."""
+    import icechunk
+
+    from open_climate_service.streaming.store import read_committed_period_ids
+
+    cube = _cube(["2026-03-01", "2026-03-02"], leads=5)
+    store = tmp_path / "fc.icechunk"
+    repo = icechunk.Repository.create(icechunk.local_filesystem_storage(str(store)))
+    session = repo.writable_session("main")
+    cube.to_zarr(session.store, mode="w", zarr_format=3)
+    session.commit("fc")
+
+    assert read_committed_period_ids(store, "daily") == {"2026-03-01", "2026-03-02"}
