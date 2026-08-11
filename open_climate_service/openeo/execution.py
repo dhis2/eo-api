@@ -6,9 +6,12 @@ openeo-processes-dask for the standard openEO process implementations.
 
 from __future__ import annotations
 
+import datetime
+import functools
 import importlib
 import inspect
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import xarray as xr
@@ -148,7 +151,10 @@ def _build_process_registry() -> Any:
             "See the instance guide's 'Upgrading and troubleshooting' section."
         ) from exc
 
-    registry = ProcessRegistry(wrap_funcs=[wrap_fn])
+    # Order matters: wrap_funcs are applied left to right, so the first entry ends up
+    # innermost. _normalise_temporal_arguments must sit inside wrap_fn to see arguments
+    # after ParameterReference resolution — see its docstring.
+    registry = ProcessRegistry(wrap_funcs=[_normalise_temporal_arguments, wrap_fn])
 
     for name, func in inspect.getmembers(impls_module, inspect.isfunction):
         spec: dict[str, Any] = getattr(specs_module, name, None) or {}
@@ -497,6 +503,87 @@ def _strip_tz(value: str | None) -> str | None:
         if value.endswith(suffix):
             return value[: -len(suffix)]
     return value
+
+
+def _naive_temporal_scalar(value: Any) -> Any:
+    """Convert a scalar openEO temporal argument to a timezone-naive string.
+
+    The pg-parser validates any date-typed process argument into a pydantic ``RootModel``
+    (``Date``, ``DateTime``, ``Year``, ``Time``) wrapping a **timezone-aware** pendulum
+    ``DateTime``. Our published stores carry timezone-naive time coordinates, so a process
+    that slices with such a value fails inside pandas with
+
+        cannot do slice indexing on DatetimeIndex with these indexers
+        [root=DateTime(1991, 1, 1, 0, 0, 0, tzinfo=Timezone('UTC'))] of type Date
+
+    Anything that is not one of those wrappers is returned untouched. In particular
+    ``TemporalInterval`` is left alone — its ``root`` is a *list*, it is normalised
+    separately by ``_temporal_to_list`` at the ``load_collection`` boundary, and rewriting
+    it to a string here would break that.
+
+    A ``Date`` becomes ``YYYY-MM-DD`` rather than a midnight timestamp. It is the more
+    faithful reading of a date-typed argument, and it behaves better as a slice bound:
+    pandas partial-string indexing treats ``"2020-12-31"`` as the whole day, whereas
+    ``"2020-12-31T00:00:00"`` would exclude everything after midnight on a sub-daily
+    series. Other wrappers keep their time component, minus the zone.
+    """
+    # A timezone-qualified ISO *string* reaches the process raw, because the pg-parser
+    # only coerces plain forms like "1991-01-01" into a Date — "1991-01-01T00:00:00Z"
+    # fails that validation and stays a string. It then fails just as hard, with
+    # "ValueError: Both dates must have the same UTC offset", so strip the offset here.
+    # Narrow on purpose: the string must parse as ISO 8601 *and* carry an offset, so
+    # ordinary string arguments ("MS", "1991", "07-01", "mm/d", "degC") are untouched,
+    # as is a naive ISO string, which is returned unchanged rather than reformatted.
+    if isinstance(value, str):
+        # Rewrite a trailing "Z" only. A blanket replace() would touch any "Z" in the
+        # string, which is harder to reason about than the one position ISO 8601 uses it in.
+        candidate = f"{value[:-1]}+00:00" if value.endswith("Z") else value
+        try:
+            parsed = datetime.datetime.fromisoformat(candidate)
+        except ValueError:
+            return value
+        return value if parsed.tzinfo is None else parsed.replace(tzinfo=None).isoformat()
+
+    root = getattr(value, "root", None)
+    # pendulum's DateTime subclasses datetime.date, so one check covers every scalar
+    # wrapper while structurally excluding TemporalInterval, whose root is a list.
+    if not isinstance(root, datetime.date):
+        return value
+
+    # Imported here rather than at module scope to match the rest of this module, which
+    # defers every openeo_pg_parser_networkx import so the package is only required when a
+    # process graph actually runs. After the first call this is a sys.modules lookup.
+    from openeo_pg_parser_networkx.pg_schema import Date
+
+    text = _strip_tz(root.isoformat()) or ""
+    if isinstance(value, Date):
+        return text.split("T", 1)[0]
+    return text
+
+
+def _normalise_temporal_arguments(func: Callable[..., Any]) -> Callable[..., Any]:
+    """Wrap a process so scalar date arguments arrive timezone-naive.
+
+    Registered as the **innermost** wrap function, so it runs after
+    openeo-processes-dask's wrapper has resolved ``ParameterReference`` arguments. A date
+    supplied through ``{"from_parameter": ...}`` — as workflows do — is still a reference
+    when the outer wrapper is entered and only becomes a ``Date`` further in, so
+    normalising on the outside would miss exactly that case.
+
+    ``functools.wraps`` matters here beyond cosmetics: the outer wrapper decides whether to
+    forward ``axis``/``keepdims``/``context`` by looking at ``inspect.signature`` of what it
+    wraps, and that follows ``__wrapped__``. Without it every process would appear to accept
+    those arguments and they would be passed on to implementations that reject them.
+    """
+
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return func(
+            *(_naive_temporal_scalar(a) for a in args),
+            **{key: _naive_temporal_scalar(value) for key, value in kwargs.items()},
+        )
+
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
