@@ -150,19 +150,18 @@ from the dimension's metadata, so there's nothing extra to configure.
 
 **Period and sync**
 
-| Field            | Required | Description                                                                                       |
-| ---------------- | -------- | ------------------------------------------------------------------------------------------------- |
-| `period_type`    | Yes      | Temporal resolution: `hourly`, `daily`, `dekadal`, `weekly`, `monthly`, `yearly`, or `climatology`. Validated at registration — an unrecognised value is rejected rather than silently ignored, and it is required unless `sync.kind` is `static` |
-| `sync.kind`      | Yes      | `temporal` — data grows over time; `release` — versioned releases; `static` — never synced        |
-| `sync.execution` | No       | `append` — new time steps appended to existing store; `rematerialize` — full rebuild on each sync |
-| `temporal_direction` | No   | Which way the periods run relative to now: `past` (default), `future` (a forecast), or `spanning` (crosses now, e.g. WorldPop 2015–2030). See below |
+| Field                | Required | Description                                                                                                                                                                                                                                       |
+| -------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `period_type`        | Yes      | Temporal resolution: `hourly`, `daily`, `dekadal`, `weekly`, `monthly`, `yearly`, or `climatology`. Validated at registration — an unrecognised value is rejected rather than silently ignored, and it is required unless `sync.kind` is `static` |
+| `sync.kind`          | Yes      | `temporal` — data grows over time; `release` — versioned releases; `static` — never synced                                                                                                                                                        |
+| `sync.execution`     | No       | `append` — new time steps appended to existing store; `rematerialize` — full rebuild on each sync                                                                                                                                                 |
+| `temporal_direction` | No       | Which way the periods run relative to now: `past` (default), `future` (a forecast), or `spanning` (crosses now, e.g. WorldPop 2015–2030). See below                                                                                               |
 
 ### Dekads: a period type with no fixed length
 
-`dekadal` is 10-daily data, as published by the Copernicus Land Monitoring Service among
-others. It is the one cadence whose periods differ in length: a dekad runs day 1–10, then
-11–20, then **21 to the end of the month**, so the third is 8, 9, 10 or 11 days long. There
-are 36 in a year, not 36.5.
+`dekadal` is 10-daily data, and is the one cadence whose periods differ in length: a dekad
+runs day 1–10, then 11–20, then **21 to the end of the month**, so the third is 8, 9, 10
+or 11 days long. There are 36 in a year.
 
 Two consequences worth knowing:
 
@@ -178,35 +177,28 @@ A plugin enumerating dekads should use `shared.time.dekad_period_ids(start, end)
 dekadal counterpart of `daily_period_ids`. `dekad_bounds(period_id)` gives the inclusive
 first and last day, which is the only complete description of a dekad's extent.
 
-Aggregating dekads to months needs care rather than a plain `mean`: three dekads tile a
-month exactly, but they are not equal in length, so an unweighted mean over-weights a short
-third dekad (February's 8-day dekad by nearly 5 percentage points, a 14% relative error on
-its contribution). Use the built-in **`aggregate_dekads_to_period`** workflow, which weights
-each dekad by the days it shares with the target period — `method: mean` for a per-day rate,
-`method: sum` for a per-dekad total, which it conserves exactly.
-
 ### Which way the periods run: `temporal_direction`
 
 Most datasets are historical, and the default (`past`) suits them. Two other shapes exist, and they behave differently at ingest time:
 
-| Value | Periods | `start` on an ingestion |
-| --- | --- | --- |
-| `past` (default) | All historical | Required |
-| `future` | All ahead of now — a forecast | **Optional**, meaning "from now" |
-| `spanning` | Cross now — WorldPop Global2 (2015–2030), climate projections | Required |
+| Value            | Periods                                                       | `start` on an ingestion          |
+| ---------------- | ------------------------------------------------------------- | -------------------------------- |
+| `past` (default) | All historical                                                | Required                         |
+| `future`         | All ahead of now — a forecast                                 | **Optional**, meaning "from now" |
+| `spanning`       | Cross now — WorldPop Global2 (2015–2030), climate projections | Required                         |
 
-`spanning` requires a start *on purpose*. Defaulting it to "now" would ingest only the projected years and silently drop every historical one, which is usually the half you actually want. What declaring it does buy you: the ingest form prefills the end from the dataset's declared `extents.temporal.end`, so selecting WorldPop offers the full range through 2030 instead of truncating at today.
+`spanning` requires a start _on purpose_. Defaulting it to "now" would ingest only the projected years and silently drop every historical one, which is usually the half you actually want. What declaring it does buy you: the ingest form prefills the end from the dataset's declared `extents.temporal.end`, so selecting WorldPop offers the full range through 2030 instead of truncating at today.
 
 ### Forecast datasets (`temporal_direction: future`)
 
-A forecast's periods lie in the *future*, which changes what an ingestion request means. Declare it:
+A forecast's periods lie in the _future_, which changes what an ingestion request means. Declare it:
 
 ```yaml
 - id: tmax_forecast_daily
   period_type: daily
   temporal_direction: future
   sync:
-    kind: temporal          # still temporal: re-running fetches a fresher forecast
+    kind: temporal # still temporal: re-running fetches a fresher forecast
   ingestion:
     plugin: datasets.my_forecast.MyForecastPlugin
     params:
@@ -223,7 +215,7 @@ curl -X POST http://localhost:9000/ingestions \
 
 Omitting it is usually what you want. A fixed `start` is only correct on the day it is written — tomorrow it under-requests — so a scheduled refresh with hardcoded dates drifts out of the forecast window and then quietly fetches nothing. Supplying `start`/`end` still works, and narrows the window when you deliberately want a subset.
 
-**What your `periods()` receives.** For a historical dataset an omitted end is filled in with "now" — "through the latest available period". A forecast cannot use that, because "now" is the *start* of its window: filling it in would hand you `start == end == today` and collapse a seven-day forecast to one day. So a forecast instead receives a **forward horizon** — the template's declared `extents.temporal.end` if it has one, otherwise a year ahead. It is deliberately generous: the real limit is your plugin's lead time, and a tighter bound in core would silently truncate a longer forecast.
+**What your `periods()` receives.** For a historical dataset an omitted end is filled in with "now" — "through the latest available period". A forecast cannot use that, because "now" is the _start_ of its window: filling it in would hand you `start == end == today` and collapse a seven-day forecast to one day. So a forecast instead receives a **forward horizon** — the template's declared `extents.temporal.end` if it has one, otherwise a year ahead. It is deliberately generous: the real limit is your plugin's lead time, and a tighter bound in core would silently truncate a longer forecast.
 
 Your plugin clips to what it actually publishes:
 
@@ -240,17 +232,17 @@ Note `end` stays a plain `str`, so there is no missing-value case to handle.
 
 `temporal_direction` is separate from `sync.kind` on purpose: a forecast is still `temporal` for sync (re-run it and you get fresher data); what differs is which way its periods run. It cannot be combined with `sync.kind: static`, which has no upstream to look ahead into.
 
-**How far ahead belongs in the template, not the request.** A source often publishes further out than is useful — 40 days when only 7 verify well. That cap is a property of the dataset, so express it in `ingestion.params` (as `max_lead_days` above) and let your plugin's `periods()` honour it. The request then narrows *within* that window rather than re-deciding it on every run.
+**How far ahead belongs in the template, not the request.** A source often publishes further out than is useful — 40 days when only 7 verify well. That cap is a property of the dataset, so express it in `ingestion.params` (as `max_lead_days` above) and let your plugin's `periods()` honour it. The request then narrows _within_ that window rather than re-deciding it on every run.
 
 The response reports the window that was actually ingested, under `dataset.extent.temporal`, so you can confirm what an omitted `start` resolved to.
 
 **Ingestion**
 
-| Field              | Required | Description                                                                                      |
-| ------------------ | -------- | ------------------------------------------------------------------------------------------------ |
-| `ingestion.plugin` | Yes      | Dotted path to the streaming plugin class                                                        |
-| `ingestion.params` | No       | Extra keyword arguments forwarded to `fetch_period` as `**params`, and to the plugin constructor |
-| `ingestion.resampling` | No   | Pyramid coarsening for large layers: `mean` (default; continuous data), `max`/`min`/`sum`, or `mode`/`nearest` for categorical data — see below |
+| Field                  | Required | Description                                                                                                                                     |
+| ---------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ingestion.plugin`     | Yes      | Dotted path to the streaming plugin class                                                                                                       |
+| `ingestion.params`     | No       | Extra keyword arguments forwarded to `fetch_period` as `**params`, and to the plugin constructor                                                |
+| `ingestion.resampling` | No       | Pyramid coarsening for large layers: `mean` (default; continuous data), `max`/`min`/`sum`, or `mode`/`nearest` for categorical data — see below |
 
 Multiple templates can share the same plugin class and differ only in `params`:
 
@@ -274,9 +266,9 @@ Layers larger than ~2048×2048 are stored as a multiscale pyramid so the map sta
 
 - **Continuous data** (temperature, precipitation, NDVI, …) — leave the default `mean`.
 - **Binary masks** (0/1 presence) — use `max` ("present anywhere in the block"). Averaging turns a mask into meaningless fractions.
-- **Multi-class categorical** (land-cover class codes, etc.) — use `mode` (majority class). `mean` would average class codes into a *different, non-existent* class (e.g. `mean(10, 80) = 45`).
+- **Multi-class categorical** (land-cover class codes, etc.) — use `mode` (majority class). `mean` would average class codes into a _different, non-existent_ class (e.g. `mean(10, 80) = 45`).
 
-`mean`/`max`/`min`/`sum`/`nearest` are computed by [topozarr](https://github.com/carbonplan/topozarr), which builds each level from the one above. That is valid for all five because they are *composable* — for `nearest`, taking the corner of each corner gives the same cell as taking every nth cell of the original.
+`mean`/`max`/`min`/`sum`/`nearest` are computed by [topozarr](https://github.com/carbonplan/topozarr), which builds each level from the one above. That is valid for all five because they are _composable_ — for `nearest`, taking the corner of each corner gives the same cell as taking every nth cell of the original.
 
 `mode` is not composable: mode-of-modes is not mode-of-native, since a locally dominant class can win at coarse zoom even when it is globally rare. So Open Climate Service resamples `mode` levels from the native resolution itself. A first-class `mode` upstream is still open as [carbonplan/topozarr#26](https://github.com/carbonplan/topozarr/issues/26); when it lands, that local path can go.
 
