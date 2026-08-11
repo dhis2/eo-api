@@ -166,3 +166,23 @@ def get_utc_offset() -> datetime.timedelta:
     as it correctly handles half- and quarter-hour offsets rather than truncating.
     """
     return datetime.timedelta(hours=get_utc_offset_hours())
+
+
+def is_read_only() -> bool:
+    """Return True when the instance refuses state-changing requests.
+
+    Set ``read_only: true`` in climate-service.yaml to serve a public instance that can
+    be browsed but not modified — no ingestion, no batch jobs, no stored process graphs,
+    no admin UI. Defaults to False so local and single-user deployments are unaffected.
+
+    Read-only applies to HTTP only. Ingestion on a read-only instance is an operator
+    task performed on the host, which is what lets this switch be absolute: there is no
+    exemption, token or trusted header that could be misconfigured into a bypass.
+    """
+    raw = get_config().get("read_only", False)
+    if not isinstance(raw, bool):
+        raise ValueError(
+            f"read_only in CLIMATE_SERVICE_CONFIG must be true or false, got {type(raw).__name__}. "
+            "Quoted values like 'false' are strings, not booleans."
+        )
+    return raw
