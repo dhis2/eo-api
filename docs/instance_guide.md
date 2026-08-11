@@ -138,6 +138,7 @@ plugins_dir: ./plugins/
 | `extent.country_code` | No | ISO 3166-1 alpha-3 — required for WorldPop downloads |
 | `data_dir` | Yes | Directory for downloaded files and Zarr stores, resolved relative to the config file |
 | `plugins_dir` | No | Directory containing `datasets/`, `processes/`, and `workflows/` plugin subdirectories |
+| `read_only` | No | Set `true` to refuse all state-changing requests — see [Read-only instances](#read-only-instances). Defaults to `false` |
 
 To find the bounding box for a region, [bboxfinder.com](http://bboxfinder.com) is a useful tool.
 
@@ -255,3 +256,31 @@ make run
 For containerised deployment, the core open-climate-service repository ships a `Dockerfile`
 and a `compose.yml` that can serve as a starting point for packaging an instance. A
 dedicated instance Docker guide is planned.
+
+### Read-only instances
+
+For an instance that should be browsable but not changeable — a public demo, a shared
+reference endpoint:
+
+```yaml
+read_only: true
+```
+
+Every state-changing request is refused with `403`, the openEO capabilities document stops
+advertising the endpoints that would refuse, and `GET /info` reports `read_only: true`.
+
+Still available: the catalogue and metadata (`/collections`, `/stac`, `/datasets`,
+`/processes`, `/process_graphs`, `/extent`), the data (`/zarr/…`, `/icechunk/…`, downloads),
+the landing page and `/map`, and `POST /result` for synchronous openEO process graphs.
+
+Refused: ingestion and sync, the `/manage` console, stored process graph writes, and batch
+jobs.
+
+Read-only applies to HTTP only, so ingestion becomes an operator task on the host. Until a
+CLI command exists, run it inside the container or virtualenv:
+
+```python
+from open_climate_service.ingestions.processes import execute_ingestion
+
+execute_ingestion(dataset_id="era5land_temperature_monthly", start="2016-01", end="2016-12")
+```
