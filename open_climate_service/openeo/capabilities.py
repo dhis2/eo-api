@@ -11,6 +11,22 @@ API_VERSION = "1.2.0"
 STAC_VERSION = "1.1.0"
 
 
+def _readable_endpoints(endpoints: list[OpenEOEndpoint]) -> list[OpenEOEndpoint]:
+    """Drop methods and paths that read-only mode refuses, keeping the rest intact.
+
+    Derived from the read-only policy itself rather than a second hand-maintained list, so
+    the advertised surface cannot drift from the enforced one.
+    """
+    from open_climate_service.read_only import is_blocked
+
+    filtered: list[OpenEOEndpoint] = []
+    for endpoint in endpoints:
+        allowed = [method for method in endpoint.methods if not is_blocked(method, endpoint.path)]
+        if allowed:
+            filtered.append(OpenEOEndpoint(path=endpoint.path, methods=allowed))
+    return filtered
+
+
 def build_capabilities(base_url: str) -> OpenEOCapabilities:
     """Return the openEO capabilities document."""
     backend_version = _pkg_version("open-climate-service")
@@ -33,6 +49,13 @@ def build_capabilities(base_url: str) -> OpenEOCapabilities:
         OpenEOEndpoint(path="/result", methods=["POST"]),
         OpenEOEndpoint(path="/health", methods=["GET"]),
     ]
+
+    # A read-only instance must not advertise what it will refuse: openEO clients build
+    # their capability set from this list, so leaving the write endpoints in would have
+    # them offer batch jobs and UDP storage that then 403. The spec permits a backend to
+    # declare only the endpoints it supports.
+    if api_config.is_read_only():
+        endpoints = _readable_endpoints(endpoints)
 
     links = [
         {"rel": "self", "href": base_url, "type": "application/json"},

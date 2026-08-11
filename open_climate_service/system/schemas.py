@@ -46,3 +46,5 @@ class AppInfo(BaseModel):
     app_version: str
     python_version: str
     uvicorn_version: str
+    # Advertised so a client can tell whether writes are possible before attempting one.
+    read_only: bool = False
