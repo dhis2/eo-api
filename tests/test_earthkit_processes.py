@@ -235,3 +235,96 @@ def test_every_registered_cube_parameter_has_a_known_unit() -> None:
         for param in meta["parameters"]:
             if param["schema"].get("subtype") == "datacube":
                 assert "Expected unit:" in param["description"], (meta["id"], param["name"])
+
+
+# --- unit enforcement must not depend on upstream docstrings being well-formed -----------
+
+
+def test_virtual_temperature_enforces_kelvin_despite_the_upstream_typo() -> None:
+    """earthkit-meteo 1.0.0 documents `virtual_temperature.t` as "Temperature (K)s".
+
+    The stray trailing "s" defeats the end-of-line unit match, so the docstring scan alone
+    yields no unit for `t`. Without an override the parameter would be advertised as a plain
+    number and handed to earthkit unconverted — a degC cube read as Kelvin, wrong by 273.15
+    and labelled Kelvin. See _UNIT_OVERRIDES.
+    """
+    from earthkit.meteo import thermo
+
+    # The upstream defect this guards against, asserted so the override is removed only when
+    # upstream actually fixes it.
+    assert "t" not in earthkit_processes._documented_units(thermo.virtual_temperature)
+
+    meta = get_process_metadata(_process("virtual_temperature"))
+    assert meta is not None
+    params = {p["name"]: p for p in meta["parameters"]}
+    assert params["t"]["schema"] == {"type": "object", "subtype": "datacube"}
+    assert "Expected unit: K" in params["t"]["description"]
+
+    func = _process("virtual_temperature")
+    celsius = func(t=_cube(20.0, "degC"), q=_cube(0.01, "kg/kg"))  # type: ignore[operator]
+    kelvin = func(t=_cube(293.15, "K"), q=_cube(0.01, "kg/kg"))  # type: ignore[operator]
+    assert float(celsius[0, 0]) == pytest.approx(float(kelvin[0, 0]), abs=1e-9)
+    # And it is the Kelvin-scale answer, not the ~20 the bug produced.
+    assert float(celsius[0, 0]) > 290.0
+
+
+def test_every_cube_typed_parameter_is_advertised_as_a_datacube() -> None:
+    """The converse of test_every_registered_cube_parameter_has_a_known_unit.
+
+    That test checks datacube => has a unit. This checks array-like => datacube, which is the
+    direction that catches a *missed* unit: an unparsed physical input silently falls into the
+    scalar branch and is advertised as a number, so no conversion is applied.
+    """
+    from earthkit.meteo import thermo
+
+    for func in earthkit_processes.scan():
+        meta = get_process_metadata(func)
+        assert meta is not None
+        cube_params = earthkit_processes._cube_parameters(getattr(thermo, meta["id"]))
+        advertised = {p["name"]: p for p in meta["parameters"]}
+        for name in cube_params:
+            assert advertised[name]["schema"] == {"type": "object", "subtype": "datacube"}, (
+                meta["id"],
+                name,
+            )
+
+
+def test_a_cube_parameter_with_no_enforceable_unit_is_refused_registration() -> None:
+    """Fail closed rather than advertise a cube whose units cannot be checked."""
+
+    def bogus(x: object) -> object:
+        """Compute something.
+
+        Parameters
+        ----------
+        x: array-like | xarray.DataArray
+            Some quantity (furlongs)
+
+        Returns
+        -------
+        array-like
+        """
+        return x
+
+    assert earthkit_processes._cube_parameters(bogus) == {"x"}
+    assert earthkit_processes._documented_units(bogus) == {}
+
+
+def test_the_slope_precompute_parameter_keeps_its_unit_enforced() -> None:
+    """`es_slope` is documented in Pa/K — a real unit, so the function stays registered."""
+    meta = get_process_metadata(_process("saturation_mixing_ratio_slope"))
+    assert meta is not None
+    params = {p["name"]: p for p in meta["parameters"]}
+    assert params["es_slope"]["schema"] == {"type": "object", "subtype": "datacube"}
+    assert "Expected unit: Pa/K" in params["es_slope"]["description"]
+
+
+def test_an_unnamed_input_still_yields_a_named_result() -> None:
+    """earthkit inherits the input's name, so an unnamed input left the result anonymous."""
+    func = _process("relative_humidity_from_dewpoint")
+    t = _cube(20.0, "degC").rename(None)
+    td = _cube(10.0, "degC").rename(None)
+    assert t.name is None
+
+    result = func(t=t, td=td)  # type: ignore[operator]
+    assert result.name == "relative_humidity_from_dewpoint"
