@@ -222,15 +222,11 @@ class C3SSeasonalAnomalyPlugin(BaseDatasetPlugin):
 
     @staticmethod
     def _store_ready(ds: xr.Dataset) -> xr.Dataset:
-        """One chunk per issue time, and drop attributes that cannot be written or exported.
+        """One chunk per issue time, which is how the store grows.
 
-        cfgrib attaches GRIB provenance including tuple-valued entries; NetCDF attributes must be
-        scalars or arrays, so leaving them in breaks every openEO export of the store.
+        Unwriteable attributes — cfgrib attaches plenty — are dropped at the write boundary for
+        every plugin alike, in ``shared.cf.drop_unserializable_attrs``.
         """
-        for name in list(ds.coords) + list(ds.data_vars):
-            attrs = ds[name].attrs
-            for key in [k for k, value in attrs.items() if isinstance(value, dict)]:
-                del attrs[key]
         chunks: dict[str, int] = {forecast.REFERENCE_DIM: 1}
         for dim in (forecast.LEAD_DIM, "quantile", "y", "x"):
             if dim in ds.sizes:

@@ -256,22 +256,7 @@ class GefsForecastPlugin(BaseDatasetPlugin):
                 renamed[name].attrs["standard_name"] = standard
         renamed[forecast.LEAD_DIM].attrs["units"] = "days"
         ordered = renamed.transpose(forecast.REFERENCE_DIM, forecast.LEAD_DIM, ..., "y", "x", missing_dims="ignore")
-        return self._store_ready_chunks(self._drop_foreign_attrs(ordered))
-
-    @staticmethod
-    def _drop_foreign_attrs(ds: xr.Dataset) -> xr.Dataset:
-        """Remove upstream attributes that do not survive the trip.
-
-        The upstream coordinates carry ``statistics_approximate`` as a nested mapping. NetCDF
-        attributes are scalars or arrays, so an openEO export of this dataset fails outright on
-        it — and the values describe the global grid anyway, so after a bbox subset they are
-        wrong as well as unwriteable.
-        """
-        for name in list(ds.coords) + list(ds.data_vars):
-            attrs = ds[name].attrs
-            for key in [k for k, value in attrs.items() if isinstance(value, dict)]:
-                del attrs[key]
-        return ds
+        return self._store_ready_chunks(ordered)
 
     @staticmethod
     def _store_ready_chunks(ds: xr.Dataset) -> xr.Dataset:

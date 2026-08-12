@@ -26,6 +26,7 @@ from open_climate_service.openeo.schemas import (
     OpenEOJobStatus,
     OpenEOJobUpdate,
 )
+from open_climate_service.shared.cf import drop_unserializable_attrs
 from open_climate_service.shared.time import utc_now
 from open_climate_service.stac.media_types import ZARR_V3_MEDIA_TYPE, zarr_media_type
 
@@ -1077,6 +1078,10 @@ def _write_raster(ds: Any, results_dir: Any, fmt: str) -> str | None:
             logger.debug("geometry→GeoDataFrame conversion failed", exc_info=True)
 
     ext, _ = _RASTER_FORMATS.get(fmt, (".zarr", "application/vnd+zarr"))
+
+    # Also here, not only at ingest: a store written before this guard existed — or one an
+    # instance points at without having ingested it — still has to export rather than 500.
+    drop_unserializable_attrs(ds, context=f"{fmt} export")
 
     if ext == ".zarr":
         path = str(results_dir / "result.zarr")
