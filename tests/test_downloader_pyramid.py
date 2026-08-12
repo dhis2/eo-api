@@ -28,7 +28,7 @@ from open_climate_service.data_manager.services.downloader import (  # noqa: E40
 
 
 def _pyramid_sized_cube():
-    # Larger than the 2048x2048 pyramid threshold; integer var exercises the
+    # Larger than the pyramid threshold; integer var exercises the
     # no-data fill_value handling that used to be pinned via pyramid.encoding.
     ny = nx = 2100
     data = np.ones((1, ny, nx), dtype="uint8")
@@ -183,3 +183,65 @@ def test_write_to_icechunk_store_mode_keeps_class_codes(tmp_path: Path) -> None:
     with xr.open_zarr(store, group="1", consolidated=False, zarr_format=3) as lvl1:
         values = np.unique(lvl1["landcover"].values)
     assert set(int(v) for v in values) <= codes
+
+
+def _uganda_gpp_shaped_cube(nt: int = 2):
+    """A cube on the grid that motivated lowering the threshold: CLMS GPP over Uganda."""
+    ny, nx = 1949, 1895
+    return xr.Dataset(
+        {"gpp": (("t", "y", "x"), np.zeros((nt, ny, nx), dtype="float32"))},
+        coords={
+            "t": np.array(["2024-01-01", "2024-01-11"], dtype="datetime64[ns]")[:nt],
+            "y": np.linspace(4.29, -1.50, ny),
+            "x": np.linspace(29.47, 35.11, nx),
+        },
+    )
+
+
+def test_threshold_catches_the_grid_that_used_to_render_flat() -> None:
+    """1949 x 1895 = 3.69 Mpx sat at 0.88x of the old 2048^2 bar, so no pyramid was built.
+
+    Every frame then read the full grid at every zoom — 32 chunk requests and 14.8 MB per
+    timestep to fill a few hundred screen pixels. Pinned to the real geometry rather than a
+    round number so the constant cannot drift back above it unnoticed.
+    """
+    assert needs_pyramid(_uganda_gpp_shaped_cube())
+
+
+def test_threshold_still_skips_a_grid_small_enough_to_send_whole() -> None:
+    """A pyramid on a small grid is pure overhead: more metadata, no fewer bytes to draw."""
+    ny = nx = 700  # 0.49 Mpx
+    small = xr.Dataset(
+        {"v": (("y", "x"), np.zeros((ny, nx), dtype="float32"))},
+        coords={"y": np.linspace(1.0, 0.0, ny), "x": np.linspace(0.0, 1.0, nx)},
+    )
+    assert not needs_pyramid(small)
+
+
+def test_pyramid_build_never_materialises_the_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """topozarr streams level 0 region by region, so the source must stay lazy.
+
+    Loading it first defeated that and made peak memory scale with the store: measured on a
+    2.13 GB cube, 7.50 GB peak loaded versus 1.19 GB streamed. Asserted by making `.load()`
+    fail outright, which is the only way to prove it is not called somewhere in the path.
+    """
+
+    def explode(self: object, **kwargs: object) -> None:
+        raise AssertionError("write_to_icechunk_store must not materialise the source")
+
+    monkeypatch.setattr(xr.Dataset, "load", explode)
+    monkeypatch.setattr(xr.DataArray, "load", explode)
+
+    ds = _uganda_gpp_shaped_cube().chunk({"t": 1, "y": 244, "x": 474})
+    assert ds["gpp"].chunks is not None
+    assert needs_pyramid(ds)
+
+    store_path = tmp_path / "streamed.icechunk"
+    write_to_icechunk_store(ds, store_path, crs="EPSG:4326")
+
+    import icechunk
+
+    repo = icechunk.Repository.open(icechunk.local_filesystem_storage(str(store_path)))
+    root = zarr.open_group(repo.readonly_session("main").store, mode="r")
+    assert "multiscales" in dict(root.attrs)
+    assert {"0", "1"} <= {k for k, _ in root.groups()}

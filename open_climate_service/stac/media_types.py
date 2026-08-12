@@ -44,6 +44,17 @@ MULTISCALES_CONVENTION_UUID = "d35379db-88df-4056-af3a-620245f8e347"
 """UUID of the Zarr multiscales convention (https://github.com/zarr-conventions/multiscales)."""
 
 
+def is_multiscales_convention(convention: Any) -> bool:
+    """True for one ``zarr_conventions`` entry declaring the multiscales convention.
+
+    Shared with the streaming writer, which has to carry this entry across an append rather
+    than let a flat store's convention list replace it.
+    """
+    return isinstance(convention, Mapping) and (
+        convention.get("uuid") == MULTISCALES_CONVENTION_UUID or convention.get("name") == "multiscales"
+    )
+
+
 def attributes_declare_multiscales(attributes: Mapping[str, Any]) -> bool:
     """True when root group *attributes* describe a real multiscales pyramid.
 
@@ -55,12 +66,7 @@ def attributes_declare_multiscales(attributes: Mapping[str, Any]) -> bool:
     conventions = attributes.get("zarr_conventions")
     if not isinstance(conventions, list):
         return False
-    declared = any(
-        isinstance(convention, Mapping)
-        and (convention.get("uuid") == MULTISCALES_CONVENTION_UUID or convention.get("name") == "multiscales")
-        for convention in conventions
-    )
-    if not declared:
+    if not any(is_multiscales_convention(convention) for convention in conventions):
         return False
     multiscales = attributes.get("multiscales")
     if not isinstance(multiscales, Mapping):
