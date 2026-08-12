@@ -392,11 +392,22 @@
       }
 
       function stepLabelAt(steps, i) {
-        // Explicit `values` come through verbatim — an irregular temporal axis (dekads) or a
-        // forecast's issue times. Trimmed only when the whole axis is midnight-aligned, so an
-        // hourly axis keeps its 00:00 step labelled like every other step on it.
+        // Explicit `values` cover two kinds of axis. Ordinal ones list numbers (day-of-year) or
+        // category names (sex) and pass through untouched; an irregular temporal axis lists ISO
+        // timestamps, which want the same granularity trimming the generated branches below
+        // apply — so a dekadal axis reads "2024-12-21", not "2024-12-21T00:00:00Z".
+        //
+        // The granularity is decided for the axis as a whole, not per value: trimming value by
+        // value would leave an hourly axis showing "2026-08-11" for its 00:00 step and
+        // "2026-08-11 01:00" for the next one, which reads as two different kinds of label in
+        // one slider. So an all-midnight axis loses the time everywhere, and a sub-daily axis
+        // keeps it everywhere.
         if (Array.isArray(steps)) {
-          return stepsAreDateOnly(steps) ? String(steps[i]).slice(0, 10) : steps[i];
+          const v = steps[i];
+          if (typeof v !== "string") return v;
+          if (stepsAreDateOnly(steps)) return v.slice(0, 10);
+          if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return v.slice(0, 16).replace("T", " ");
+          return v;
         }
         const sd = new Date(steps.start);
         // Label at the granularity of the step: year for P1Y, year-month for P1M,

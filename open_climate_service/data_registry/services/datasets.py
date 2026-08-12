@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 
 from open_climate_service import config as api_config
+from open_climate_service.shared.time import SUPPORTED_PERIOD_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,27 @@ def _validate_dataset_template(dataset: object, *, source: str) -> None:
         raise ValueError(
             f"Dataset template '{dataset_id}' in {source} has unsupported sync.kind "
             f"'{sync_kind}'. Supported values: {supported}"
+        )
+
+    # An unsupported period_type is accepted by every downstream consumer and then
+    # silently ignored — no step, no period normalisation, no error. Reject it here so a
+    # typo or a cadence this version cannot honour fails at registration.
+    period_type = dataset.get("period_type")
+    if period_type is not None and period_type not in SUPPORTED_PERIOD_TYPES:
+        supported = ", ".join(sorted(SUPPORTED_PERIOD_TYPES))
+        raise ValueError(
+            f"Dataset template '{dataset_id}' in {source} has unsupported period_type "
+            f"{period_type!r}. Supported values: {supported}"
+        )
+    # A temporal or release dataset must declare its cadence: sync planning and coverage
+    # index period_type unguarded, so an absent one registers and then raises a KeyError
+    # further in. Static datasets are exempt — an openEO save_result output is static and
+    # legitimately has no cadence when none can be derived, and sync planning returns for
+    # static before it reads the field.
+    if period_type is None and sync_kind != "static":
+        raise ValueError(
+            f"Dataset template '{dataset_id}' in {source} must define period_type "
+            f"(required for sync.kind '{sync_kind}')"
         )
 
     direction = dataset.get("temporal_direction")

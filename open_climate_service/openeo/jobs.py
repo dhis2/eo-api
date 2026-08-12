@@ -900,6 +900,32 @@ def _derive_coverage(ds: Any, x_dim: str, y_dim: str, t_dim: str | None) -> Any:
     )
 
 
+def _is_dekadal_axis(t_values: Any) -> bool:
+    """Whether every timestamp starts a dekad, at dekadal spacing.
+
+    Two conditions, and both are needed:
+
+    * **Every timestamp falls on the 1st, 11th or 21st.** Necessary because a regular 10-day
+      series on any other day of the month is not dekadal, and calling it so would attach a
+      cadence whose period strings mean something else.
+    * **Some adjacent pair is 8 to 11 days apart.** Necessary because the day-of-month test
+      alone accepts a *monthly* axis: every month starts on the 1st, and a monthly-on-the-11th
+      axis is equally a subset. The same trap is guarded in ``aggregate_dekads._dekad_dates``.
+      Tested on the minimum rather than the median so a dekadal axis with missing dekads — a
+      real state, which ``aggregate_dekads`` warns about — is still recognised.
+    """
+    import numpy as np
+    import pandas as pd
+
+    from open_climate_service.shared.time import DEKAD_START_DAYS
+
+    stamps = pd.DatetimeIndex(np.asarray(t_values, dtype="datetime64[ns]"))
+    if not set(stamps.day) <= set(DEKAD_START_DAYS):
+        return False
+    gaps = np.diff(stamps.values).astype("timedelta64[D]").astype(int)
+    return bool(gaps.size and gaps.min() <= 11)
+
+
 def _infer_period_type(ds: Any, t_dim: str) -> str | None:
     """Infer period type from the median time step of a dataset."""
     import numpy as np
@@ -917,12 +943,25 @@ def _infer_period_type(ds: Any, t_dim: str) -> str | None:
         return "hourly"
     if median_seconds <= 86400:
         return "daily"
+    # Dekads are recognised by their structure, not by their interval. A dekad *starts* on the
+    # 1st, 11th or 21st by definition, so testing that is exact where a median is a guess: it
+    # accepts a short axis across a month boundary (Feb 21 -> Mar 1, 8 days) and one with missing
+    # dekads (median 15.5 days), and it refuses unrelated 10-day data that happens to fall on
+    # other days of the month. Placed before the weekly and monthly buckets, which would
+    # otherwise claim both of those cases.
+    if _is_dekadal_axis(t_values):
+        return "dekadal"
     if median_seconds <= 8 * 86400:
         return "weekly"
     if median_seconds <= 32 * 86400:
         return "monthly"
-    if 80 * 86400 <= median_seconds <= 100 * 86400:
-        return "quarterly"
+    # Deliberately no "quarterly" branch. It is in the STAC step map (so a store that already
+    # carries it still gets P3M) but is not implemented for ingest or coverage:
+    # `datetime_to_period_string` raises on it and `numpy_datetime_to_period_string` KeyErrors,
+    # so inferring it attached a cadence that fails the moment the artifact is written — and
+    # since it is now rejected at registration, it would fail auto-registration outright.
+    # Returning None instead is honest and legal: a managed openEO output is static, and a
+    # static template may carry no cadence. Add the branch back with quarterly support.
     if 330 * 86400 <= median_seconds <= 370 * 86400:
         return "yearly"
     return None

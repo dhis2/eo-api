@@ -49,7 +49,13 @@ from open_climate_service.ingestions.schemas import (
 )
 from open_climate_service.ingestions.sync_engine import SyncConfigurationError, plan_sync, run_sync
 from open_climate_service.publications.services import managed_dataset_id_for, publish_artifact
-from open_climate_service.shared.time import datetime_to_period_string, normalize_period_string, utc_now, utc_today
+from open_climate_service.shared.time import (
+    datetime_to_period_string,
+    dekad_start,
+    normalize_period_string,
+    utc_now,
+    utc_today,
+)
 from open_climate_service.streaming.orchestrator import run_streaming_ingest_sync
 from open_climate_service.streaming.protocol import IngestionPlugin
 
@@ -1162,6 +1168,8 @@ def _current_request_period(period_type: str) -> str:
         return datetime_to_period_string(utc_now(), period_type)
     if period_type == "daily":
         return utc_today().isoformat()
+    if period_type == "dekadal":
+        return dekad_start(utc_today()).isoformat()
     if period_type == "weekly":
         return datetime_to_period_string(utc_now(), period_type)
     if period_type == "monthly":
