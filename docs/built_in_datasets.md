@@ -27,6 +27,29 @@ CHIRPS (Climate Hazards Group InfraRed Precipitation with Station data) v3 is a 
 
 ---
 
+## CHIRPS v3 — monthly precipitation
+
+| Property               | Value                                              |
+| ---------------------- | -------------------------------------------------- |
+| **Dataset ID**         | `chirps3_precipitation_monthly`                    |
+| **Variable**           | `precip`                                           |
+| **Units**              | mm/d                                               |
+| **Period**             | Monthly                                            |
+| **Spatial coverage**   | Global land, 50°S–50°N                             |
+| **Spatial resolution** | ~5 km                                              |
+| **Record start**       | 1981-01                                            |
+| **Source**             | [CHIRPS v3](https://www.chc.ucsb.edu/data/chirps3) |
+
+The monthly CHIRPS product, published as one global raster per calendar month. Prefer it over aggregating the daily dataset when you only need monthly values: it is roughly 30× less data to ingest, and drought indices such as SPI and SPEI are conventionally computed monthly.
+
+**Sync behaviour** — as for the daily dataset, the latest published month is discovered by probing the CHIRPS server rather than assuming a fixed lag. The monthly final product typically trails the calendar by a month or two.
+
+**Transforms** — the source raster is a monthly **total** in mm; it is divided by the number of days in the month and stored as a mean daily rate (`mm/d`). Unlike the daily dataset, where mm and mm/day are the same number, this is a real conversion.
+
+That choice keeps every monthly precipitation dataset on the same units, which matters because `chirps3_precipitation_monthly_normal_1991_2020` is also `mm/d` and is the natural partner for a monthly anomaly — storing the raw total under the same label would make that comparison wrong by a factor of about 30. It is also the form xclim's drought indices expect.
+
+---
+
 ## ERA5-Land — temperature and precipitation
 
 ERA5-Land provides temperature and precipitation at hourly, daily, and monthly resolution. Nine dataset templates are available covering both variables and all resolutions, with options for UTC or local-timezone daily aggregation.
