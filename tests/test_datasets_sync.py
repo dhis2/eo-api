@@ -1396,7 +1396,7 @@ def test_an_interrupted_swap_is_healed_before_ingest_reads_the_store(
         country_code=None,
         overwrite=False,
         publish=False,
-        request_scope=ArtifactRequestScope(start="2026-01-01", end="2026-01-03", bbox=[0.0, 0.0, 1.0, 1.0]),
+        request_scope=ArtifactRequestScope(start="2026-01-01", end="2026-01-03", bbox=(0.0, 0.0, 1.0, 1.0)),
     )
 
     # The point of the test: the ingest ran against the recovered store, not a bare path.
