@@ -918,6 +918,22 @@ def _infer_period_type(ds: Any, t_dim: str) -> str | None:
         return "daily"
     if median_seconds <= 8 * 86400:
         return "weekly"
+    # Dekads sit between weekly and monthly, and without this branch they were read as monthly:
+    # the 32-day bucket swallowed everything from 8 to 32 days. A dekadal axis has steps of
+    # 8 to 11 days (the third dekad runs to the month's end) with a median of exactly 10,
+    # measured over both a single year and three; weekly medians 7 and monthly 30 or 31, so the
+    # 11-day cut separates all three cleanly.
+    #
+    # Safe to infer, unlike the quarterly case below: `datetime_to_period_string`,
+    # `numpy_datetime_to_period_string` and `normalize_period_string` all handle dekadal, and
+    # `period_type_to_iso_step` returning None for it is correct rather than a failure — a dekad
+    # has no fixed ISO duration, which is what `Cadence.IRREGULAR` exists to say.
+    #
+    # Known limit: a two-timestep slice spanning February's short third dekad has a median of 8
+    # and still reads as weekly. Inference from two points is weak in general; a caller that
+    # needs certainty declares `period_type` on the output template.
+    if median_seconds <= 11 * 86400:
+        return "dekadal"
     if median_seconds <= 32 * 86400:
         return "monthly"
     # Deliberately no "quarterly" branch. It is in the STAC step map (so a store that already

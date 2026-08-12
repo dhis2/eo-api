@@ -1462,6 +1462,7 @@ def test_derive_variable_raises_for_multiple_vars_without_option() -> None:
     [
         (1, "daily"),
         (7, "weekly"),
+        (10, "dekadal"),
         (30, "monthly"),
         (365, "yearly"),
     ],
@@ -1470,6 +1471,30 @@ def test_infer_period_type(timedelta_days: int, expected: str) -> None:
     t = np.arange(3).astype("timedelta64[D]") * timedelta_days + np.datetime64("2025-01-01", "D")
     ds = xr.Dataset({"v": ("t", [1.0, 2.0, 3.0])}, coords={"t": t})
     assert _infer_period_type(ds, "t") == expected
+
+
+def test_infer_period_type_reads_a_real_dekadal_axis_as_dekadal() -> None:
+    """The 32-day monthly bucket used to swallow dekads, mislabelling them monthly.
+
+    Built from `dekad_period_ids` rather than a fixed 10-day stride, so the axis carries the
+    real 8/10/11-day spacing a dekadal store has.
+    """
+    from open_climate_service.shared.time import dekad_period_ids
+
+    ids = dekad_period_ids("2026-01-01", "2026-12-31")
+    t = np.array(ids, dtype="datetime64[ns]")
+    ds = xr.Dataset({"v": ("t", np.arange(len(ids), dtype="float64"))}, coords={"t": t})
+
+    assert _infer_period_type(ds, "t") == "dekadal"
+
+
+def test_infer_period_type_still_separates_weekly_and_monthly_from_dekadal() -> None:
+    """The new bucket must not annex its neighbours."""
+    weekly = np.arange(np.datetime64("2026-01-01"), np.datetime64("2026-04-01"), np.timedelta64(7, "D"))
+    monthly = np.array([f"2026-{m:02d}-01" for m in range(1, 13)], dtype="datetime64[ns]")
+    for axis, expected in ((weekly, "weekly"), (monthly, "monthly")):
+        ds = xr.Dataset({"v": ("t", np.arange(len(axis), dtype="float64"))}, coords={"t": axis})
+        assert _infer_period_type(ds, "t") == expected
 
 
 def test_infer_period_type_returns_none_for_single_timestep() -> None:
