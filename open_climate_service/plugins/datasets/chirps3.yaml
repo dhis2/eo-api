@@ -28,6 +28,39 @@
     range: [0.0, 20.0]
     nodata: -9999.0
 
+- id: chirps3_precipitation_monthly
+  name: Precipitation rate (CHIRPS3, monthly)
+  short_name: Precipitation
+  standard_name: lwe_precipitation_rate
+  variable: precip
+  period_type: monthly
+  sync:
+    kind: temporal
+    execution: append
+  extents:
+    spatial:
+      bbox: [-180, -50, 180, 50]
+    temporal:
+      begin: "1981-01-01"
+      resolution: P1M
+  ingestion:
+    plugin: open_climate_service.plugins.datasets.chirps3.CHIRPS3MonthlyPlugin
+  # The source raster is a monthly *total* in mm — confirmed against the sum of the same
+  # month's dailies, which matches exactly — so the plugin divides by the number of days to
+  # store a mean daily rate. Unlike the daily dataset this is a real conversion, not a
+  # relabel. mm/d is what every other monthly precipitation dataset here uses, including
+  # chirps3_precipitation_monthly_normal_1991_2020 below: storing the raw total under the
+  # same units would make a monthly anomaly against that normal wrong by a factor of ~30.
+  units: mm/d
+  cell_methods: "time: mean"
+  resolution: 5 km x 5 km
+  source: CHIRPS v3 (monthly)
+  source_url: https://www.chc.ucsb.edu/data/chirps3
+  display:
+    colormap: blues
+    range: [0.0, 20.0]
+    nodata: -9999.0
+
 # ---------------------------------------------------------------------------
 # Climate-normal output templates for the `climate_normal` openEO workflow (normals
 # computed from the already-ingested CHIRPS3 store). No ingestion plugin — the data is
