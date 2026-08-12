@@ -1462,7 +1462,6 @@ def test_derive_variable_raises_for_multiple_vars_without_option() -> None:
     [
         (1, "daily"),
         (7, "weekly"),
-        (10, "dekadal"),
         (30, "monthly"),
         (365, "yearly"),
     ],
@@ -1473,28 +1472,53 @@ def test_infer_period_type(timedelta_days: int, expected: str) -> None:
     assert _infer_period_type(ds, "t") == expected
 
 
-def test_infer_period_type_reads_a_real_dekadal_axis_as_dekadal() -> None:
-    """The 32-day monthly bucket used to swallow dekads, mislabelling them monthly.
+def _axis(ids: list[str]) -> xr.Dataset:
+    t = np.array(ids, dtype="datetime64[ns]")
+    return xr.Dataset({"v": ("t", np.arange(len(ids), dtype="float64"))}, coords={"t": t})
 
-    Built from `dekad_period_ids` rather than a fixed 10-day stride, so the axis carries the
-    real 8/10/11-day spacing a dekadal store has.
-    """
+
+def test_infer_period_type_reads_a_real_dekadal_axis_as_dekadal() -> None:
+    """The 32-day monthly bucket used to swallow dekads, mislabelling them monthly."""
     from open_climate_service.shared.time import dekad_period_ids
 
-    ids = dekad_period_ids("2026-01-01", "2026-12-31")
-    t = np.array(ids, dtype="datetime64[ns]")
-    ds = xr.Dataset({"v": ("t", np.arange(len(ids), dtype="float64"))}, coords={"t": t})
-
-    assert _infer_period_type(ds, "t") == "dekadal"
+    assert _infer_period_type(_axis(dekad_period_ids("2026-01-01", "2026-12-31")), "t") == "dekadal"
 
 
-def test_infer_period_type_still_separates_weekly_and_monthly_from_dekadal() -> None:
-    """The new bucket must not annex its neighbours."""
-    weekly = np.arange(np.datetime64("2026-01-01"), np.datetime64("2026-04-01"), np.timedelta64(7, "D"))
-    monthly = np.array([f"2026-{m:02d}-01" for m in range(1, 13)], dtype="datetime64[ns]")
-    for axis, expected in ((weekly, "weekly"), (monthly, "monthly")):
-        ds = xr.Dataset({"v": ("t", np.arange(len(axis), dtype="float64"))}, coords={"t": axis})
-        assert _infer_period_type(ds, "t") == expected
+def test_infer_period_type_recognises_a_short_dekadal_axis_across_a_month_boundary() -> None:
+    """Feb 21 -> Mar 1 is 8 days, so any interval rule reads it as weekly.
+
+    Dekads are defined by *starting* on the 1st, 11th or 21st, which is exact where a median
+    is a guess.
+    """
+    assert _infer_period_type(_axis(["2026-02-21", "2026-03-01"]), "t") == "dekadal"
+
+
+def test_infer_period_type_recognises_a_dekadal_axis_with_missing_dekads() -> None:
+    """A gap is a real state — `aggregate_dekads` warns about it — and its median is 15.5 days."""
+    assert _infer_period_type(_axis(["2026-01-01", "2026-01-11", "2026-02-01"]), "t") == "dekadal"
+
+
+def test_infer_period_type_does_not_call_unrelated_ten_day_data_dekadal() -> None:
+    """A regular 10-day series on other days of the month is not a dekadal cadence."""
+    stride = [
+        str(d)[:10]
+        for d in np.arange(np.datetime64("2026-01-03"), np.datetime64("2026-03-01"), np.timedelta64(10, "D"))
+    ]
+    assert _infer_period_type(_axis(stride), "t") != "dekadal"
+
+
+def test_infer_period_type_does_not_call_a_monthly_axis_dekadal() -> None:
+    """Every month starts on the 1st, so the day-of-month test alone would accept it — and a
+    monthly-on-the-11th axis is equally a subset of the dekad start days."""
+    assert _infer_period_type(_axis([f"2026-{m:02d}-01" for m in range(1, 13)]), "t") == "monthly"
+    assert _infer_period_type(_axis([f"2026-{m:02d}-11" for m in range(1, 13)]), "t") == "monthly"
+
+
+def test_infer_period_type_still_separates_weekly_from_dekadal() -> None:
+    weekly = [
+        str(d)[:10] for d in np.arange(np.datetime64("2026-01-01"), np.datetime64("2026-04-01"), np.timedelta64(7, "D"))
+    ]
+    assert _infer_period_type(_axis(weekly), "t") == "weekly"
 
 
 def test_infer_period_type_returns_none_for_single_timestep() -> None:
