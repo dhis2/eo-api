@@ -341,6 +341,13 @@ def _create_streaming_artifact(
             detail=f"An ingest or sync is already running for dataset '{dataset['id']}'. Wait for it to finish.",
         )
     try:
+        # First thing under the lock, before anything looks at the store. A swap killed between
+        # its two renames leaves the published path missing and the data at `.retired`; ingest
+        # would read that as a brand-new store and write only the requested delta into a fresh
+        # one, after which recovery finds the target present and strands the whole history in
+        # `.retired`. Healing before any inspection makes the next sync an ordinary append.
+        recover_interrupted_swap(store_path)
+
         if overwrite and store_path.exists():
             if store_path.is_dir():
                 shutil.rmtree(store_path)
@@ -500,8 +507,9 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
     """
     from open_climate_service.data_accessor.services.accessor import open_icechunk_dataset
 
-    # Before the open, not after: a swap interrupted by a kill leaves the published path
-    # missing, so without this the open below would fail and the dataset would stay broken.
+    # Belt and braces: `_create_streaming_artifact` already heals this under the lock before
+    # ingest, which is the call that matters. Kept because this function is also entered
+    # directly, and because it is idempotent — a present target makes it a no-op.
     recover_interrupted_swap(store_path)
 
     try:
@@ -536,14 +544,21 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
         # GPP) to transient disk (one extra copy, reclaimed on success).
         staging = store_path.with_name(f"{store_path.name}.rebuild")
         shutil.rmtree(staging, ignore_errors=True)
-        downloader.write_to_icechunk_store(
-            ds,
-            staging,
-            pyramid_method=downloader.resampling_method_from_template(dataset),
-            commit_message="Applied GeoZarr conventions",
-        )
-        ds.close()  # drop the read session before the directory moves under it
-        _swap_store(staging, store_path)
+        try:
+            downloader.write_to_icechunk_store(
+                ds,
+                staging,
+                pyramid_method=downloader.resampling_method_from_template(dataset),
+                commit_message="Applied GeoZarr conventions",
+            )
+            ds.close()  # drop the read session before the directory moves under it
+            _swap_store(staging, store_path)
+        finally:
+            # A failed build leaves a partial copy of the whole store behind. That matters most
+            # when the failure *was* disk exhaustion: the flat-store fallback below would
+            # otherwise run with the transient copy still occupying the space. A successful
+            # swap has already moved `staging` away, so this is a no-op then.
+            shutil.rmtree(staging, ignore_errors=True)
     except Exception:
         logger.error(
             "GeoZarr/pyramid write failed for '%s'; flat Icechunk artifact will be used as-is",

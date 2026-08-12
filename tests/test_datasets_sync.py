@@ -1316,3 +1316,92 @@ def test_recover_interrupted_swap_is_a_no_op_for_a_brand_new_dataset(tmp_path: P
     from open_climate_service.ingestions.services import recover_interrupted_swap
 
     assert recover_interrupted_swap(tmp_path / "never-existed.icechunk") is False
+
+
+def test_an_interrupted_swap_is_healed_before_ingest_reads_the_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recovery has to happen before anything inspects the store, not after ingest.
+
+    A swap killed between its two renames leaves the published path missing and the whole
+    history at `.retired`. If recovery runs after the ingest — as it did when it lived only in
+    `_maybe_build_pyramid` — the sequence is:
+
+    1. ingest sees no store, treats it as new, and writes *only* the requested delta;
+    2. recovery then finds the target present and does nothing;
+    3. the entire history stays stranded in `.retired`, unreferenced.
+
+    Nothing errors, and the dataset silently loses everything before the interruption. So this
+    asserts on what the ingest *sees*: the store must already be there, carrying its history.
+    """
+    from types import SimpleNamespace
+
+    from open_climate_service.data_manager.services import downloader
+    from open_climate_service.ingestions import services as ingestion_services
+    from open_climate_service.ingestions.schemas import ArtifactRequestScope
+
+    target = tmp_path / "ds.icechunk"
+    retired = tmp_path / "ds.icechunk.retired"
+    # The state a killed swap leaves: no published store, the history under `.retired`.
+    retired.mkdir()
+    (retired / "history").write_text("2026-01-01,2026-01-02", encoding="utf-8")
+
+    seen: dict[str, object] = {}
+
+    def fake_ingest(**kwargs: object) -> object:
+        store_path = kwargs["store_path"]
+        assert isinstance(store_path, Path)
+        seen["store_existed"] = store_path.exists()
+        history = store_path / "history"
+        seen["history"] = history.read_text(encoding="utf-8") if history.exists() else None
+        # Append the new period the way a real sync would, onto whatever is there.
+        if history.exists():
+            history.write_text(history.read_text(encoding="utf-8") + ",2026-01-03", encoding="utf-8")
+        else:
+            store_path.mkdir(parents=True, exist_ok=True)
+            history.write_text("2026-01-03", encoding="utf-8")
+        return SimpleNamespace(periods_written=1)
+
+    monkeypatch.setattr(downloader, "get_icechunk_path", lambda _dataset: target)
+    monkeypatch.setattr(ingestion_services, "run_streaming_ingest_sync", fake_ingest)
+    monkeypatch.setattr(ingestion_services, "_load_streaming_plugin", lambda *a, **k: object())
+    monkeypatch.setattr(ingestion_services, "_maybe_build_pyramid", lambda *a, **k: None)
+    monkeypatch.setattr(
+        ingestion_services,
+        "get_data_coverage_for_paths",
+        lambda *a, **k: {
+            "has_data": True,
+            "forecast_reference": None,
+            "coverage": {
+                "temporal": {"start": "2026-01-01", "end": "2026-01-03"},
+                "spatial": {"xmin": 0.0, "ymin": 0.0, "xmax": 1.0, "ymax": 1.0},
+                "spatial_wgs84": None,
+            },
+        },
+    )
+    monkeypatch.setattr(ingestion_services, "_upsert_artifact_record", lambda record, **k: record)
+
+    ingestion_services._create_streaming_artifact(
+        dataset={
+            "id": "ds1",
+            "name": "DS1",
+            "variable": "precip",
+            "period_type": "daily",
+            "ingestion": {"plugin": "example.Plugin"},
+        },
+        plugin_path="example.Plugin",
+        start="2026-01-01",
+        end="2026-01-03",
+        bbox=[0.0, 0.0, 1.0, 1.0],
+        country_code=None,
+        overwrite=False,
+        publish=False,
+        request_scope=ArtifactRequestScope(start="2026-01-01", end="2026-01-03", bbox=[0.0, 0.0, 1.0, 1.0]),
+    )
+
+    # The point of the test: the ingest ran against the recovered store, not a bare path.
+    assert seen["store_existed"] is True
+    assert seen["history"] == "2026-01-01,2026-01-02"
+    # And the delta landed on top of the history rather than replacing it.
+    assert (target / "history").read_text(encoding="utf-8") == "2026-01-01,2026-01-02,2026-01-03"
+    assert not retired.exists()
