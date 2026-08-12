@@ -6,12 +6,12 @@ streaming path introduced for issue #64 / CLIM-715.
 
 This package is also the single import surface for writing a dataset plugin —
 `BaseDatasetPlugin` plus the helpers a plugin reaches for (`normalize_period`,
-`daily_period_ids`) — so contributors don't have to hunt across modules.
-`daily_period_ids` is re-exported from `open_climate_service.shared.time`, its
-canonical home.
+`daily_period_ids`, `monthly_period_ids`) — so contributors don't have to hunt across
+modules. The period-id helpers are re-exported from `open_climate_service.shared.time`,
+their canonical home.
 """
 
-from open_climate_service.shared.time import daily_period_ids
+from open_climate_service.shared.time import daily_period_ids, monthly_period_ids
 from open_climate_service.streaming.base import BaseDatasetPlugin
 from open_climate_service.streaming.helpers import normalize_period
 from open_climate_service.streaming.orchestrator import StreamingIngestResult, run_streaming_ingest_sync
@@ -22,6 +22,7 @@ __all__ = [
     "IngestionPlugin",
     "StreamingIngestResult",
     "daily_period_ids",
+    "monthly_period_ids",
     "normalize_period",
     "run_streaming_ingest_sync",
 ]
