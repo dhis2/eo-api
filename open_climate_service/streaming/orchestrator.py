@@ -33,6 +33,7 @@ from open_climate_service.shared.raster_contract import (
 )
 from open_climate_service.streaming.protocol import GridSpec, IngestionPlugin
 from open_climate_service.streaming.store import (
+    committed_data_group,
     is_store_empty,
     open_or_create_repo,
     read_committed_period_ids,
@@ -207,6 +208,8 @@ async def run_streaming_ingest(
     expected_spatial_shape: tuple[int, int] | None = None
     # The append-axes check runs once per run, on the first period appended to an existing store.
     axes_checked = False
+    # Group to append into: None for a flat store, "0" for a pyramided one.
+    append_group: str | None = None
     # CF attributes (units / standard_name / cell_methods) declared on the template,
     # stamped onto each written period so the store is CF-compliant on disk (#280).
     # The template is authoritative for the fields it declares, so we overwrite any
@@ -280,8 +283,19 @@ async def run_streaming_ingest(
                 else:
                     if not axes_checked:
                         _assert_appendable_axes(store_path, ds, x_dim=x_dim, y_dim=y_dim)
+                        # Where the data actually lives. A store promoted to a pyramid by an
+                        # earlier sync keeps its variables in level groups, and appending at the
+                        # root would create a second one-timestep array beside the pyramid,
+                        # leaving the store unopenable. Resolved once per sync, since promotion
+                        # only happens between syncs.
+                        append_group = committed_data_group(store_path)
                         axes_checked = True
-                    ds.to_zarr(session.store, append_dim=spec.time_dim, zarr_format=3)
+                    ds.to_zarr(
+                        session.store,
+                        group=append_group,
+                        append_dim=spec.time_dim,
+                        zarr_format=3,
+                    )
                 # Root attrs are rewritten on every commit so later append sessions
                 # preserve GeoZarr metadata even if the underlying store layer only
                 # touches array content for the new period.
