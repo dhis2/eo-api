@@ -9,6 +9,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, TypeVar
 
+import numpy as np
+import pandas as pd
 import pystac
 import xarray as xr
 from fastapi import HTTPException, Request
@@ -21,7 +23,9 @@ from open_climate_service.ingestions import services as ingestion_services
 from open_climate_service.ingestions.schemas import ArtifactFormat, ArtifactRecord
 from open_climate_service.shared.crs import canonical_crs_code, is_builtin_crs
 from open_climate_service.shared.time import (
+    Cadence,
     parse_period_string_to_datetime,
+    period_cadence,
     period_type_to_iso_step,
     resolve_iso_period_step,
 )
@@ -104,8 +108,9 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
         source_dataset=source_dataset,
     )
     template_links = [_link_to_dict(link) for link in template.links]
+    period_type = source_dataset.get("period_type")
 
-    collection_payload = _build_collection_with_xstac(artifact=artifact, template=template)
+    collection_payload = _build_collection_with_xstac(artifact=artifact, template=template, period_type=period_type)
     collection_payload["id"] = dataset_id
     collection_payload["type"] = "Collection"
     collection_payload["stac_version"] = STAC_VERSION
@@ -151,7 +156,8 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
     # get a temporal step — the map viewer needs it to build the time slider.
     _override_time_step(
         collection_payload,
-        resolve_iso_period_step(source_dataset) or period_type_to_iso_step(source_dataset.get("period_type")),
+        resolve_iso_period_step(source_dataset) or period_type_to_iso_step(period_type),
+        cadence=period_cadence(period_type),
     )
     # Spatial extent comes from the live store (set in _build_collection_with_xstac),
     # not the artifact coverage — see _wgs84_extent_from_store. Temporal still tracks the
@@ -322,8 +328,13 @@ def _wgs84_extent_from_store(ds: xr.Dataset, store_crs: str, x_dim: str, y_dim: 
         return None
 
 
-def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.Collection) -> dict[str, Any]:
-    cached_payload = _xstac_collection_cache.get(artifact.artifact_id)
+def _build_collection_with_xstac(
+    *, artifact: ArtifactRecord, template: pystac.Collection, period_type: Any = None
+) -> dict[str, Any]:
+    # Keyed on period_type as well as the artifact: correcting a template's cadence
+    # changes the payload (an irregular one gains `values`) without producing a new artifact.
+    cache_key = f"{artifact.artifact_id}:{period_type}"
+    cached_payload = _xstac_collection_cache.get(cache_key)
     if cached_payload is not None:
         return deepcopy(cached_payload)
 
@@ -389,7 +400,9 @@ def _build_collection_with_xstac(*, artifact: ArtifactRecord, template: pystac.C
         extent_bbox = _wgs84_extent_from_store(ds, store_crs or "EPSG:4326", x_dimension, y_dimension)
         if extent_bbox is not None:
             payload.setdefault("extent", {}).setdefault("spatial", {})["bbox"] = [extent_bbox]
-        _cache_xstac_collection_payload(artifact.artifact_id, payload)
+        if time_dimension is not None and period_cadence(period_type) is Cadence.IRREGULAR:
+            _add_temporal_values(payload, ds, time_dimension)
+        _cache_xstac_collection_payload(cache_key, payload)
         return deepcopy(payload)
     except HTTPException:
         raise
@@ -508,8 +521,25 @@ def _abs_url(request: Request, path: str) -> str:
     return f"{str(request.base_url).rstrip('/')}{path}"
 
 
-def _override_time_step(collection: dict[str, Any], step: str | None) -> None:
-    if step is None:
+def _override_time_step(collection: dict[str, Any], step: str | None, *, cadence: Cadence) -> None:
+    """Set the temporal dimension's ``step`` to the duration, or to an explicit null.
+
+    A regular cadence gets its ISO 8601 duration. An **irregular** one gets ``null``,
+    which the datacube extension defines as "irregularly spaced steps" — the only
+    truthful answer for a cadence whose periods differ in length, and better than
+    leaving whatever xstac inferred, which would imply a regular spacing the data does
+    not have.
+
+    A null step alone is not enough for a client, though: without a duration there is
+    nothing to extrapolate from, so the accompanying ``values`` must carry the real
+    timestamps. See ``_add_temporal_values``, which supplies them.
+    """
+    if cadence is Cadence.IRREGULAR:
+        # No duration can describe a variable-length cadence, so a declared
+        # extents.temporal.resolution must not win here: a dekadal template that happens to
+        # declare P10D would otherwise publish it and look regular.
+        step = None
+    elif step is None:
         return
     dimensions = collection.setdefault("cube:dimensions", {})
     for key, value in dimensions.items():
@@ -517,6 +547,27 @@ def _override_time_step(collection: dict[str, Any], step: str | None) -> None:
             value["step"] = step
             dimensions[key] = value
             return
+
+
+def _add_temporal_values(collection: dict[str, Any], ds: xr.Dataset, time_dimension: str) -> None:
+    """List the temporal dimension's actual timestamps as ``values``.
+
+    Required for an irregular cadence, not decorative. A client builds its time control
+    either from explicit ``values`` or by stepping ``extent`` by ``step``; with an
+    irregular cadence there is no step to walk, so omitting ``values`` leaves a consumer
+    with a single position and no slider. This mirrors ``_build_ordinal_dimensions``,
+    which lists values for the same reason on a day-of-year axis.
+
+    Only emitted for irregular cadences. A regular one is fully described by extent plus
+    duration, and listing every timestamp would add one ISO string per period to a cached
+    response for no gain — thousands of entries for a multi-year daily store.
+    """
+    dimensions = collection.get("cube:dimensions") or {}
+    dim = dimensions.get(time_dimension)
+    if not isinstance(dim, dict) or dim.get("type") != "temporal":
+        return
+    stamps = pd.DatetimeIndex(np.asarray(ds[time_dimension].values, dtype="datetime64[ns]"))
+    dim["values"] = [f"{s.isoformat()}Z" for s in stamps.tz_localize(None)]
 
 
 def _build_static_cube_dimensions(ds: xr.Dataset, x_dim: str, y_dim: str) -> dict[str, Any]:

@@ -346,3 +346,55 @@ def test_ensure_time_coordinate_chunking_rechunks_appended_store(tmp_path: Path)
 
     # idempotent: a second call is a no-op
     assert downloader.ensure_time_coordinate_chunking(store_path, "t") is False
+
+
+def test_write_to_icechunk_store_handles_a_reversed_dask_chunk_tuple(tmp_path: Path) -> None:
+    """A south-up, dask-backed source must still publish.
+
+    `raster_contract.ensure_north_up` flips y with `isel(slice(None, None, -1))`, and that
+    reverses the dask *chunk tuple* along with the data: a legal trailing remainder
+    (10, 10, 5) becomes a leading one (5, 10, 10). Zarr permits the short chunk only last,
+    so `to_zarr` refused the write with "Zarr requires uniform chunk sizes except for final
+    chunk".
+
+    Regression for the dekad -> monthly aggregation failing to publish CLMS GPP, whose grid
+    (1949 x 1895, chunked 244) sits below the pyramid threshold and so takes the flat write
+    path — the pyramid path materialises via `load()` and never saw this.
+    """
+    y = np.arange(25.0)  # ascending => south-up => ensure_north_up will reverse it
+    x = np.arange(8.0)
+    data = np.arange(25 * 8, dtype="float32").reshape(1, 25, 8)
+    ds = xr.Dataset(
+        {"gpp": (("t", "y", "x"), data)},
+        coords={"t": [np.datetime64("2024-01-01")], "y": y, "x": x},
+    )
+    ds.attrs["proj:code"] = "EPSG:4326"
+    ds = ds.chunk({"y": 10, "x": 8})
+    source_chunks = ds["gpp"].chunks
+    assert source_chunks is not None
+    assert source_chunks[1] == (10, 10, 5), "precondition: a trailing short chunk"
+
+    store = tmp_path / "reversed_chunks.icechunk"
+    downloader.write_to_icechunk_store(ds, store, commit_message="test")
+
+    out = open_icechunk_dataset(str(store))
+    # Reversed to north-up, and the value at a given latitude has not moved with it.
+    assert out["y"].values[0] > out["y"].values[-1]
+    assert float(out["gpp"].isel(t=0).sel(y=0.0, x=0.0)) == pytest.approx(0.0)
+    assert float(out["gpp"].isel(t=0).sel(y=24.0, x=7.0)) == pytest.approx(25 * 8 - 1)
+
+
+def test_uniform_chunks_leaves_a_legal_trailing_remainder_alone() -> None:
+    """Only the illegal shape is rewritten — rechunking a large array is not free."""
+    ds = xr.Dataset(
+        {"v": (("y", "x"), np.zeros((25, 8), dtype="float32"))},
+        coords={"y": np.arange(25.0), "x": np.arange(8.0)},
+    ).chunk({"y": 10, "x": 8})
+    assert ds["v"].chunks == ((10, 10, 5), (8,))
+
+    # Identity, not merely an equal result: a rechunk of a full-resolution grid is not free.
+    assert downloader._uniform_chunks(ds) is ds
+
+    reversed_ds = ds.isel(y=slice(None, None, -1))
+    assert reversed_ds["v"].chunks == ((5, 10, 10), (8,)), "precondition: leading short chunk"
+    assert downloader._uniform_chunks(reversed_ds)["v"].chunks == ((10, 10, 5), (8,))

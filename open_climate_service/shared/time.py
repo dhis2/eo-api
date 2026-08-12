@@ -1,8 +1,10 @@
 """Time helpers shared across Open Climate Service modules."""
 
+import calendar
 import logging
 import re
 from datetime import UTC, date, datetime, timedelta
+from enum import StrEnum
 from typing import Any, cast
 
 import numpy as np
@@ -23,13 +25,72 @@ _PERIOD_TYPE_ISO_STEP = {
     "yearly": "P1Y",
 }
 
+# Cadences that are real calendar periods but have no single ISO 8601 duration, because
+# their members differ in length. A dekad is the first: day 1-10, 11-20, then 21 to the
+# end of the month, so the third runs 8, 9, 10 or 11 days. "P10D" would be wrong for
+# every third dekad of the year, which is why these carry no step at all.
+_IRREGULAR_PERIOD_TYPES = frozenset({"dekadal"})
+
+# Period types whose ids are not calendar instants. "climatology" ids are day-of-year
+# ordinals (1..366), so asking for their cadence or ISO step is a category error.
+_NON_TEMPORAL_PERIOD_TYPES = frozenset({"climatology"})
+
+# Period types a dataset template may declare. Deliberately *not* derived from
+# _PERIOD_TYPE_ISO_STEP: that map exists to give STAC a step for whatever is already in a
+# store, and includes "quarterly", which none of datetime_to_period_string,
+# normalize_period_string, numpy_datetime_to_period_string, _next_period_start or
+# _default_target_end implement. Deriving the two from one set would advertise quarterly as
+# registerable and then fail at ingest, so they are kept apart.
+SUPPORTED_PERIOD_TYPES = (
+    frozenset({"hourly", "daily", "weekly", "monthly", "yearly"}) | _IRREGULAR_PERIOD_TYPES | _NON_TEMPORAL_PERIOD_TYPES
+)
+
+
+class Cadence(StrEnum):
+    """How a dataset's periods are spaced, as far as the rest of the system must care.
+
+    The distinction that matters is ``IRREGULAR`` versus ``UNKNOWN``. Both lack an ISO
+    8601 step, but they mean opposite things: an irregular cadence is correctly declared
+    and its spacing is genuinely variable, whereas an unknown one is a template we cannot
+    honour. Collapsing them — as returning ``None`` from the step lookup for both would —
+    makes a valid dekadal dataset indistinguishable from a misconfigured one.
+    """
+
+    REGULAR = "regular"
+    """Fixed-length periods; ``period_type_to_iso_step`` yields a duration."""
+
+    IRREGULAR = "irregular"
+    """Known calendar cadence with variable-length periods; no duration exists."""
+
+    NON_TEMPORAL = "non_temporal"
+    """Ids are not calendar instants (day-of-year ordinals); cadence does not apply."""
+
+    UNKNOWN = "unknown"
+    """Unsupported ``period_type``. Reject at registration rather than degrade."""
+
+
+def period_cadence(period_type: Any) -> Cadence:
+    """Classify a dataset ``period_type``."""
+    if not isinstance(period_type, str):
+        return Cadence.UNKNOWN
+    if period_type in _PERIOD_TYPE_ISO_STEP:
+        return Cadence.REGULAR
+    if period_type in _IRREGULAR_PERIOD_TYPES:
+        return Cadence.IRREGULAR
+    if period_type in _NON_TEMPORAL_PERIOD_TYPES:
+        return Cadence.NON_TEMPORAL
+    return Cadence.UNKNOWN
+
 
 def period_type_to_iso_step(period_type: Any) -> str | None:
-    """Map a dataset ``period_type`` to its ISO 8601 step, or None if not a regular cadence.
+    """Map a dataset ``period_type`` to its ISO 8601 step, or None if it has none.
 
     Used as a fallback for the temporal cube dimension's ``step`` when a template does
     not declare ``extents.temporal.resolution`` (e.g. openEO ``save_result`` outputs).
     Without a step the map viewer cannot build a time slider.
+
+    None covers three different situations — irregular, non-temporal and unsupported —
+    so callers that need to tell them apart must use :func:`period_cadence`.
     """
     if not isinstance(period_type, str):
         return None
@@ -118,6 +179,8 @@ def datetime_to_period_string(value: datetime, period_type: str) -> str:
         return value.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H")
     if period_type == "daily":
         return value.date().isoformat()
+    if period_type == "dekadal":
+        return dekad_start(value.date()).isoformat()
     if period_type == "weekly":
         iso_year, iso_week, _ = value.isocalendar()
         return f"{iso_year:04d}-W{iso_week:02d}"
@@ -147,14 +210,6 @@ def daily_period_ids(start: str | date, end: str | date, *, cutoff: str | date |
     rather than re-deriving it. Shared by the daily streaming plugins so they only
     own the cutoff, not the day enumeration.
     """
-
-    def _as_date(value: str | date) -> date:
-        if isinstance(value, datetime):
-            return value.date()
-        if isinstance(value, date):
-            return value
-        return date.fromisoformat(str(value)[:10])
-
     current = _as_date(start)
     last = _as_date(end)
     if cutoff is not None:
@@ -206,6 +261,71 @@ def monthly_period_ids(start: str | date, end: str | date, *, cutoff: str | date
     return out
 
 
+DEKAD_START_DAYS = (1, 11, 21)
+"""Day-of-month on which each dekad begins, per the openEO ``dekad`` definition."""
+
+
+def _as_date(value: str | date) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
+def dekad_start(value: str | date) -> date:
+    """Return the first day of the dekad containing ``value``.
+
+    Truncation for the dekadal cadence: 15 January lands in the second dekad, so it
+    normalises to 11 January.
+    """
+    day = _as_date(value)
+    start_day = max(d for d in DEKAD_START_DAYS if d <= day.day)
+    return day.replace(day=start_day)
+
+
+def dekad_bounds(value: str | date) -> tuple[date, date]:
+    """Return the inclusive ``(first_day, last_day)`` of the dekad containing ``value``.
+
+    The third dekad of a month ends on the month's last day, so its length varies from
+    8 (February, common year) to 11 days. This is the only honest expression of a dekad's
+    extent — there is no duration that describes all three — and it is what CF
+    ``time_bnds`` should be written from.
+    """
+    start = dekad_start(value)
+    if start.day == DEKAD_START_DAYS[-1]:
+        last_day = calendar.monthrange(start.year, start.month)[1]
+        return start, start.replace(day=last_day)
+    return start, start.replace(day=start.day + 9)
+
+
+def dekad_period_ids(start: str | date, end: str | date, *, cutoff: str | date | None = None) -> list[str]:
+    """Return ``YYYY-MM-DD`` ids for every dekad overlapping ``[start, end]`` inclusive.
+
+    Ids are the dekad's first day, so they sort chronologically and parse as plain dates.
+    A partially covered dekad at either end is included — the dekad is the smallest unit
+    the data has, so overlapping it means it is needed. The dekadal counterpart of
+    :func:`daily_period_ids`, including the ``cutoff`` availability clamp.
+    """
+    requested_start = _as_date(start)
+    last = _as_date(end)
+    if cutoff is not None:
+        last = min(last, _as_date(cutoff))
+    # Tested against the *requested* start, not the snapped one: an inverted or
+    # cutoff-exhausted range covers nothing, and snapping back into the containing dekad
+    # must not turn it into a hit. `daily_period_ids` returns [] for the same input.
+    if requested_start > last:
+        return []
+    first = dekad_start(requested_start)
+    out: list[str] = []
+    current = first
+    while current <= last:
+        out.append(current.isoformat())
+        _, dekad_end = dekad_bounds(current)
+        current = dekad_end + timedelta(days=1)
+    return out
+
+
 def parse_hourly_period_string(value: str) -> datetime:
     """Parse a dataset-native hourly period string or full ISO datetime."""
     if len(value) == 13:
@@ -235,6 +355,14 @@ def normalize_period_string(value: str, period_type: str) -> str:
             return datetime_to_period_string(datetime.fromisoformat(value), period_type)
         except ValueError as exc:
             raise ValueError(f"Invalid daily period '{value}'; expected YYYY-MM-DD or ISO datetime") from exc
+    if period_type == "dekadal":
+        try:
+            return datetime_to_period_string(datetime.fromisoformat(value), period_type)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid dekadal period '{value}'; expected YYYY-MM-DD (any day within the "
+                "dekad, normalised to the 1st, 11th or 21st) or ISO datetime"
+            ) from exc
     if period_type == "weekly":
         try:
             return datetime_to_period_string(parse_weekly_period_string(value), period_type)
@@ -285,11 +413,24 @@ def parse_period_string_to_datetime(value: str) -> datetime:
 
 def numpy_datetime_to_period_string(datetimes: np.ndarray[Any, Any], period_type: str) -> np.ndarray[Any, Any]:
     """Convert an array of numpy datetimes to truncated period strings."""
-    if period_type != "weekly":
-        lengths = {"hourly": 13, "daily": 10, "monthly": 7, "yearly": 4}
-        return np.datetime_as_string(datetimes, unit="s").astype(f"U{lengths[period_type]}")
+    if period_type == "weekly":
+        dt_index = pd.DatetimeIndex(np.atleast_1d(np.asarray(datetimes, dtype="datetime64[ns]")))
+        iso = dt_index.isocalendar()
+        strings = iso["year"].astype(str).str.zfill(4) + "-W" + iso["week"].astype(str).str.zfill(2)
+        return cast(np.ndarray[Any, Any], strings.to_numpy().astype("U8"))
 
-    dt_index = pd.DatetimeIndex(np.atleast_1d(np.asarray(datetimes, dtype="datetime64[ns]")))
-    iso = dt_index.isocalendar()
-    strings = iso["year"].astype(str).str.zfill(4) + "-W" + iso["week"].astype(str).str.zfill(2)
-    return cast(np.ndarray[Any, Any], strings.to_numpy().astype("U8"))
+    if period_type == "dekadal":
+        # Snapping, not truncation: a stored timestamp anywhere inside a dekad must yield
+        # that dekad's id. Truncating to 10 characters would only be correct for stores
+        # whose timestamps already sit on the 1st/11th/21st.
+        dt_index = pd.DatetimeIndex(np.atleast_1d(np.asarray(datetimes, dtype="datetime64[ns]")))
+        day = dt_index.day.to_numpy()
+        start_day = np.select([day >= 21, day >= 11], [21, 11], default=1)
+        dekad_ids = [
+            f"{year:04d}-{month:02d}-{start:02d}"
+            for year, month, start in zip(dt_index.year, dt_index.month, start_day, strict=True)
+        ]
+        return cast(np.ndarray[Any, Any], np.asarray(dekad_ids, dtype="U10"))
+
+    lengths = {"hourly": 13, "daily": 10, "monthly": 7, "yearly": 4}
+    return np.datetime_as_string(datetimes, unit="s").astype(f"U{lengths[period_type]}")
