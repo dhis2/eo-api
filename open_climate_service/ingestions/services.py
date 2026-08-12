@@ -341,6 +341,13 @@ def _create_streaming_artifact(
             detail=f"An ingest or sync is already running for dataset '{dataset['id']}'. Wait for it to finish.",
         )
     try:
+        # First thing under the lock, before anything looks at the store. A swap killed between
+        # its two renames leaves the published path missing and the data at `.retired`; ingest
+        # would read that as a brand-new store and write only the requested delta into a fresh
+        # one, after which recovery finds the target present and strands the whole history in
+        # `.retired`. Healing before any inspection makes the next sync an ordinary append.
+        recover_interrupted_swap(store_path)
+
         if overwrite and store_path.exists():
             if store_path.is_dir():
                 shutil.rmtree(store_path)
@@ -422,6 +429,61 @@ def _create_streaming_artifact(
         lock.release()
 
 
+def _retired_path(target: Path) -> Path:
+    return target.with_name(f"{target.name}.retired")
+
+
+def recover_interrupted_swap(target: Path) -> bool:
+    """Restore a store left behind by a swap that was killed between its two renames.
+
+    ``_swap_store`` moves the published store aside before moving the rebuilt one in. An
+    exception between the two is handled there, but a SIGKILL or a host restart is not: the
+    published path then does not exist and the data sits at ``<name>.retired``, which no
+    reader looks for. Called before the store is opened, so the next sync heals it rather
+    than reporting an unreadable dataset.
+
+    Returns True when a recovery was performed.
+    """
+    retired = _retired_path(target)
+    if target.exists() or not retired.is_dir():
+        return False
+    retired.rename(target)
+    logger.warning(
+        "Recovered '%s' from '%s': a previous store swap was interrupted between its two "
+        "renames, leaving the published path missing.",
+        target.name,
+        retired.name,
+    )
+    return True
+
+
+def _swap_store(staging: Path, target: Path) -> None:
+    """Move ``staging`` into ``target``'s place, keeping the original until the swap lands.
+
+    Two directory renames on one filesystem rather than a copy, so the cost is metadata
+    rather than bytes. Two caveats, both real:
+
+    * **The target does not exist between the renames.** A reader that opens the store in that
+      window fails. The window is two metadata operations wide, but it is not zero.
+    * **Only an exception is rolled back here.** A process kill or host restart between the
+      renames leaves the published path missing, which :func:`recover_interrupted_swap`
+      repairs on the next sync.
+
+    Neither is fixable by reordering: POSIX has no atomic directory exchange that Python
+    exposes portably. The durable answer is to publish through a pointer that can be switched
+    atomically, which is CLIM-880 — this keeps the window small and recoverable meanwhile.
+    """
+    retired = _retired_path(target)
+    shutil.rmtree(retired, ignore_errors=True)
+    target.rename(retired)
+    try:
+        staging.rename(target)
+    except Exception:
+        retired.rename(target)  # leave the store exactly as it was
+        raise
+    shutil.rmtree(retired, ignore_errors=True)
+
+
 def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
     """Apply GeoZarr conventions and a multiscale pyramid to the committed Icechunk store.
 
@@ -430,19 +492,25 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
     ``write_to_icechunk_store`` to add them, so every Icechunk store follows the
     same GeoZarr layout regardless of size.
 
-    The rewrite must materialise the whole store in memory first, because
-    ``write_to_icechunk_store`` overwrites the very store it is reading from. That
-    is unavoidable on the initial ingest and whenever a pyramid must be rebuilt,
-    but a *temporal append* to an already-normalised flat store produces nothing
-    new: ``spatial_ref`` is a scalar that survives the append and streaming
-    refreshes the root attrs on every commit. We detect that case and skip the
-    read-rewrite, avoiding both the full in-memory load and the write
-    amplification of re-emitting the entire store on every sync.
+    ``write_to_icechunk_store`` would overwrite the very store it is reading from, so the
+    rewrite goes to a sibling store which is then swapped in. That keeps the source readable
+    while topozarr streams the pyramid out of it, which is what lets the build stay lazy
+    instead of materialising the whole store in RAM.
+
+    A *temporal append* to an already-normalised flat store produces nothing new, though:
+    ``spatial_ref`` is a scalar that survives the append and streaming refreshes the root
+    attrs on every commit. We detect that case and skip the read-rewrite entirely, avoiding
+    the write amplification of re-emitting the whole store on every sync.
 
     Errors are logged and swallowed so that the plain flat artifact is still
     registered.
     """
     from open_climate_service.data_accessor.services.accessor import open_icechunk_dataset
+
+    # Belt and braces: `_create_streaming_artifact` already heals this under the lock before
+    # ingest, which is the call that matters. Kept because this function is also entered
+    # directly, and because it is idempotent — a present target makes it a no-op.
+    recover_interrupted_swap(store_path)
 
     try:
         ds = open_icechunk_dataset(store_path)
@@ -469,12 +537,28 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
                 store_path.name,
             )
             return
-        downloader.write_to_icechunk_store(
-            ds.load(),
-            store_path,
-            pyramid_method=downloader.resampling_method_from_template(dataset),
-            commit_message="Applied GeoZarr conventions",
-        )
+        # `ds` reads lazily from `store_path`, and the rewrite overwrites that same store —
+        # the aliasing is why this used to materialise everything first. Build into a sibling
+        # store and swap it in, so the source stays readable while topozarr streams the
+        # pyramid out of it. The cost moves from RAM (the whole store: 3.47 GB for Uganda's
+        # GPP) to transient disk (one extra copy, reclaimed on success).
+        staging = store_path.with_name(f"{store_path.name}.rebuild")
+        shutil.rmtree(staging, ignore_errors=True)
+        try:
+            downloader.write_to_icechunk_store(
+                ds,
+                staging,
+                pyramid_method=downloader.resampling_method_from_template(dataset),
+                commit_message="Applied GeoZarr conventions",
+            )
+            ds.close()  # drop the read session before the directory moves under it
+            _swap_store(staging, store_path)
+        finally:
+            # A failed build leaves a partial copy of the whole store behind. That matters most
+            # when the failure *was* disk exhaustion: the flat-store fallback below would
+            # otherwise run with the transient copy still occupying the space. A successful
+            # swap has already moved `staging` away, so this is a no-op then.
+            shutil.rmtree(staging, ignore_errors=True)
     except Exception:
         logger.error(
             "GeoZarr/pyramid write failed for '%s'; flat Icechunk artifact will be used as-is",
