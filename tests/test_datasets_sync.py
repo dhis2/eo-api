@@ -1139,13 +1139,19 @@ def test_maybe_build_pyramid_calls_write_to_icechunk_store(tmp_path: Path, monke
 
     def fake_write(ds_arg: xr.Dataset, path: Path, *a: object, **kw: object) -> None:
         written.append((ds_arg, path))
+        path.mkdir(parents=True, exist_ok=True)  # a real write leaves a store behind
 
     monkeypatch.setattr(downloader, "write_to_icechunk_store", fake_write)
 
     _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "precip"})
 
     assert len(written) == 1
-    assert written[0][1] == icechunk_path
+    # The rewrite cannot target the store it is reading from, so it goes to a sibling and is
+    # swapped in. What matters to callers is where it ends up, and that nothing is left over.
+    assert written[0][1] == icechunk_path.with_name(f"{icechunk_path.name}.rebuild")
+    assert icechunk_path.is_dir()
+    assert not written[0][1].exists()
+    assert not icechunk_path.with_name(f"{icechunk_path.name}.retired").exists()
 
 
 def test_maybe_build_pyramid_skips_rewrite_for_normalized_flat_store(
@@ -1235,3 +1241,167 @@ def test_plan_sync_append_for_icechunk_artifact(
     )
 
     assert result.action == SyncAction.APPEND
+
+
+def test_swap_store_replaces_the_target_and_cleans_up(tmp_path: Path) -> None:
+    from open_climate_service.ingestions.services import _swap_store
+
+    target = tmp_path / "ds.icechunk"
+    target.mkdir()
+    (target / "old.txt").write_text("old", encoding="utf-8")
+    staging = tmp_path / "ds.icechunk.rebuild"
+    staging.mkdir()
+    (staging / "new.txt").write_text("new", encoding="utf-8")
+
+    _swap_store(staging, target)
+
+    assert (target / "new.txt").read_text(encoding="utf-8") == "new"
+    assert not (target / "old.txt").exists()
+    assert not staging.exists()
+    assert not (tmp_path / "ds.icechunk.retired").exists()
+
+
+def test_swap_store_puts_the_original_back_when_the_swap_fails(tmp_path: Path) -> None:
+    """A failed swap must not leave the dataset without a store."""
+    from open_climate_service.ingestions.services import _swap_store
+
+    target = tmp_path / "ds.icechunk"
+    target.mkdir()
+    (target / "old.txt").write_text("old", encoding="utf-8")
+    missing_staging = tmp_path / "ds.icechunk.rebuild"  # never created -> rename raises
+
+    with pytest.raises(OSError):
+        _swap_store(missing_staging, target)
+
+    # The original survived, contents intact.
+    assert (target / "old.txt").read_text(encoding="utf-8") == "old"
+
+
+def test_recover_interrupted_swap_restores_a_store_killed_between_renames(tmp_path: Path) -> None:
+    """A SIGKILL between the two renames leaves the published path missing and the data at
+    `.retired`, which no reader looks for. The exception handler cannot cover that case.
+    """
+    from open_climate_service.ingestions.services import recover_interrupted_swap
+
+    target = tmp_path / "ds.icechunk"
+    retired = tmp_path / "ds.icechunk.retired"
+    retired.mkdir()
+    (retired / "data").write_text("published", encoding="utf-8")
+    assert not target.exists()  # the state a killed swap leaves behind
+
+    assert recover_interrupted_swap(target) is True
+    assert (target / "data").read_text(encoding="utf-8") == "published"
+    assert not retired.exists()
+
+
+def test_recover_interrupted_swap_leaves_a_healthy_store_alone(tmp_path: Path) -> None:
+    """A `.retired` directory alongside a live store is leftover space, not a pending recovery.
+
+    Restoring over a healthy store would roll back a completed swap.
+    """
+    from open_climate_service.ingestions.services import recover_interrupted_swap
+
+    target = tmp_path / "ds.icechunk"
+    target.mkdir()
+    (target / "data").write_text("current", encoding="utf-8")
+    retired = tmp_path / "ds.icechunk.retired"
+    retired.mkdir()
+    (retired / "data").write_text("stale", encoding="utf-8")
+
+    assert recover_interrupted_swap(target) is False
+    assert (target / "data").read_text(encoding="utf-8") == "current"
+
+
+def test_recover_interrupted_swap_is_a_no_op_for_a_brand_new_dataset(tmp_path: Path) -> None:
+    from open_climate_service.ingestions.services import recover_interrupted_swap
+
+    assert recover_interrupted_swap(tmp_path / "never-existed.icechunk") is False
+
+
+def test_an_interrupted_swap_is_healed_before_ingest_reads_the_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recovery has to happen before anything inspects the store, not after ingest.
+
+    A swap killed between its two renames leaves the published path missing and the whole
+    history at `.retired`. If recovery runs after the ingest — as it did when it lived only in
+    `_maybe_build_pyramid` — the sequence is:
+
+    1. ingest sees no store, treats it as new, and writes *only* the requested delta;
+    2. recovery then finds the target present and does nothing;
+    3. the entire history stays stranded in `.retired`, unreferenced.
+
+    Nothing errors, and the dataset silently loses everything before the interruption. So this
+    asserts on what the ingest *sees*: the store must already be there, carrying its history.
+    """
+    from types import SimpleNamespace
+
+    from open_climate_service.data_manager.services import downloader
+    from open_climate_service.ingestions import services as ingestion_services
+    from open_climate_service.ingestions.schemas import ArtifactRequestScope
+
+    target = tmp_path / "ds.icechunk"
+    retired = tmp_path / "ds.icechunk.retired"
+    # The state a killed swap leaves: no published store, the history under `.retired`.
+    retired.mkdir()
+    (retired / "history").write_text("2026-01-01,2026-01-02", encoding="utf-8")
+
+    seen: dict[str, object] = {}
+
+    def fake_ingest(**kwargs: object) -> object:
+        store_path = kwargs["store_path"]
+        assert isinstance(store_path, Path)
+        seen["store_existed"] = store_path.exists()
+        history = store_path / "history"
+        seen["history"] = history.read_text(encoding="utf-8") if history.exists() else None
+        # Append the new period the way a real sync would, onto whatever is there.
+        if history.exists():
+            history.write_text(history.read_text(encoding="utf-8") + ",2026-01-03", encoding="utf-8")
+        else:
+            store_path.mkdir(parents=True, exist_ok=True)
+            history.write_text("2026-01-03", encoding="utf-8")
+        return SimpleNamespace(periods_written=1)
+
+    monkeypatch.setattr(downloader, "get_icechunk_path", lambda _dataset: target)
+    monkeypatch.setattr(ingestion_services, "run_streaming_ingest_sync", fake_ingest)
+    monkeypatch.setattr(ingestion_services, "_load_streaming_plugin", lambda *a, **k: object())
+    monkeypatch.setattr(ingestion_services, "_maybe_build_pyramid", lambda *a, **k: None)
+    monkeypatch.setattr(
+        ingestion_services,
+        "get_data_coverage_for_paths",
+        lambda *a, **k: {
+            "has_data": True,
+            "forecast_reference": None,
+            "coverage": {
+                "temporal": {"start": "2026-01-01", "end": "2026-01-03"},
+                "spatial": {"xmin": 0.0, "ymin": 0.0, "xmax": 1.0, "ymax": 1.0},
+                "spatial_wgs84": None,
+            },
+        },
+    )
+    monkeypatch.setattr(ingestion_services, "_upsert_artifact_record", lambda record, **k: record)
+
+    ingestion_services._create_streaming_artifact(
+        dataset={
+            "id": "ds1",
+            "name": "DS1",
+            "variable": "precip",
+            "period_type": "daily",
+            "ingestion": {"plugin": "example.Plugin"},
+        },
+        plugin_path="example.Plugin",
+        start="2026-01-01",
+        end="2026-01-03",
+        bbox=[0.0, 0.0, 1.0, 1.0],
+        country_code=None,
+        overwrite=False,
+        publish=False,
+        request_scope=ArtifactRequestScope(start="2026-01-01", end="2026-01-03", bbox=(0.0, 0.0, 1.0, 1.0)),
+    )
+
+    # The point of the test: the ingest ran against the recovered store, not a bare path.
+    assert seen["store_existed"] is True
+    assert seen["history"] == "2026-01-01,2026-01-02"
+    # And the delta landed on top of the history rather than replacing it.
+    assert (target / "history").read_text(encoding="utf-8") == "2026-01-01,2026-01-02,2026-01-03"
+    assert not retired.exists()
