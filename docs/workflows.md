@@ -232,6 +232,17 @@ It runs `load_collection(observed, temporal_extent) + load_collection(normal) �
 
 The `output_dataset_id` needs a static template like the normals above (auto-registered if missing; a diverging `rdbu_r` display centred on zero suits anomalies). Pair a **daily** observed dataset with a day-of-year normal, or a **monthly** observed dataset with a month normal — `compute_anomaly` aligns on the matching axis automatically.
 
+The two methods publish **different units**, so a pre-registered template belongs to one of them:
+
+| `method` | Published units | Suitable range |
+|---|---|---|
+| `absolute` | the observed variable's unit (e.g. `mm/d`) | `[-20, 20]` for precipitation |
+| `relative` | `%` | `[-100, 100]` |
+
+An auto-registered template takes its units from the computed result, so it is correct either way. A pre-registered one is authoritative, and publishing a relative anomaly into a template declaring `mm/d` is **refused** rather than relabelled — otherwise 20 % of normal would be stored as 20 mm of rain per day, which is plausible enough that nothing downstream could catch it. The shipped `*_anomaly_1991_2020` templates declare absolute units, so a relative anomaly needs its own template.
+
+The observed and normal cubes must be on the **same grid** — same cell count, same spacing, same positions. Coordinates differing by floating-point noise are normalised silently; anything larger is refused, because a normal offset by even part of a cell would otherwise be differenced against the wrong cells.
+
 ### Example
 
 ```json

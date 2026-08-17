@@ -578,7 +578,9 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     # fields it declares, so overwrite any placeholder/generic value left on the variable.
     from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
 
-    apply_cf_metadata(ds, cf_attrs_from_template(template), overwrite=True)
+    cf_attrs = cf_attrs_from_template(template)
+    _reject_incompatible_template_units(ds, variable, cf_attrs)
+    apply_cf_metadata(ds, cf_attrs, overwrite=True)
 
     coverage = _derive_coverage(ds, x_dim, y_dim, t_dim)
     period_type: str | None = _derive_period_type(ds, options, source_template, t_dim)
@@ -707,11 +709,85 @@ def _derive_managed_dataset_template(
         if isinstance(explicit, str) and explicit:
             template[field] = explicit
             continue
+        # Units the process actually produced beat units inherited from the source dataset.
+        # A source template's units describe its *own* variable, so inheriting them is a
+        # guess that only holds while the process preserves units — and processes that change
+        # them say so on the result. `compute_anomaly(method="relative")` returns percent of
+        # normal with `units: "%"`; inheriting `mm/d` from the observed precipitation dataset
+        # published percentages as a precipitation depth, and 20 "mm/d" looks entirely
+        # plausible, so nothing downstream could catch it.
+        if field == "units":
+            produced = _variable_units(ds, variable)
+            if produced is not None:
+                template[field] = produced
+                continue
         inherited = source_template.get(field) if isinstance(source_template, dict) else None
         if isinstance(inherited, str) and inherited:
             template[field] = inherited
 
     return template
+
+
+_PLACEHOLDER_UNITS = frozenset({"", "1", "-", "none", "unknown", "unitless", "n/a", "na"})
+"""Unit strings that carry no information, so inheriting over them is an improvement.
+
+A cube arriving with one of these has not asserted anything about its units, which is the
+case the source-template inheritance exists to fill in.
+"""
+
+
+def _variable_units(ds: Any, variable: str) -> str | None:
+    """The units the result variable declares, or None when it declares nothing meaningful."""
+    try:
+        units = ds[variable].attrs.get("units")
+    except Exception:
+        return None
+    if not isinstance(units, str):
+        return None
+    text = units.strip()
+    return text if text and text.lower() not in _PLACEHOLDER_UNITS else None
+
+
+def _reject_incompatible_template_units(ds: Any, variable: str, cf_attrs: dict[str, str]) -> None:
+    """Refuse to relabel a result with template units of a different physical dimension.
+
+    A pre-registered template's units are authoritative over a *placeholder* left on the
+    variable — that is what the overwrite at the call site is for. They are not a licence to
+    relabel a quantity as something it is not: publishing `compute_anomaly(method="relative")`
+    against the shipped `..._anomaly_1991_2020` templates would stamp `mm/d` over the `%`
+    earthkit produced, turning 20 percent-of-normal into 20 mm of rain per day. Both values
+    are plausible and the template's diverging range covers both, so no later check could
+    notice.
+
+    Dimensionality, not string equality, because relabelling within a dimension is the
+    legitimate case this must not break (a template declaring `degC` over a `K` placeholder,
+    or a tidier spelling of the same unit). A dimensionless-vs-dimensional mismatch is the
+    one that cannot be a spelling difference.
+    """
+    declared = cf_attrs.get("units")
+    produced = _variable_units(ds, variable)
+    if not isinstance(declared, str) or not declared.strip() or produced is None:
+        return
+    if declared.strip() == produced:
+        return
+    try:
+        from xclim.core.units import units2pint
+    except ImportError:
+        return  # client-only install; validate_units() makes the same allowance
+    try:
+        declared_dim = units2pint(declared).dimensionality
+        produced_dim = units2pint(produced).dimensionality
+    except Exception:  # noqa: BLE001 — an unparseable unit is validate_units()' problem, not ours
+        return
+    if declared_dim != produced_dim:
+        raise ValueError(
+            f"dataset template declares units '{declared}' but the result carries '{produced}', "
+            f"which measures a different quantity ({declared_dim or 'dimensionless'} vs "
+            f"{produced_dim or 'dimensionless'}). Publishing would relabel the values rather "
+            "than convert them. Use a template whose units match the process output (a relative "
+            "anomaly is a percentage, not the observed variable's unit), or pass an explicit "
+            "'units' in the save_result options."
+        )
 
 
 def _derive_template_name(

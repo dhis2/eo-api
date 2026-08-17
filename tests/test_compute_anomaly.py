@@ -111,6 +111,46 @@ def test_aligns_grids_differing_by_float_noise() -> None:
     assert float(out.isel(t=99, y=0, x=0)) == pytest.approx(5.0)
 
 
+def test_grid_offset_larger_than_float_noise_is_rejected() -> None:
+    """A real offset must raise, not snap to whichever cell happens to be nearest.
+
+    The earlier implementation reindexed by nearest neighbour within *half a grid step*, so a
+    normal offset by a whole cell came back shifted one cell with a single NaN — the anomaly
+    computed against the neighbouring cell for almost every cell, and nothing said so. A
+    cell-centre vs cell-edge convention difference between two products is exactly that case.
+    """
+    normal = _normal_doy()  # x/y are [1.0, 2.0], so the grid step is 1.0
+    for offset in (0.4, 0.5, 1.0):
+        shifted = normal.assign_coords(x=normal.x.values + offset)
+        with pytest.raises(ValueError, match="describe different cells"):
+            compute_anomaly(_observed_doy(offset=5.0), shifted, method="absolute")
+
+
+def test_grid_size_mismatch_is_rejected() -> None:
+    normal = _normal_doy().isel(x=slice(0, 1))
+    with pytest.raises(ValueError, match="disagree on the size of 'x'"):
+        compute_anomaly(_observed_doy(offset=5.0), normal, method="absolute")
+
+
+def test_grid_spacing_mismatch_is_rejected() -> None:
+    """Same cell count, different resolution — a regrid, which must be explicit."""
+    normal = _normal_doy().assign_coords(x=[1.0, 3.0])
+    with pytest.raises(ValueError, match="different 'x' spacing"):
+        compute_anomaly(_observed_doy(offset=5.0), normal, method="absolute")
+
+
+def test_float_noise_relabels_rather_than_resamples() -> None:
+    """The noise fix must copy coordinates across, leaving the values untouched."""
+    normal = _normal_doy()
+    noisy = normal.assign_coords(x=normal.x.values - 1e-11)
+    observed = _observed_doy(offset=5.0)
+
+    out = compute_anomaly(observed, noisy, method="absolute")
+
+    np.testing.assert_array_equal(out.x.values, observed.x.values)
+    assert bool(np.isfinite(out).all())
+
+
 def test_anomaly_preserves_dask_laziness() -> None:
     out = compute_anomaly(_observed_doy(offset=5.0).chunk({"y": 1, "x": 1}), _normal_doy().chunk({"y": 1, "x": 1}))
     assert out.chunks is not None

@@ -78,8 +78,17 @@ def _observed_step_days(observed: xr.DataArray, t_dim: str) -> float | None:
     return float(np.median(diffs))
 
 
+_COORD_NOISE_RTOL = 1e-6
+"""How far a normal's coordinate may sit from the observed one, as a fraction of the grid step.
+
+Sized for floating-point noise and nothing else. The noise this absorbs is ~1e-11 absolute on
+coordinates of order 1–360, so a millionth of a cell is already five orders of magnitude of
+headroom, while still being five orders below any offset that could represent a different cell.
+"""
+
+
 def _match_spatial_grid(normal: xr.DataArray, observed: xr.DataArray, t_dim: str) -> xr.DataArray:
-    """Snap the normal onto the observed cube's spatial grid.
+    """Relabel the normal's spatial coordinates with the observed cube's, or raise.
 
     Observed and normal cubes can be produced independently (e.g. a CDS-derived observed vs
     an EDH normal whose longitudes were remapped from [0, 360)), so nominally equal grids
@@ -93,24 +102,68 @@ def _match_spatial_grid(normal: xr.DataArray, observed: xr.DataArray, t_dim: str
     correct while silently losing data, and when the whole axis is uniformly offset (the
     realistic remapped-longitude case) that is every cell in the cube.
 
-    Reindexing the normal onto the observed coordinates by nearest neighbour within half a
-    grid step makes float noise snap cleanly, while a genuinely unmatched cell still becomes
-    NaN rather than being silently paired with a distant neighbour.
+    This is therefore **coordinate normalisation, not resampling**: the axes must already
+    describe the same cells (same length, same spacing, same positions to within
+    :data:`_COORD_NOISE_RTOL` of a step), and then the observed coordinates are copied over
+    so the arithmetic aligns. Anything larger raises and asks for an explicit regridding step.
+
+    An earlier version reindexed by nearest neighbour within *half a grid step*, which is
+    nine orders of magnitude more slack than float noise needs, and paired different physical
+    cells without saying so: on a 0.1° grid, a normal offset by a full 0.1° came back shifted
+    one cell with only a single NaN, so the anomaly was computed against the neighbouring
+    cell for 9 of 10 cells while looking clean. A cell-centre vs cell-edge convention
+    mismatch between two products is exactly that case.
 
     Upstream gap, not a preference: earthkit could either accept a tolerance or — cheaper and
     arguably better — detect the failed alignment and raise instead of returning a quietly
     NaN cube. To be filed against ecmwf/earthkit-transforms; delete this helper once it lands.
 
-    The step is taken from the first spacing of each axis, i.e. a *regular* grid is assumed
-    (true for the lat/lon and UTM grids this serves); an irregular axis would mis-size the
-    tolerance.
+    A *regular* grid is assumed (true for the lat/lon and UTM grids this serves); the spacing
+    check below is what makes that assumption explicit rather than silent.
     """
-    spatial_dims = [d for d in observed.dims if d != t_dim and d in normal.dims and d in observed.coords]
+    spatial_dims = [str(d) for d in observed.dims if d != t_dim and d in normal.dims and d in observed.coords]
     if not spatial_dims:
         return normal
-    steps = [abs(float(np.diff(observed[d].values)[0])) for d in spatial_dims if observed.sizes[d] > 1]
-    tolerance = 0.5 * min(steps) if steps else None
-    return normal.reindex({d: observed[d] for d in spatial_dims}, method="nearest", tolerance=tolerance)
+
+    replacements: dict[str, Any] = {}
+    for dim in spatial_dims:
+        obs_coord = observed[dim].values
+        nrm_coord = normal[dim].values
+
+        if obs_coord.shape != nrm_coord.shape:
+            raise ValueError(
+                f"observed and normal disagree on the size of '{dim}' "
+                f"({obs_coord.size} vs {nrm_coord.size}); regrid the normal onto the observed "
+                "grid before computing an anomaly"
+            )
+        if obs_coord.size < 2:
+            # A single cell has no spacing to compare; fall through to the position check,
+            # which needs a step — use the coordinate magnitude to scale the tolerance.
+            step = abs(float(obs_coord[0])) or 1.0
+        else:
+            obs_steps = np.diff(obs_coord.astype(float))
+            nrm_steps = np.diff(nrm_coord.astype(float))
+            step = abs(float(obs_steps[0]))
+            if not np.allclose(nrm_steps, obs_steps, rtol=_COORD_NOISE_RTOL, atol=0.0):
+                raise ValueError(
+                    f"observed and normal have different '{dim}' spacing "
+                    f"({obs_steps[0]:g} vs {nrm_steps[0]:g}); regrid the normal onto the "
+                    "observed grid before computing an anomaly"
+                )
+
+        offset = np.abs(nrm_coord.astype(float) - obs_coord.astype(float))
+        worst = float(offset.max())
+        if worst > _COORD_NOISE_RTOL * abs(step):
+            raise ValueError(
+                f"observed and normal '{dim}' coordinates differ by up to {worst:g} "
+                f"({worst / abs(step):.3g} of the {abs(step):g} grid step), which is more than "
+                "floating-point noise — they describe different cells. Regrid the normal onto "
+                "the observed grid before computing an anomaly."
+            )
+        replacements[dim] = observed[dim]
+
+    # assign_coords, not reindex: a pure relabel cannot reorder, drop or pair cells.
+    return normal.assign_coords(replacements)
 
 
 @process(

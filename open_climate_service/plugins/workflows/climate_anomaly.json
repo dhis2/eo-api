@@ -15,7 +15,7 @@
     },
     {
       "name": "output_dataset_id",
-      "description": "ID of the anomaly dataset to publish. Auto-registered if no static template exists; pre-register one to control the diverging display (no ingestion plugin needed).",
+      "description": "ID of the anomaly dataset to publish. Auto-registered if no static template exists, taking its units from the computed result (so a relative anomaly registers as '%'); pre-register one to control the diverging display, making sure its units match the method (no ingestion plugin needed).",
       "schema": { "type": "string" }
     },
     {
@@ -30,7 +30,7 @@
     },
     {
       "name": "method",
-      "description": "'absolute' (observed − normal, default) or 'relative' (percent).",
+      "description": "'absolute' (observed − normal, default) or 'relative' (percent of normal). A relative anomaly is published with units '%' rather than the observed variable's unit, so a pre-registered output template must declare '%' to match; publishing into one that declares the observed unit is refused rather than relabelled.",
       "schema": { "type": "string", "enum": ["absolute", "relative"] },
       "optional": true,
       "default": "absolute"
