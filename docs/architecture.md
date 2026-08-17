@@ -234,7 +234,8 @@ Plugin code (streaming plugins, `@process` functions) can rely on the following 
 | Longitudes rolled to −180…180 for geographic data             | `normalize_longitudes`                           |
 | CRS kept consistent with the coordinates (never reprojected)  | `resolve_store_crs`                              |
 | Zarr chunking (auto-sized from `extents.temporal.resolution`) | `time_chunk_for_iso_step`                        |
-| Multiscale pyramid generation (when dims > 2048×2048)         | `write_to_icechunk_store`                        |
+| Zarr time-coordinate chunking (bounded for browser axis reads) | `ensure_time_coordinate_chunking`                |
+| Multiscale pyramid generation (when nx × ny > 1024×1024)      | `write_to_icechunk_store`                        |
 | GeoZarr root attributes (`spatial:transform`, `proj:code`, …) | `grid_geometry` / `write_geozarr_attrs`          |
 | Artifact coverage computation                                 | `_coverage_from_dataset`                         |
 | Artifact record persistence                                   | `_store_artifact_record`                         |

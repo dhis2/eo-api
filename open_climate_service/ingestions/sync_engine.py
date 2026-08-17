@@ -32,6 +32,8 @@ from open_climate_service.ingestions.schemas import (
 from open_climate_service.publications.services import managed_dataset_id_for
 from open_climate_service.shared.time import (
     datetime_to_period_string,
+    dekad_bounds,
+    dekad_start,
     normalize_period_string,
     parse_hourly_period_string,
     parse_period_string_to_datetime,
@@ -380,6 +382,11 @@ def _next_period_start(latest_period_end: str, *, period_type: str) -> str:
     if period_type == "daily":
         current = date.fromisoformat(latest_period_end)
         return (current + timedelta(days=1)).isoformat()
+    if period_type == "dekadal":
+        # Step by the covered dekad's own length rather than a fixed 10 days, since the
+        # third dekad of a month runs 8-11 days.
+        _, dekad_end = dekad_bounds(latest_period_end)
+        return (dekad_end + timedelta(days=1)).isoformat()
     if period_type == "weekly":
         current = parse_period_string_to_datetime(latest_period_end).date()
         next_week = datetime.combine(current + timedelta(days=7), time(0))
@@ -402,6 +409,8 @@ def _default_target_end(*, period_type: str) -> str:
         return datetime_to_period_string(utc_now(), period_type)
     if period_type == "daily":
         return today.isoformat()
+    if period_type == "dekadal":
+        return dekad_start(today).isoformat()
     if period_type == "weekly":
         return datetime_to_period_string(utc_now(), period_type)
     if period_type == "monthly":
