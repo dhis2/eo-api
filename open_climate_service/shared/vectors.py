@@ -19,6 +19,7 @@ names, which is everything the metadata below reports.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from pathlib import Path
@@ -72,6 +73,26 @@ def _crs_label(crs: Any) -> str | None:
     return str(name) if name else None
 
 
+def _crs_label_from_projjson(crs: Any) -> str | None:
+    """A short CRS label from the PROJJSON in GeoParquet metadata, without building a CRS object.
+
+    GeoParquet stores the CRS as PROJJSON, whose ``id`` carries the authority and code directly —
+    so the common case needs no PROJ lookup at all. ``crs: null`` means OGC:CRS84 per the spec
+    (lon/lat WGS 84), which is why absent metadata maps to EPSG:4326 rather than to unknown.
+    """
+    if crs is None:
+        return "EPSG:4326"
+    if not isinstance(crs, dict):
+        return None
+    identifier = crs.get("id")
+    if isinstance(identifier, dict):
+        authority, code = identifier.get("authority"), identifier.get("code")
+        if authority and code is not None:
+            return f"{authority}:{code}"
+    name = crs.get("name")
+    return str(name) if name else None
+
+
 def _is_lonlat(crs: Any) -> bool:
     """Whether a CRS is already WGS 84 lon/lat, so reprojection can be skipped.
 
@@ -107,34 +128,81 @@ def collection_path(collection_id: str) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def describe(collection_id: str) -> dict[str, Any] | None:
-    """Metadata for one collection, read from the file itself.
+def _geo_metadata(meta: Any) -> dict[str, Any]:
+    """The GeoParquet ``geo`` metadata for the primary geometry column, or an empty dict.
 
-    Reads the Parquet metadata and geometry column rather than the whole table, so describing a
-    large boundary set does not load it.
+    Read from the Parquet footer, which is a few kilobytes however large the file is.
+    """
+    raw = (meta.metadata or {}).get(b"geo")
+    if raw is None:
+        return {}
+    try:
+        geo = json.loads(raw)
+        column = geo["columns"][geo["primary_column"]]
+    except Exception:  # noqa: BLE001 — malformed metadata is the same as absent metadata here
+        return {}
+    return column if isinstance(column, dict) else {}
+
+
+def describe(collection_id: str) -> dict[str, Any] | None:
+    """Metadata for one collection, read from the file's footer where possible.
+
+    Bounds and geometry types come from the GeoParquet ``geo`` metadata rather than from the
+    geometry column. Both fields are written by every GeoParquet writer we care about — with or
+    without a covering bbox — and reading the footer is ~400x faster than reading every geometry
+    (0.4 ms vs 150 ms for 300k footprints). This matters because `list_collections` describes
+    every collection on every request to `GET /vector-collections`, so the cost of doing it the
+    slow way scales with the total feature count of the instance, not with the response size.
+
+    An older file whose metadata lacks either field falls back to reading the geometry column,
+    which is correct but proportional to the collection.
     """
     path = collection_path(collection_id)
     if path is None:
         return None
-    import geopandas as gpd
     import pyarrow.parquet as pq
 
     try:
         meta = pq.read_metadata(path)
-        frame = gpd.read_parquet(path, columns=["geometry"])
     except Exception:
         logger.warning("Vector collection '%s' could not be read; skipping", collection_id, exc_info=True)
         return None
 
-    bounds = [float(v) for v in frame.total_bounds] if len(frame) else None
+    geo = _geo_metadata(meta)
+    bbox = geo.get("bbox")
+    geometry_types = geo.get("geometry_types")
+    crs_label: str | None
+    # `covering` marks a per-row bbox column, which is what makes a spatial read cheap.
+    supports_bbox_filter = bool((geo.get("covering") or {}).get("bbox"))
+
+    if isinstance(bbox, list) and len(bbox) == 4 and isinstance(geometry_types, list):
+        bounds = [float(v) for v in bbox] if meta.num_rows else None
+        types = sorted({str(t) for t in geometry_types})
+        crs_label = _crs_label_from_projjson(geo.get("crs"))
+    else:
+        logger.debug("Vector collection '%s' has incomplete geo metadata; reading geometry", collection_id)
+        import geopandas as gpd
+
+        try:
+            frame = gpd.read_parquet(path, columns=["geometry"])
+        except Exception:
+            logger.warning("Vector collection '%s' could not be read; skipping", collection_id, exc_info=True)
+            return None
+        bounds = [float(v) for v in frame.total_bounds] if len(frame) else None
+        types = sorted({str(t) for t in frame.geom_type.unique()})
+        crs_label = _crs_label(frame.crs)
+
     return {
         "id": collection_id,
         "feature_count": int(meta.num_rows),
         "properties": [name for name in meta.schema.names if name != "geometry"],
-        "geometry_types": sorted({str(t) for t in frame.geom_type.unique()}),
-        "crs": _crs_label(frame.crs),
+        "geometry_types": types,
+        "crs": crs_label,
         "bbox": bounds,
         "size_bytes": path.stat().st_size,
+        # Whether a windowed read can skip row groups — the difference between a viewport query
+        # touching a few hundred rows and one reading the whole collection.
+        "supports_bbox_filter": supports_bbox_filter,
     }
 
 
@@ -159,11 +227,24 @@ def list_collections() -> list[dict[str, Any]]:
     return described
 
 
+MAX_FEATURES = 50_000
+"""Refuse to build a FeatureCollection larger than this without a ``bbox``.
+
+This function materialises every feature as Python dicts, which costs far more than reading the
+file: for 300k polygons, ``read_parquet`` takes 0.13 s and ``to_geo_dict`` 5.6 s for ~105 MB of
+dicts. That is fine for the boundary sets this exists to serve (tens to thousands of features)
+and hopeless for a collection of building footprints, which a single unqualified call would
+otherwise pull into memory. The limit is generous for any administrative hierarchy and small
+enough to stop that; a windowed read via ``bbox`` is not subject to it beyond its own result size.
+"""
+
+
 def load_feature_collection(
     collection_id: str,
     *,
     id_property: str | None = None,
     properties: list[str] | None = None,
+    bbox: tuple[float, float, float, float] | list[float] | None = None,
 ) -> dict[str, Any]:
     """Read a collection as a GeoJSON FeatureCollection.
 
@@ -175,6 +256,11 @@ def load_feature_collection(
     cosmetics: the feature id becomes the label on the geometry dimension, which is what the
     DHIS2 and CHAP exports use as their location column — so pointing it at an org-unit code
     column is what makes a named collection usable for a DHIS2 push.
+
+    ``bbox`` restricts the read to a lon/lat window. Where the file carries a per-row covering
+    bbox, this is pushed down to row-group pruning and only the matching groups are fetched;
+    otherwise the file is read and filtered, which is correct but not cheap. Collections above
+    :data:`MAX_FEATURES` require it.
     """
     path = collection_path(collection_id)
     if path is None:
@@ -183,13 +269,42 @@ def load_feature_collection(
 
     import geopandas as gpd
 
+    info = describe(collection_id) or {}
+    feature_count = int(info.get("feature_count") or 0)
+    if bbox is None and feature_count > MAX_FEATURES:
+        raise ValueError(
+            f"Vector collection {collection_id!r} has {feature_count:,} features, more than the "
+            f"{MAX_FEATURES:,} that can be loaded as a FeatureCollection. Pass a bbox to read a "
+            "window of it."
+        )
+
     columns: list[str] | None = None
     if properties is not None:
         wanted: set[str] = {*properties, "geometry"}
         if id_property:
             wanted.add(id_property)
         columns = sorted(wanted)
-    frame = gpd.read_parquet(path, columns=columns)
+
+    if bbox is None:
+        frame = gpd.read_parquet(path, columns=columns)
+    elif info.get("supports_bbox_filter"):
+        frame = gpd.read_parquet(path, columns=columns, bbox=tuple(bbox))
+    else:
+        # No covering bbox to prune on, so geopandas would reject `bbox=`. Read and clip instead,
+        # and say so: the difference is a whole-file read, which is what the covering bbox exists
+        # to avoid.
+        logger.info(
+            "Vector collection '%s' has no covering bbox; reading in full and filtering. "
+            "Rewrite it with write_covering_bbox=True to make windowed reads cheap.",
+            collection_id,
+        )
+        from shapely.geometry import box
+
+        full = gpd.read_parquet(path, columns=columns)
+        # Intersects, not clip: the window selects features, it does not cut their geometry —
+        # matching what `read_parquet(bbox=...)` returns on the pushdown path above.
+        window = box(float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+        frame = full[full.intersects(window)]
 
     if frame.crs is not None and not _is_lonlat(frame.crs):
         # aggregate_spatial masks against the raster's own grid and assumes lon/lat, so a

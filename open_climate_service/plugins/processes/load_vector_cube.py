@@ -42,12 +42,20 @@ from open_climate_service.shared import vectors
                 "few keeps a wide boundary set from carrying every attribute through the job."
             )
         },
+        "bbox": {
+            "description": (
+                "Optional lon/lat window [west, south, east, north]. Where the collection "
+                "carries a covering bbox this prunes row groups instead of reading the whole "
+                "file, and it is required for collections too large to load whole."
+            )
+        },
     },
 )
 def load_vector_cube(
     id: str,  # noqa: A002 — the openEO parameter is named `id`
     id_property: str | None = None,
     properties: list[str] | None = None,
+    bbox: list[float] | None = None,
 ) -> dict[str, Any]:
     """Return the collection as a GeoJSON FeatureCollection.
 
@@ -55,4 +63,4 @@ def load_vector_cube(
     client-supplied one and `aggregate_spatial` needs no second input path. The geometry survives
     the aggregation either way — see `aggregate_spatial`'s WKT companion coordinate.
     """
-    return vectors.load_feature_collection(id, id_property=id_property, properties=properties)
+    return vectors.load_feature_collection(id, id_property=id_property, properties=properties, bbox=bbox)

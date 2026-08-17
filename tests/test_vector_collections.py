@@ -116,6 +116,43 @@ def test_traversal_cannot_reach_a_parquet_file_outside_the_vector_dir(vector_dat
     assert vectors.collection_path("../elsewhere") is None
 
 
+def test_describe_reads_bounds_from_the_footer_not_every_geometry(
+    vector_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`GET /vector-collections` describes every collection, so this must not scale with features.
+
+    Bounds and geometry types are in the GeoParquet footer. Reading the geometry column instead
+    is ~400x slower on 300k features, and the listing pays it per collection per request.
+    """
+    _write_districts(vector_data_dir)
+
+    def _refuse(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("describe() must not read the geometry column when metadata suffices")
+
+    monkeypatch.setattr(gpd, "read_parquet", _refuse)
+
+    info = vectors.describe("districts")
+    assert info is not None
+    assert info["bbox"] == [0.0, 0.0, 4.0, 4.0]
+    assert info["geometry_types"] == ["Polygon"]
+    assert info["crs"] == "EPSG:4326"
+    assert info["feature_count"] == 2
+
+
+def test_describe_reports_whether_windowed_reads_are_cheap(vector_data_dir: Path) -> None:
+    """A covering bbox is the difference between pruning row groups and reading everything."""
+    _write_districts(vector_data_dir, name="plain")
+    frame = _write_districts(vector_data_dir, name="unused")
+    (vector_data_dir / "unused.parquet").unlink()
+    frame.to_parquet(vector_data_dir / "covered.parquet", write_covering_bbox=True)
+
+    plain = vectors.describe("plain")
+    covered = vectors.describe("covered")
+    assert plain is not None and covered is not None
+    assert plain["supports_bbox_filter"] is False
+    assert covered["supports_bbox_filter"] is True
+
+
 # --- loading ---------------------------------------------------------------------------------
 
 
@@ -158,6 +195,48 @@ def test_unknown_id_property_names_the_available_columns(vector_data_dir: Path) 
     _write_districts(vector_data_dir)
     with pytest.raises(ValueError, match="no property 'code'.*ou_code"):
         load_vector_cube("districts", id_property="code")
+
+
+def test_a_collection_too_large_to_materialise_is_refused(
+    vector_data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`load_vector_cube` builds Python dicts per feature, so an unbounded read is a foot-gun.
+
+    `/vector-collections` advertises every collection and the process accepts any id, so once a
+    building-footprint collection exists, one unqualified call would pull millions of features
+    into memory. 300k polygons already cost ~5.6 s and ~105 MB as dicts.
+    """
+    _write_districts(vector_data_dir)
+    monkeypatch.setattr(vectors, "MAX_FEATURES", 1)
+
+    with pytest.raises(ValueError, match="more than the 1 that can be loaded"):
+        load_vector_cube("districts")
+
+    # ...but a windowed read is allowed, since its cost is bounded by the window.
+    payload = load_vector_cube("districts", bbox=[0.0, 0.0, 4.0, 1.0])
+    assert payload["type"] == "FeatureCollection"
+
+
+def test_bbox_restricts_the_features_returned(vector_data_dir: Path) -> None:
+    """A window over the southern half returns only the southern district."""
+    _write_districts(vector_data_dir)
+    payload = load_vector_cube("districts", id_property="ou_code", bbox=[0.0, 0.0, 4.0, 1.0])
+    assert [feature["id"] for feature in payload["features"]] == ["MW.S"]
+
+
+def test_bbox_uses_row_group_pruning_when_the_file_supports_it(vector_data_dir: Path) -> None:
+    """With a covering bbox the read is pushed down; without one it falls back to read-and-clip.
+
+    Both must return the same features -- the covering bbox is a performance property, not a
+    semantic one.
+    """
+    frame = _write_districts(vector_data_dir, name="plain")
+    frame.to_parquet(vector_data_dir / "covered.parquet", write_covering_bbox=True)
+
+    window = [0.0, 0.0, 4.0, 1.0]
+    plain = load_vector_cube("plain", id_property="ou_code", bbox=window)
+    covered = load_vector_cube("covered", id_property="ou_code", bbox=window)
+    assert [f["id"] for f in plain["features"]] == [f["id"] for f in covered["features"]] == ["MW.S"]
 
 
 # --- routes ----------------------------------------------------------------------------------

@@ -90,7 +90,8 @@ curl http://localhost:8000/vector-collections
     "geometry_types": ["Polygon"],
     "crs": "EPSG:4326",
     "bbox": [32.7, -17.1, 35.9, -9.4],
-    "size_bytes": 148329
+    "size_bytes": 148329,
+    "supports_bbox_filter": true
   }
 ]
 ```
@@ -109,6 +110,15 @@ stats.download("districts.parquet", format="PARQUET")
 `id_property` names the column that becomes each feature's id. That is more than cosmetic: the feature id becomes the label on the `geometry` dimension, which is what the `DHIS2JSON` and `CHAPCSV` exports use as their location column — so point it at an org-unit code column when the result is destined for DHIS2.
 
 A collection in a projected CRS is reprojected to EPSG:4326 on load, since the aggregation masks against the raster's own lon/lat grid.
+
+`load_vector_cube` builds a GeoJSON feature per row, so it is meant for boundary sets — administrative hierarchies, catchments — not for collections of hundreds of thousands of features. Above 50,000 features an unqualified call is refused, and a `bbox` is required:
+
+```python
+{"process_id": "load_vector_cube",
+ "arguments": {"id": "buildings", "bbox": [85.2, 27.6, 85.4, 27.8]}}
+```
+
+Where the GeoParquet carries a per-row covering bbox — written with `write_covering_bbox=True` — a windowed read prunes row groups and fetches only the matching ones. `supports_bbox_filter` in the listing says whether a given collection has one; without it the window still works, but the whole file is read and filtered.
 
 Named collections are an addition, not a replacement: passing a GeoJSON `FeatureCollection` directly works exactly as before.
 
