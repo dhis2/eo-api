@@ -183,8 +183,18 @@ def aggregate_spatial(
     # feature id, and the DHIS2 and CHAP exports key their location column on it
     # (`location_field` defaults to "geometry"). Putting shapes there would break both.
     #
-    # WKT strings rather than shapely objects, because an object-dtype coordinate cannot be
-    # written by the Zarr or NetCDF writers, and this cube reaches them via `save_result`.
+    # WKT strings rather than shapely objects, which is what openEO's vector datacube model uses
+    # (xvec puts shapely geometries in an object-dtype coordinate with a CRS-carrying
+    # GeometryIndex). This process does not build an xvec cube in the first place — the geometry
+    # dimension carries string feature ids, because that is the label the exports need — so the
+    # carrier is chosen for robustness instead: a string coordinate is inert on every path the
+    # cube can take, whereas an object-dtype one makes `to_zarr` fail outright, and the drop that
+    # currently prevents that lives in a single place in the job writer.
+    #
+    # xvec's own encodings are not a better option here: `encode_wkb` round-trips through Zarr as
+    # null-terminated bytes and comes back truncated, and `encode_cf` restructures the cube into
+    # several CF geometry variables — right for an archival file, wrong for a carrier that only
+    # has to survive as far as the vector writer.
     combined = combined.assign_coords({GEOMETRY_WKT_COORD: (geom_dim, [geom.wkt for geom in geom_shapes])})
     return combined
 
