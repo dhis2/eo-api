@@ -8,6 +8,7 @@ import numpy as np
 import xarray as xr
 
 from open_climate_service.process import process
+from open_climate_service.shared.vectors import GEOMETRY_WKT_COORD
 
 
 def _parse_geometries(geometries: Any) -> tuple[list[Any], list[str]]:
@@ -173,6 +174,18 @@ def aggregate_spatial(
 
     combined = xr.concat(results, dim=geom_dim)
     combined[geom_dim] = geom_labels
+    # Carry the shapes as well as the labels, so the result is a vector datacube rather than a
+    # table that has forgotten where it came from — `save_result(format="GeoParquet")` writes
+    # them straight out, and a consumer can map the result without joining back to a boundary
+    # file. See CLIM-836.
+    #
+    # A companion coordinate rather than replacing the labels on `geom_dim`: the label is the
+    # feature id, and the DHIS2 and CHAP exports key their location column on it
+    # (`location_field` defaults to "geometry"). Putting shapes there would break both.
+    #
+    # WKT strings rather than shapely objects, because an object-dtype coordinate cannot be
+    # written by the Zarr or NetCDF writers, and this cube reaches them via `save_result`.
+    combined = combined.assign_coords({GEOMETRY_WKT_COORD: (geom_dim, [geom.wkt for geom in geom_shapes])})
     return combined
 
 

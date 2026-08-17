@@ -18,6 +18,7 @@ from open_climate_service.openeo.jobs import get_openeo_job_service
 from open_climate_service.read_only import read_only_middleware
 from open_climate_service.stac import routes as stac_routes
 from open_climate_service.system import routes as system_routes
+from open_climate_service.vectors import routes as vector_routes
 
 # Hosted browser tools that read a Zarr store directly over HTTP. They are the reason a local
 # instance needs any cross-origin story at all: each is a public page fetching a store that may
@@ -172,6 +173,7 @@ def create_app() -> FastAPI:
     _app.include_router(openeo_routes.udp_router, prefix="/process_graphs", tags=["openEO"])
     _app.include_router(openeo_routes.result_router, prefix="/result", tags=["openEO"])
     _app.include_router(extent_routes.router, prefix="/extent", tags=["Extent"])
+    _app.include_router(vector_routes.router, prefix="/vector-collections", tags=["Vector collections"])
     _app.include_router(dataset_template_routes.router, prefix="/dataset-templates", tags=["Dataset templates"])
     _app.include_router(ingestion_routes.datasets_router, prefix="/datasets", tags=["Datasets"])
     _app.include_router(ingestion_routes.ingestions_router, prefix="/ingestions", tags=["Ingestions"])
