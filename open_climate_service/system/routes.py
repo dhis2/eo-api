@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import urllib.parse
@@ -25,7 +26,32 @@ from .templates import (
     wants_json,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+
+def _describe_exception(exc: BaseException, *, with_type: bool = False) -> str:
+    """Return an operator-readable description, unwrapping exception groups.
+
+    An ``ExceptionGroup`` stringifies as ``unhandled errors in a TaskGroup (1 sub-exception)``,
+    which names the plumbing and discards the cause. Ingest reaches plenty of async code that
+    raises inside a task group — zarr's concurrent chunk reads, for one — so without this the
+    operator gets the wrapper and nothing to act on, and the sub-exception is lost for good
+    because these handlers turn it into a redirect.
+
+    The type prefix is added for members of a group, where the exception class is most of the
+    signal, and omitted for a lone exception so existing messages read unchanged.
+    """
+    if isinstance(exc, BaseExceptionGroup):
+        described: dict[str, None] = {}
+        for member in exc.exceptions:
+            described.setdefault(_describe_exception(member, with_type=True), None)
+        return "; ".join(described) or str(exc)
+    text = str(exc).strip()
+    if not text:
+        return type(exc).__name__
+    return f"{type(exc).__name__}: {text}" if with_type else text
 
 
 async def _sse_events(queue: asyncio.Queue[dict[str, Any] | None]) -> AsyncIterator[str]:
@@ -124,7 +150,8 @@ async def manage_ingest(request: Request) -> Response:
         msg = urllib.parse.quote(str(exc.detail))
         return RedirectResponse(f"{base}/manage?error={msg}", status_code=303)
     except Exception as exc:
-        msg = urllib.parse.quote(str(exc))
+        logger.exception("Manage form submission failed")
+        msg = urllib.parse.quote(_describe_exception(exc))
         return RedirectResponse(f"{base}/manage?error={msg}", status_code=303)
 
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -162,10 +189,12 @@ async def manage_ingest(request: Request) -> Response:
                 {"error": str(exc.detail), "redirect": f"{base}/manage?error={msg}"},
             )
         except Exception as exc:
-            msg = urllib.parse.quote(str(exc))
+            logger.exception("Manage operation failed")
+            detail = _describe_exception(exc)
+            msg = urllib.parse.quote(detail)
             loop.call_soon_threadsafe(
                 queue.put_nowait,
-                {"error": str(exc), "redirect": f"{base}/manage?error={msg}"},
+                {"error": detail, "redirect": f"{base}/manage?error={msg}"},
             )
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)
@@ -194,7 +223,8 @@ async def manage_sync(request: Request) -> Response:
         msg = urllib.parse.quote(str(exc.detail))
         return RedirectResponse(f"{base}/manage?error={msg}", status_code=303)
     except Exception as exc:
-        msg = urllib.parse.quote(str(exc))
+        logger.exception("Manage form submission failed")
+        msg = urllib.parse.quote(_describe_exception(exc))
         return RedirectResponse(f"{base}/manage?error={msg}", status_code=303)
 
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -222,10 +252,12 @@ async def manage_sync(request: Request) -> Response:
                 {"error": str(exc.detail), "redirect": f"{base}/manage?error={msg}"},
             )
         except Exception as exc:
-            msg = urllib.parse.quote(str(exc))
+            logger.exception("Manage operation failed")
+            detail = _describe_exception(exc)
+            msg = urllib.parse.quote(detail)
             loop.call_soon_threadsafe(
                 queue.put_nowait,
-                {"error": str(exc), "redirect": f"{base}/manage?error={msg}"},
+                {"error": detail, "redirect": f"{base}/manage?error={msg}"},
             )
         finally:
             loop.call_soon_threadsafe(queue.put_nowait, None)
