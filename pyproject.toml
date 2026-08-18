@@ -118,11 +118,19 @@ server = [
     # openeo-processes-dask note above. Add a component here when a process needs it.
     #   transforms — climatological normals + anomalies, deaccumulation
     #   meteo      — thermodynamics; auto-registered as processes (openeo/earthkit_processes.py)
-    #   data       — format-agnostic readers (GRIB in particular, for ECMWF sources)
     #   utils      — shared helpers, imported by the above
+    #
+    # earthkit-data (GRIB/BUFR readers) is deliberately absent: nothing here imports it, no
+    # other earthkit component requires it outside their own [all]/[test]/[docs] extras, and
+    # it is the only dependency that made a Windows install impossible — it requires
+    # eccodeslib and eckit, both of which require eckitlib, and none of those three has ever
+    # published a Windows wheel (ecmwf/earthkit-data#1105). Every other package in the
+    # resolved tree is pure-Python or ships win_amd64, including `eccodes` itself, which is
+    # why the failure was so confusing to hit. A plugin that genuinely reads GRIB declares
+    # earthkit-data in its own instance dependencies, as it would any other plugin-owned
+    # import — see tests/test_scientific_libraries.py for the guard that keeps it out.
     "earthkit-transforms>=1.0",
     "earthkit-meteo>=1.0",
-    "earthkit-data>=1.1",
     "earthkit-utils>=1.0",
     # ERA5-Land plugin runtime deps — the CDS API client and the netCDF4 engine its
     # downloads are read with.
