@@ -7,6 +7,7 @@ from starlette.responses import Response
 from open_climate_service.data_registry.routes import _get_dataset_or_404
 from open_climate_service.extents.services import get_extent_or_404
 from open_climate_service.ingestions import services
+from open_climate_service.ingestions.job_submission import INGESTION_JOB_HREF_BASE, submit_sync_job
 from open_climate_service.ingestions.schemas import (
     CreateIngestionRequest,
     DatasetDetailRecord,
@@ -25,8 +26,6 @@ datasets_router = APIRouter()
 zarr_router = APIRouter()
 icechunk_router = APIRouter()
 sync_router = APIRouter()
-
-INGESTION_JOB_HREF_BASE = "/ingestions/jobs"
 
 
 def _prefer_respond_async(prefer: str | None) -> bool:
@@ -184,14 +183,10 @@ def sync_dataset(
     if _prefer_respond_async(prefer):
         services.plan_sync_dataset(dataset_id=dataset_id, end=request.end)
 
-        from open_climate_service.ingestions.processes import execute_sync
-        from open_climate_service.jobs.service import get_job_service
-
-        job = get_job_service().submit_callable_job(
-            func=execute_sync,
-            label="sync",
-            request={"dataset_id": dataset_id, **request.model_dump()},
-            job_href_base=INGESTION_JOB_HREF_BASE,
+        job = submit_sync_job(
+            dataset_id=dataset_id,
+            end=request.end,
+            publish=request.publish,
         )
         response.status_code = 202
         response.headers["Location"] = f"{INGESTION_JOB_HREF_BASE}/{job.job_id}"
