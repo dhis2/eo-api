@@ -66,6 +66,35 @@ def precip_anomaly(pr: xr.DataArray, baseline: float = 0.0) -> xr.DataArray:
 
 A plugin process with the same id as an existing process overrides it. The server must be restarted to pick up new process files. For built-in climate indices, see [Climate indices](climate_indices.md).
 
+### Scientific libraries available to your process
+
+These are declared dependencies of the server, so you can import them in a plugin process without adding anything to your instance's `pyproject.toml`:
+
+| Library | Use it for |
+|---|---|
+| [xarray](https://docs.xarray.dev) | The cube type every process takes and returns |
+| [numpy](https://numpy.org), [pandas](https://pandas.pydata.org) | Array and time-series primitives |
+| [xclim](https://xclim.readthedocs.io) | Peer-reviewed climate indices — 179 indicators, already exposed as processes (see [Climate indices](climate_indices.md)) |
+| [earthkit](https://earthkit.ecmwf.int) | ECMWF's toolkit: `earthkit.transforms` (climatologies, anomalies, deaccumulation), `earthkit.meteo` (thermodynamics) |
+| [rioxarray](https://corteva.github.io/rioxarray), [metpy](https://unidata.github.io/MetPy) | Raster/CRS operations and meteorological calculations |
+
+Anything outside this list belongs in your own instance's dependencies — the plugin that ships the import owns it. Note that plugin modules are imported **lazily, when a process runs or an ingest starts**, so a missing dependency will not show up at startup: the API boots cleanly and the dataset still lists in `/collections`, then the run fails. Declaring it is the only reliable fix.
+
+### Choosing between a standard process and a library
+
+Reach for the standard openEO process first. Roughly 130 are available out of the box, and they are what every openEO client, tutorial and process graph already speaks — a locally named equivalent fragments that vocabulary.
+
+- **openEO names it** → use it. Temporal and spatial aggregation, reductions, resampling, and the `mean`/`median`/`sd`/`quantiles` reducers are all standard: `aggregate_temporal`, `aggregate_temporal_period`, `aggregate_spatial`, `reduce_dimension`, `resample_cube_temporal`.
+- **openEO does not name it** → wrap a library in a `@process` function. Climatological normals, anomalies and deaccumulation have no standard equivalent, which is why they exist here as named processes.
+
+This is also why the two libraries are surfaced differently. xclim's indicators and earthkit-meteo's thermodynamic functions are auto-registered, so they appear in `GET /processes` individually — each is a distinct scientific quantity openEO does not define. earthkit-transforms is deliberately *not* auto-registered: most of it duplicates the standard aggregation processes, and its public functions are decorator-wrapped down to `(*args, **kwargs)`, leaving no signature from which to derive a usable process description. Call it from a hand-written `@process` instead, where you control the parameters and documentation.
+
+### Units are part of the contract
+
+Processes that wrap unit-sensitive physics should validate their inputs rather than trust them. Stored variables are CF-stamped from the `units` field of their dataset template, and those units are whatever the dataset declares — ERA5-Land temperature, for example, is converted to `degC` at ingest, while ECMWF library functions expect kelvin. Passing one for the other raises no error and produces a plausible, wrong number.
+
+The auto-registered earthkit-meteo processes handle this for you: each reads the unit its upstream function documents, converts a compatible cube (`degC` → `K`, `hPa` → `Pa`), and refuses a cube whose units are missing or incompatible. The check does not trust upstream docstrings to be well-formed: a parameter documented as taking a cube but carrying no unit the adapter can enforce is *refused registration* rather than quietly advertised as a plain number, and a small override table supplies units for known upstream documentation defects. If you write a process with the same sensitivity, do the same — and make sure your dataset templates declare `units`, since that is what makes the check possible.
+
 ---
 
 ## Workflows

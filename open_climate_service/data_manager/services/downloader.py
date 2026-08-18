@@ -30,10 +30,60 @@ def _resolve_download_dir() -> Path:
 DOWNLOAD_DIR = _resolve_download_dir()
 
 
-_PYRAMID_PIXEL_THRESHOLD = 2048 * 2048
+# A grid larger than this gets overviews. Compared against the *grid* (nx * ny), not the
+# chunk shape — a pyramid appends coarser levels beside level 0 and costs ~+33% storage
+# (1 + 1/4 + 1/16), so the only question is whether a map client would benefit.
+#
+# 1024x1024 rather than 2048x2048: at 2048² a 1949 x 1895 store (Uganda's CLMS GPP, 3.69 Mpx)
+# fell 0.88x short of the bar and rendered flat, making every frame at every zoom read the
+# full grid — 32 chunk requests and 14.8 MB per timestep to fill a few hundred screen pixels.
+# 1024² catches that while still skipping grids small enough to send whole.
+_PYRAMID_PIXEL_THRESHOLD = 1024 * 1024
 _PYRAMID_MAX_LEVELS = 8
 _PYRAMID_TARGET_TILE_SIZE = 512
 _ROOT_TIME_COORD_MAX_CHUNK = 4096
+# Memory budget per streamed level-0 region. topozarr writes region by region from a *lazy*
+# source, so this — not the store size — bounds the pyramid build. Its own default is 256 MB;
+# 64 MB keeps peak well within a small on-prem box, since peak is roughly
+# `max_workers * 5 * region_bytes`.
+_PYRAMID_MAX_REGION_BYTES = 64 * 1024 * 1024
+
+
+def _uniform_chunks(ds: xr.Dataset) -> xr.Dataset:
+    """Rechunk any dim whose dask chunks are non-uniform except for the final chunk.
+
+    Zarr requires that shape; dask does not. Reversing an axis produces exactly the illegal
+    case — ``raster_contract.ensure_north_up`` flips a south-up source with
+    ``isel(slice(None, None, -1))``, which reverses the chunk *tuple* too, so a legal
+    trailing remainder (244, 244, …, 241) becomes a leading one (241, 244, …) and
+    ``to_zarr`` refuses the write.
+
+    Rechunking to the largest existing chunk restores the source layout, since dask fills
+    uniformly and leaves the remainder last.
+
+    Only the flat path needs this. The pyramid path is unaffected because topozarr plans its
+    own chunk layout per level from ``target_chunk_bytes`` rather than inheriting the source's,
+    so a reversed tuple never reaches the write. (Deliberately not "because the pyramid path
+    calls ``load()``" — it does today, but that materialisation is being removed, and this
+    would then read as a guarantee that no longer holds.)
+
+    Applied per dimension across the whole dataset, so a variable with a legal layout can be
+    rechunked because a sibling on the same dim was illegal. Harmless, and only when at least
+    one variable needs it.
+    """
+    targets: dict[Any, int] = {}
+    for var in ds.data_vars.values():
+        for dim, chunks in zip(var.dims, var.chunks or (), strict=False):
+            # Legal already when every chunk but the last matches and the last is no larger.
+            # Checked rather than blanket-rechunked because rechunking a full-resolution grid
+            # costs a graph rewrite and a shuffle for nothing.
+            if len(set(chunks[:-1])) <= 1 and chunks[-1] <= chunks[0]:
+                continue
+            targets[dim] = max(targets.get(dim, 0), max(chunks))
+    if not targets:
+        return ds
+    logger.info("Rechunking to uniform Zarr-legal chunks: %s", targets)
+    return ds.chunk(targets)
 
 
 def _needs_pyramid(ds: xr.Dataset, x_dim: str, y_dim: str) -> bool:
@@ -361,8 +411,11 @@ def write_to_icechunk_store(
             ds.sizes[y_dim],
         )
 
-        # topozarr.create_pyramid requires fully materialised numpy arrays.
-        ds = ds.load()
+        # Deliberately *not* `ds.load()`. topozarr streams level 0 region by region and sizes
+        # those regions from `max_region_bytes`, so a lazy source is what bounds peak memory —
+        # its own docs say "for bounded memory on large stores, open the source lazily".
+        # Materialising first defeated that: Uganda's GPP store is 3.47 GB and growing ~0.6 GB
+        # per year of dekads, which is what made a lower threshold risky on a small box.
         # Validate/normalize here too, so a direct caller passing e.g. "MAX" or a mistyped
         # value never reaches topozarr as an invalid CoarseningMethod (falls back to mean).
         pyramid_method = _normalize_resampling_method(pyramid_method)
@@ -389,7 +442,7 @@ def write_to_icechunk_store(
             if var_da.dtype.kind != "f" and pyramid.fill_values.get(str(var_name)) is None:
                 pyramid.fill_values[str(var_name)] = 0
 
-        pyramid.write(session.store, mode="w")
+        pyramid.write(session.store, mode="w", max_region_bytes=_PYRAMID_MAX_REGION_BYTES)
 
         if native_resample:
             # Categorical data: recompute the coarsened levels from native so class codes /
@@ -443,6 +496,7 @@ def write_to_icechunk_store(
             ds.sizes[y_dim],
         )
         ds = ds.assign_attrs({**ds.attrs, **geozarr_attrs})
+        ds = _uniform_chunks(ds)
         # Bound the time-coordinate chunk so map clients read the axis in a few requests
         # rather than one per timestep (data variables keep their own chunking).
         flat_encoding = {}
