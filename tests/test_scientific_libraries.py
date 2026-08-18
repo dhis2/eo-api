@@ -13,12 +13,24 @@ This matters more than a normal dependency check because plugin modules are impo
 from __future__ import annotations
 
 import importlib
+import re
 import tomllib
 from pathlib import Path
 
 import pytest
 
 _PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
+
+
+def _requirement_name(requirement: str) -> str:
+    """Return the PEP 503-normalised distribution name from a PEP 508 requirement string.
+
+    Only the leading name is read, so every version operator (`>=`, `<`, `~=`, `!=`, `==`),
+    extras, and environment markers are ignored rather than having to be enumerated.
+    """
+    match = re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", requirement)
+    return re.sub(r"[-_.]+", "-", match.group(1)).lower() if match else ""
+
 
 # Kept in step with the `[server]` extra in pyproject.toml and the table in
 # docs/extensibility.md. Adding a library to either without adding it here (or vice versa)
@@ -80,7 +92,7 @@ def test_earthkit_data_is_an_extra_and_not_part_of_the_server_install() -> None:
     extras = project["optional-dependencies"]
 
     def declares_earthkit_data(requirements: list[str]) -> list[str]:
-        return [r for r in requirements if r.split(">")[0].split("=")[0].split("[")[0].strip() == "earthkit-data"]
+        return [r for r in requirements if _requirement_name(r) == "earthkit-data"]
 
     assert declares_earthkit_data(extras["grib"]), "the `grib` extra must declare earthkit-data"
     for name, requirements in (("dependencies", project["dependencies"]), *extras.items()):
@@ -90,3 +102,32 @@ def test_earthkit_data_is_an_extra_and_not_part_of_the_server_install() -> None:
             f"earthkit-data is declared in `{name}`, which makes a Windows install unresolvable "
             "(ecmwf/earthkit-data#1105). It belongs only in the `grib` extra."
         )
+
+
+@pytest.mark.parametrize(
+    "requirement",
+    [
+        "earthkit-data",
+        "earthkit-data>=1.1",
+        "earthkit-data==1.1.0",
+        "earthkit-data<2",
+        "earthkit-data~=1.1",
+        "earthkit-data!=1.0",
+        "earthkit-data[all]>=1.1",
+        "earthkit-data >= 1.1",
+        # The plausible wrong fix for Windows: a marker rather than a separate extra. It would
+        # still put the dependency in the default install, so the guard above must see it.
+        'earthkit-data; sys_platform != "win32"',
+        # PEP 503 treats these as the same distribution, so the guard must too.
+        "Earthkit_Data>=1.1",
+        "EARTHKIT.DATA",
+    ],
+)
+def test_the_placement_guard_recognises_every_spelling_of_the_dependency(requirement: str) -> None:
+    """The guard above is only as good as its name extraction.
+
+    Matching on a hand-stripped prefix missed `<`, `~=`, `!=`, markers and non-normalised
+    names, which would have let earthkit-data back into `[server]` unnoticed — so the
+    extraction reads the leading PEP 508 name and normalises it per PEP 503 instead.
+    """
+    assert _requirement_name(requirement) == "earthkit-data"
