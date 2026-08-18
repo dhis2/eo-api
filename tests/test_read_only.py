@@ -27,10 +27,6 @@ _MUTATING_ROUTES = [
     ("POST", "/manage/sync"),
     ("PUT", "/process_graphs/{process_graph_id}"),
     ("DELETE", "/process_graphs/{process_graph_id}"),
-    ("PUT", "/schedules/{dataset_id}"),
-    ("PATCH", "/schedules/{dataset_id}"),
-    ("DELETE", "/schedules/{dataset_id}"),
-    ("POST", "/schedules/{dataset_id}/run"),
     ("POST", "/sync/{dataset_id}"),
 ]
 
