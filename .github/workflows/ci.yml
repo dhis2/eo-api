@@ -33,3 +33,10 @@ jobs:
 
       - name: Run tests
         run: make test
+
+      # Resolution only, so no Windows runner is needed. Catches any dependency that has no
+      # Windows wheel, which is otherwise invisible on Linux and macOS.
+      - name: Check dependencies resolve on Windows
+        run: |
+          uv pip compile --quiet --python-platform windows --python-version 3.12 \
+            --all-extras pyproject.toml -o "$RUNNER_TEMP/windows-requirements.txt"
