@@ -13,14 +13,29 @@ This matters more than a normal dependency check because plugin modules are impo
 from __future__ import annotations
 
 import importlib
+import re
+import tomllib
+from pathlib import Path
 
 import pytest
+
+_PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
+
+
+def _requirement_name(requirement: str) -> str:
+    """Return the PEP 503-normalised distribution name from a PEP 508 requirement string.
+
+    Only the leading name is read, so every version operator (`>=`, `<`, `~=`, `!=`, `==`),
+    extras, and environment markers are ignored rather than having to be enumerated.
+    """
+    match = re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", requirement)
+    return re.sub(r"[-_.]+", "-", match.group(1)).lower() if match else ""
+
 
 # Kept in step with the `[server]` extra in pyproject.toml and the table in
 # docs/extensibility.md. Adding a library to either without adding it here (or vice versa)
 # should be a deliberate act, not an oversight.
 _PROMISED_MODULES = [
-    "earthkit.data",
     "earthkit.meteo",
     "earthkit.meteo.thermo",
     "earthkit.transforms",
@@ -59,3 +74,62 @@ def test_earthkit_transforms_exposes_deaccumulation() -> None:
 
     assert callable(temporal.deaccumulate)
     assert callable(temporal.accumulation_to_rate)
+
+
+def test_earthkit_data_is_not_a_dependency_of_this_package() -> None:
+    """`earthkit-data` is not declared here, and must not become one by accident.
+
+    Nothing in this package imports `earthkit.data`, and no other earthkit component
+    requires it outside their own `[all]`/`[test]`/`[docs]` extras — so it was pure weight,
+    and the expensive kind: it requires `eccodeslib` and `eckit`, both of which require
+    `eckitlib`, and none of those three has ever published a Windows wheel
+    (ecmwf/earthkit-data#1105). It was the only dependency that made a Windows install
+    impossible; every other package in the resolved tree is pure-Python or ships
+    `win_amd64`.
+
+    Declaring it again would re-break Windows silently, on a platform CI cannot build for,
+    so this asserts the absence rather than trusting the comment in pyproject.toml. A plugin
+    that genuinely reads GRIB declares earthkit-data in its own instance dependencies.
+    """
+    project = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["project"]
+    groups: list[tuple[str, list[str]]] = [
+        ("dependencies", project["dependencies"]),
+        *project.get("optional-dependencies", {}).items(),
+    ]
+
+    for name, requirements in groups:
+        offenders = [r for r in requirements if _requirement_name(r) == "earthkit-data"]
+        assert not offenders, (
+            f"earthkit-data is declared in `{name}` ({offenders}), which makes a Windows "
+            "install unresolvable (ecmwf/earthkit-data#1105). Nothing here imports it; a "
+            "plugin that needs GRIB readers should declare it in its own instance."
+        )
+
+
+@pytest.mark.parametrize(
+    "requirement",
+    [
+        "earthkit-data",
+        "earthkit-data>=1.1",
+        "earthkit-data==1.1.0",
+        "earthkit-data<2",
+        "earthkit-data~=1.1",
+        "earthkit-data!=1.0",
+        "earthkit-data[all]>=1.1",
+        "earthkit-data >= 1.1",
+        # The plausible wrong fix for Windows: a marker rather than a separate extra. It would
+        # still put the dependency in the default install, so the guard above must see it.
+        'earthkit-data; sys_platform != "win32"',
+        # PEP 503 treats these as the same distribution, so the guard must too.
+        "Earthkit_Data>=1.1",
+        "EARTHKIT.DATA",
+    ],
+)
+def test_the_absence_guard_recognises_every_spelling_of_the_dependency(requirement: str) -> None:
+    """The guard above is only as good as its name extraction.
+
+    Matching on a hand-stripped prefix missed `<`, `~=`, `!=`, markers and non-normalised
+    names, which would have let earthkit-data back in unnoticed — so the extraction reads the
+    leading PEP 508 name and normalises it per PEP 503 instead.
+    """
+    assert _requirement_name(requirement) == "earthkit-data"
