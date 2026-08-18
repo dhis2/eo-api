@@ -13,6 +13,7 @@ Schedules are an instance-level operational choice in `climate-service.yaml`:
 scheduler:
   enabled: true
   timezone: UTC
+  max_concurrent_syncs: 1
   dataset_sync:
     - dataset_id: chirps3_precipitation_daily
       cron: "0 6 * * *"
@@ -24,17 +25,22 @@ scheduler:
 UTC is the default and is recommended for checks that follow upstream publication times.
 Only one entry is allowed per dataset.
 
-The target dataset must already have been ingested. A scheduled check calls the normal sync
-planner with an open target end, skips an up-to-date or active dataset, and submits actionable
-work through the same native job path as an asynchronous `POST /sync/{dataset_id}` request.
-Routine no-op checks do not create job records.
+The target dataset must already have been ingested. When a schedule becomes due, APScheduler
+queues work through the same native job path as an asynchronous `POST /sync/{dataset_id}` request
+and returns immediately. Planning and synchronization happen in the native queue. An up-to-date
+check therefore completes as a normal no-op job record instead of doing upstream work in the
+clock callback.
+
+`max_concurrent_syncs` configures the native ingestion/sync worker pool and defaults to one, so
+multiple due schedules wait in the queue and dataset writes run sequentially. An active manual
+ingestion or sync for the same dataset suppresses duplicate scheduled submission.
 
 ## Inspect status
 
 `GET /schedules` reports whether the process-local clock is running and, for each schedule,
-its next check, last check, outcome, message, and submitted native job ID. Check state is
-volatile and resets when the process restarts; submitted jobs remain durable in the native
-job store.
+its next check, latest enqueue outcome, message, and submitted native job ID. This status does
+not mirror the terminal job state; follow `last_job_id` through the native jobs API. Check state
+is volatile and resets when the process restarts; submitted jobs remain durable.
 
 ## Deployment constraints
 
@@ -49,7 +55,8 @@ to maintain data served by a structurally read-only public instance.
 ## Current scope
 
 Scheduled sync supports previously ingested historical or otherwise append/rematerialize
-datasets. Future-facing forecast datasets are rejected at startup: refreshing a forecast
+datasets. A static or future-facing entry is skipped and remains visible in `GET /schedules`
+with an error, without preventing unrelated API routes from starting. Refreshing a forecast
 requires replacing an overlapping forward window, not merely appending periods after the
 latest stored timestamp.
 

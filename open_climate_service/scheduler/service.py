@@ -13,7 +13,7 @@ from apscheduler.triggers.cron import CronTrigger
 from open_climate_service import config as api_config
 from open_climate_service.data_registry.services import datasets as registry_datasets
 from open_climate_service.scheduler.config import DatasetSyncSchedule, SchedulerConfig, get_scheduler_config
-from open_climate_service.scheduler.dispatcher import CheckOutcome, CheckResult, check_and_submit
+from open_climate_service.scheduler.dispatcher import CheckOutcome, CheckResult, enqueue_sync
 from open_climate_service.scheduler.schemas import ScheduleListResponse, ScheduleStatus
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ class SchedulerService:
         self,
         *,
         config_loader: Callable[[], SchedulerConfig] = get_scheduler_config,
-        dispatcher: Callable[[DatasetSyncSchedule], CheckResult] = check_and_submit,
+        dispatcher: Callable[[DatasetSyncSchedule], CheckResult] = enqueue_sync,
         template_loader: Callable[[str], dict[str, Any] | None] = registry_datasets.get_dataset,
     ) -> None:
         self._config_loader = config_loader
@@ -47,9 +47,19 @@ class SchedulerService:
             logger.info("Dataset scheduler will not start on a read-only instance")
             return
 
-        self._validate_targets(config)
         scheduler = AsyncIOScheduler(timezone=config.timezone_info)
         for schedule in config.dataset_sync:
+            try:
+                self._validate_target(schedule)
+            except ValueError as exc:
+                self._last_results[schedule.schedule_id] = CheckResult(
+                    schedule_id=schedule.schedule_id,
+                    dataset_id=schedule.dataset_id,
+                    outcome=CheckOutcome.ERROR,
+                    message=str(exc),
+                )
+                logger.error("Scheduled dataset %s was not registered: %s", schedule.dataset_id, exc)
+                continue
             trigger = CronTrigger.from_crontab(schedule.cron, timezone=config.timezone_info)
             scheduler.add_job(
                 self.check_now,
@@ -69,24 +79,19 @@ class SchedulerService:
             len(config.dataset_sync),
         )
 
-    def _validate_targets(self, config: SchedulerConfig) -> None:
-        """Reject known unsupported targets while leaving missing state observable."""
-        for schedule in config.dataset_sync:
-            template = self._template_loader(schedule.dataset_id)
-            if template is None:
-                logger.warning(
-                    "Scheduled dataset %s has no registered template; checks will report not_materialized",
-                    schedule.dataset_id,
-                )
-                continue
-            if registry_datasets.is_future_facing(template):
-                raise ValueError(
-                    f"Scheduled dataset {schedule.dataset_id!r} is future-facing; forecast refresh requires "
-                    "overlapping-window rematerialization and is not supported yet"
-                )
-            sync = template.get("sync")
-            if not isinstance(sync, dict) or sync.get("kind") == "static":
-                raise ValueError(f"Scheduled dataset {schedule.dataset_id!r} is not syncable")
+    def _validate_target(self, schedule: DatasetSyncSchedule) -> None:
+        """Reject unsupported targets without taking down unrelated API routes."""
+        template = self._template_loader(schedule.dataset_id)
+        if template is None:
+            raise ValueError(f"Scheduled dataset {schedule.dataset_id!r} has no registered template")
+        if registry_datasets.is_future_facing(template):
+            raise ValueError(
+                f"Scheduled dataset {schedule.dataset_id!r} is future-facing; forecast refresh requires "
+                "overlapping-window rematerialization and is not supported yet"
+            )
+        sync = template.get("sync")
+        if not isinstance(sync, dict) or sync.get("kind") == "static":
+            raise ValueError(f"Scheduled dataset {schedule.dataset_id!r} is not syncable")
 
     def shutdown(self) -> None:
         """Stop future callbacks without waiting for submitted native jobs."""

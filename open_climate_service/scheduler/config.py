@@ -41,6 +41,7 @@ class SchedulerConfig(BaseModel):
 
     enabled: bool = False
     timezone: str = "UTC"
+    max_concurrent_syncs: int = Field(default=1, ge=1)
     dataset_sync: list[DatasetSyncSchedule] = Field(default_factory=list)
 
     @model_validator(mode="after")

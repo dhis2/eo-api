@@ -5,20 +5,19 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from open_climate_service import config as api_config
-from open_climate_service.ingestions import services
 from open_climate_service.ingestions.job_submission import submit_sync_job
-from open_climate_service.ingestions.schemas import SyncAction
 from open_climate_service.jobs.models import JobStatus
 from open_climate_service.jobs.service import get_job_service
 from open_climate_service.scheduler.config import DatasetSyncSchedule
 from open_climate_service.shared.time import utc_now
 
 _ACTIVE_JOB_STATUSES = {JobStatus.ACCEPTED, JobStatus.RUNNING, JobStatus.RETRYING}
-_SYNC_PROCESS_IDS = {"sync", "scheduled-sync"}
+# All native jobs that may write the same managed dataset store. Enqueuing a
+# scheduled sync while one is active only burns retry attempts on the store lock.
+_ACTIVE_WRITER_PROCESS_IDS = {"ingestion", "sync", "scheduled-sync"}
 
 
 class CheckOutcome(StrEnum):
@@ -44,17 +43,17 @@ class CheckResult(BaseModel):
     checked_at: datetime = Field(default_factory=utc_now)
 
 
-def _has_active_sync_job(dataset_id: str) -> bool:
+def _has_active_writer_job(dataset_id: str) -> bool:
     return any(
-        record.process_id in _SYNC_PROCESS_IDS
+        record.process_id in _ACTIVE_WRITER_PROCESS_IDS
         and record.status in _ACTIVE_JOB_STATUSES
         and record.request.get("dataset_id") == dataset_id
         for record in get_job_service().list_jobs().jobs
     )
 
 
-def check_and_submit(schedule: DatasetSyncSchedule) -> CheckResult:
-    """Plan one sync and submit it only when actionable and not already active."""
+def enqueue_sync(schedule: DatasetSyncSchedule) -> CheckResult:
+    """Enqueue one due sync without doing upstream work in the clock callback."""
     if api_config.is_read_only():
         return CheckResult(
             schedule_id=schedule.schedule_id,
@@ -63,33 +62,7 @@ def check_and_submit(schedule: DatasetSyncSchedule) -> CheckResult:
             message="Scheduler is disabled for a read-only instance",
         )
 
-    try:
-        plan = services.plan_sync_dataset(dataset_id=schedule.dataset_id, end=None)
-    except HTTPException as exc:
-        if exc.status_code == 404:
-            return CheckResult(
-                schedule_id=schedule.schedule_id,
-                dataset_id=schedule.dataset_id,
-                outcome=CheckOutcome.NOT_MATERIALIZED,
-                message=str(exc.detail),
-            )
-        raise
-
-    if plan.action == SyncAction.NO_OP:
-        return CheckResult(
-            schedule_id=schedule.schedule_id,
-            dataset_id=schedule.dataset_id,
-            outcome=CheckOutcome.UP_TO_DATE,
-            message=plan.message,
-        )
-    if plan.action == SyncAction.NOT_SYNCABLE:
-        return CheckResult(
-            schedule_id=schedule.schedule_id,
-            dataset_id=schedule.dataset_id,
-            outcome=CheckOutcome.NOT_SYNCABLE,
-            message=plan.message,
-        )
-    if _has_active_sync_job(schedule.dataset_id):
+    if _has_active_writer_job(schedule.dataset_id):
         return CheckResult(
             schedule_id=schedule.schedule_id,
             dataset_id=schedule.dataset_id,
