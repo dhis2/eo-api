@@ -13,14 +13,17 @@ This matters more than a normal dependency check because plugin modules are impo
 from __future__ import annotations
 
 import importlib
+import tomllib
+from pathlib import Path
 
 import pytest
+
+_PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 
 # Kept in step with the `[server]` extra in pyproject.toml and the table in
 # docs/extensibility.md. Adding a library to either without adding it here (or vice versa)
 # should be a deliberate act, not an oversight.
 _PROMISED_MODULES = [
-    "earthkit.data",
     "earthkit.meteo",
     "earthkit.meteo.thermo",
     "earthkit.transforms",
@@ -59,3 +62,31 @@ def test_earthkit_transforms_exposes_deaccumulation() -> None:
 
     assert callable(temporal.deaccumulate)
     assert callable(temporal.accumulation_to_rate)
+
+
+def test_earthkit_data_is_an_extra_and_not_part_of_the_server_install() -> None:
+    """`earthkit-data` is the only dependency here that cannot be installed on Windows.
+
+    It requires `eccodeslib` and `eckit`, both of which require `eckitlib`, and none of the
+    three has ever published a Windows wheel (ecmwf/earthkit-data#1105). Every other package
+    in the resolved tree is pure-Python or ships `win_amd64`, so moving this one dependency
+    into the `grib` extra is what makes `uv sync --extra server` resolve on Windows.
+
+    Nothing in this package imports `earthkit.data`. Adding it back to `[server]` — or to the
+    base dependencies — would re-break Windows silently, on a platform CI does not build, so
+    this test asserts the placement rather than trusting the comment in pyproject.toml.
+    """
+    project = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["project"]
+    extras = project["optional-dependencies"]
+
+    def declares_earthkit_data(requirements: list[str]) -> list[str]:
+        return [r for r in requirements if r.split(">")[0].split("=")[0].split("[")[0].strip() == "earthkit-data"]
+
+    assert declares_earthkit_data(extras["grib"]), "the `grib` extra must declare earthkit-data"
+    for name, requirements in (("dependencies", project["dependencies"]), *extras.items()):
+        if name == "grib":
+            continue
+        assert not declares_earthkit_data(requirements), (
+            f"earthkit-data is declared in `{name}`, which makes a Windows install unresolvable "
+            "(ecmwf/earthkit-data#1105). It belongs only in the `grib` extra."
+        )

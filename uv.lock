@@ -2038,9 +2038,11 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+grib = [
+    { name = "earthkit-data" },
+]
 server = [
     { name = "dask-geopandas" },
-    { name = "earthkit-data" },
     { name = "earthkit-meteo" },
     { name = "earthkit-transforms" },
     { name = "earthkit-utils" },
@@ -2096,7 +2098,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", marker = "extra == 'xarray'", specifier = ">=3.10" },
     { name = "dask-geopandas", marker = "extra == 'server'", specifier = ">=0.4" },
-    { name = "earthkit-data", marker = "extra == 'server'", specifier = ">=1.1" },
+    { name = "earthkit-data", marker = "extra == 'grib'", specifier = ">=1.1" },
     { name = "earthkit-meteo", marker = "extra == 'server'", specifier = ">=1.0" },
     { name = "earthkit-transforms", marker = "extra == 'server'", specifier = ">=1.0" },
     { name = "earthkit-utils", marker = "extra == 'server'", specifier = ">=1.0" },
@@ -2134,7 +2136,7 @@ requires-dist = [
     { name = "zarr", marker = "extra == 'server'", specifier = ">=3.1.6,<4" },
     { name = "zarr", marker = "extra == 'xarray'", specifier = ">=3.1.6,<4" },
 ]
-provides-extras = ["xarray", "server"]
+provides-extras = ["xarray", "server", "grib"]
 
 [package.metadata.requires-dev]
 dev = [

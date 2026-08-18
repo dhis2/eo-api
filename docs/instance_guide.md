@@ -239,6 +239,8 @@ Pinning to a released version (`==X.Y.Z`) is recommended over tracking `main`: a
 
 - **`pip install open-climate-service[server]` does not work** — the `[server]` extra needs dependency overrides (for upstream version caps) that `uv` applies but `pip` cannot. Install the server stack with **uv** (this guide) or **Docker**. The base client and `[xarray]` extras install fine with `pip`.
 
+- **`uv sync` fails on Windows resolving `eccodeslib`, `eckit` or `eckitlib`** — those are ECMWF binary distributions with no Windows wheel, pulled in by `earthkit-data` ([ecmwf/earthkit-data#1105](https://github.com/ecmwf/earthkit-data/issues/1105)). The `[server]` extra does not include `earthkit-data` for this reason, so check whether your instance declares it — directly, or via the `grib` extra. If a plugin of yours genuinely needs GRIB readers, that combination cannot be installed natively on Windows; use WSL, Linux or Docker. Note that `eccodes` *does* ship a Windows wheel, so seeing it install successfully is not evidence that the rest of the chain will.
+
 ---
 
 ## Deployment
