@@ -119,7 +119,16 @@ server = [
     #   transforms — climatological normals + anomalies, deaccumulation
     #   meteo      — thermodynamics; auto-registered as processes (openeo/earthkit_processes.py)
     #   utils      — shared helpers, imported by the above
-    # earthkit-data is deliberately *not* here; it is the [grib] extra below.
+    #
+    # earthkit-data (GRIB/BUFR readers) is deliberately absent: nothing here imports it, no
+    # other earthkit component requires it outside their own [all]/[test]/[docs] extras, and
+    # it is the only dependency that made a Windows install impossible — it requires
+    # eccodeslib and eckit, both of which require eckitlib, and none of those three has ever
+    # published a Windows wheel (ecmwf/earthkit-data#1105). Every other package in the
+    # resolved tree is pure-Python or ships win_amd64, including `eccodes` itself, which is
+    # why the failure was so confusing to hit. A plugin that genuinely reads GRIB declares
+    # earthkit-data in its own instance dependencies, as it would any other plugin-owned
+    # import — see tests/test_scientific_libraries.py for the guard that keeps it out.
     "earthkit-transforms>=1.0",
     "earthkit-meteo>=1.0",
     "earthkit-utils>=1.0",
@@ -127,20 +136,6 @@ server = [
     # downloads are read with.
     "ecmwf-datastores-client>=0.4",
     "netcdf4>=1.7",
-]
-# earthkit-data — format-agnostic readers, GRIB and BUFR in particular. Separate from
-# [server] because it is the one dependency in this project that cannot be installed on
-# Windows: it requires eccodeslib and eckit, both of which require eckitlib, and none of
-# those three has ever published a Windows wheel (ecmwf/earthkit-data#1105, acknowledged
-# upstream). Every other package in the resolved tree is either pure-Python or ships
-# win_amd64 — including `eccodes` itself, which is why the failure is so confusing to hit.
-#
-# Nothing in this package imports earthkit.data, and no other earthkit component requires
-# it outside their own [all]/[test]/[docs] extras, so keeping it out of [server] costs us
-# no capability and makes a native Windows install of the server resolve. Install it where
-# a plugin genuinely reads GRIB: `open-climate-service[server,grib]`.
-grib = [
-    "earthkit-data>=1.1",
 ]
 
 [project.urls]

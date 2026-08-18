@@ -34,11 +34,9 @@ jobs:
       - name: Run tests
         run: make test
 
-      # Resolution only — no Windows runner needed, and it catches the whole class of
-      # regression rather than just a re-added earthkit-data. The `grib` extra is
-      # deliberately excluded: it cannot resolve on Windows by design
-      # (ecmwf/earthkit-data#1105).
-      - name: Check the server extra still resolves on Windows
+      # Resolution only, so no Windows runner is needed. Catches any dependency that has no
+      # Windows wheel, which is otherwise invisible on Linux and macOS.
+      - name: Check dependencies resolve on Windows
         run: |
           uv pip compile --quiet --python-platform windows --python-version 3.12 \
-            --extra server pyproject.toml -o "$RUNNER_TEMP/windows-requirements.txt"
+            --all-extras pyproject.toml -o "$RUNNER_TEMP/windows-requirements.txt"

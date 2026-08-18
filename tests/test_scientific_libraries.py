@@ -76,31 +76,33 @@ def test_earthkit_transforms_exposes_deaccumulation() -> None:
     assert callable(temporal.accumulation_to_rate)
 
 
-def test_earthkit_data_is_an_extra_and_not_part_of_the_server_install() -> None:
-    """`earthkit-data` is the only dependency here that cannot be installed on Windows.
+def test_earthkit_data_is_not_a_dependency_of_this_package() -> None:
+    """`earthkit-data` is not declared here, and must not become one by accident.
 
-    It requires `eccodeslib` and `eckit`, both of which require `eckitlib`, and none of the
-    three has ever published a Windows wheel (ecmwf/earthkit-data#1105). Every other package
-    in the resolved tree is pure-Python or ships `win_amd64`, so moving this one dependency
-    into the `grib` extra is what makes `uv sync --extra server` resolve on Windows.
+    Nothing in this package imports `earthkit.data`, and no other earthkit component
+    requires it outside their own `[all]`/`[test]`/`[docs]` extras — so it was pure weight,
+    and the expensive kind: it requires `eccodeslib` and `eckit`, both of which require
+    `eckitlib`, and none of those three has ever published a Windows wheel
+    (ecmwf/earthkit-data#1105). It was the only dependency that made a Windows install
+    impossible; every other package in the resolved tree is pure-Python or ships
+    `win_amd64`.
 
-    Nothing in this package imports `earthkit.data`. Adding it back to `[server]` — or to the
-    base dependencies — would re-break Windows silently, on a platform CI does not build, so
-    this test asserts the placement rather than trusting the comment in pyproject.toml.
+    Declaring it again would re-break Windows silently, on a platform CI cannot build for,
+    so this asserts the absence rather than trusting the comment in pyproject.toml. A plugin
+    that genuinely reads GRIB declares earthkit-data in its own instance dependencies.
     """
     project = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))["project"]
-    extras = project["optional-dependencies"]
+    groups: list[tuple[str, list[str]]] = [
+        ("dependencies", project["dependencies"]),
+        *project.get("optional-dependencies", {}).items(),
+    ]
 
-    def declares_earthkit_data(requirements: list[str]) -> list[str]:
-        return [r for r in requirements if _requirement_name(r) == "earthkit-data"]
-
-    assert declares_earthkit_data(extras["grib"]), "the `grib` extra must declare earthkit-data"
-    for name, requirements in (("dependencies", project["dependencies"]), *extras.items()):
-        if name == "grib":
-            continue
-        assert not declares_earthkit_data(requirements), (
-            f"earthkit-data is declared in `{name}`, which makes a Windows install unresolvable "
-            "(ecmwf/earthkit-data#1105). It belongs only in the `grib` extra."
+    for name, requirements in groups:
+        offenders = [r for r in requirements if _requirement_name(r) == "earthkit-data"]
+        assert not offenders, (
+            f"earthkit-data is declared in `{name}` ({offenders}), which makes a Windows "
+            "install unresolvable (ecmwf/earthkit-data#1105). Nothing here imports it; a "
+            "plugin that needs GRIB readers should declare it in its own instance."
         )
 
 
@@ -123,11 +125,11 @@ def test_earthkit_data_is_an_extra_and_not_part_of_the_server_install() -> None:
         "EARTHKIT.DATA",
     ],
 )
-def test_the_placement_guard_recognises_every_spelling_of_the_dependency(requirement: str) -> None:
+def test_the_absence_guard_recognises_every_spelling_of_the_dependency(requirement: str) -> None:
     """The guard above is only as good as its name extraction.
 
     Matching on a hand-stripped prefix missed `<`, `~=`, `!=`, markers and non-normalised
-    names, which would have let earthkit-data back into `[server]` unnoticed — so the
-    extraction reads the leading PEP 508 name and normalises it per PEP 503 instead.
+    names, which would have let earthkit-data back in unnoticed — so the extraction reads the
+    leading PEP 508 name and normalises it per PEP 503 instead.
     """
     assert _requirement_name(requirement) == "earthkit-data"
