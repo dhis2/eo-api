@@ -1,6 +1,7 @@
 services:
   api:
-    image: ghcr.io/dhis2/open-climate-service:latest
+    image: ghcr.io/dhis2/open-climate-service:main
+    pull_policy: always
     env_file: .env
     ports:
       - "${PORT:-9000}:${PORT:-9000}"
