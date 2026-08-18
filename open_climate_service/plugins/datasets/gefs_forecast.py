@@ -56,6 +56,11 @@ _SPATIAL_CHUNK = 256
 class GefsForecastPlugin(BaseDatasetPlugin):
     """One instance per variable. Streams one initialisation per fetch."""
 
+    # Deliberately serial. zarr already fetches a shard's inner chunks concurrently within one
+    # read, so fetching several initialisations at once only contends for the same connection:
+    # measured over four initialisations, four workers took 73s each against 13.8s serial. What
+    # remains is per-request latency (~1.3s per ranged GET), not bandwidth, so more workers
+    # cannot help until that changes.
     max_concurrency = 1
     # One run is one commit: a 35-day block for a country bbox is small, and batching would
     # only delay the point at which a partially fetched archive becomes resumable.
@@ -98,12 +103,27 @@ class GefsForecastPlugin(BaseDatasetPlugin):
         """
         if self._ds is None:
             logger.info("Opening GEFS forecast store %s", self._store_url)
-            # `chunks={}` keeps the store's own chunking and stays lazy, so a country subset
-            # never materialises the global grid.
+            # `chunks=None` — no dask. Still lazy: xarray defers to zarr's own indexing, which
+            # is what performs the partial shard reads this store needs.
+            #
+            # `chunks={}` would adopt the store's chunking, which sounds right and is a trap
+            # here. The store is sharded: the shard is (1, 31, 192, 374, 368) but `array.chunks`
+            # reports the *inner* chunk (1, 31, 64, 17, 16), so dask graphs the whole
+            # (2148, 31, 181, 721, 1440) variable at inner-chunk granularity — 24.9 million
+            # chunks — before any selection narrows it. Measured for one initialisation over a
+            # country bbox: 24.4s and 5.9 GB peak RSS with `chunks={}`, against 13.8s and
+            # 328 MB with `chunks=None`, for an identical result. The cost was graph
+            # construction, not transfer, which is why asking for a single lead step cost the
+            # same as asking for all 181.
+            #
+            # Chunking at the shard instead is not the fix: dask chunks that span shards fail
+            # with a Blosc "Stored and computed checksum do not match".
             self._ds = xr.open_zarr(
                 self._store_url,
                 decode_timedelta=True,
-                chunks={},  # pyright: ignore[reportArgumentType]
+                # `None` is xarray's documented "do not use dask" value; its stub types the
+                # parameter as `str`, so the annotation is narrower than the API.
+                chunks=None,  # pyright: ignore[reportArgumentType]
             )
         return self._ds
 
