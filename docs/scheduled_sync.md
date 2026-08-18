@@ -1,57 +1,79 @@
 # Scheduled dataset synchronization
 
-Open Climate Service can periodically check whether an existing managed dataset has new
-source periods and submit an asynchronous sync job when work is required. The scheduler is
-a clock only: planning, retries, execution, progress, and restart recovery remain owned by
-the native OCS job service.
+Open Climate Service can periodically update selected, already-ingested datasets. APScheduler
+owns cron timing only; due work is queued through the native job service, which owns execution,
+status, retries, and restart recovery.
 
-## Configure schedules
+## Enable scheduling for the deployment
 
-Schedules are an instance-level operational choice in `climate-service.yaml`:
+An operator enables the capability in `climate-service.yaml`:
 
 ```yaml
 scheduler:
   enabled: true
   timezone: UTC
-  dataset_sync:
-    - dataset_id: chirps3_precipitation_daily
-      cron: "0 6 * * *"
-      publish: true
-      max_attempts: 3
+  max_concurrent_syncs: 1
 ```
 
-`cron` is a standard five-field expression interpreted in the configured IANA timezone.
-UTC is the default and is recommended for checks that follow upstream publication times.
-Only one entry is allowed per dataset.
+`timezone` is the default for newly created schedules. `max_concurrent_syncs` configures the
+native worker pool used by queued ingestion and sync jobs; the default of one makes writes run
+sequentially. Exactly one writable OCS process may enable the scheduler clock.
 
-The target dataset must already have been ingested. A scheduled check calls the normal sync
-planner with an open target end, skips an up-to-date or active dataset, and submits actionable
-work through the same native job path as an asynchronous `POST /sync/{dataset_id}` request.
-Routine no-op checks do not create job records.
+## Create a dataset schedule
 
-## Inspect status
+Scheduling is an explicit per-dataset choice. The target must be an existing managed dataset.
+Create or replace its only schedule with:
 
-`GET /schedules` reports whether the process-local clock is running and, for each schedule,
-its next check, last check, outcome, message, and submitted native job ID. Check state is
-volatile and resets when the process restarts; submitted jobs remain durable in the native
-job store.
+```http
+PUT /schedules/chirps3_precipitation_daily
+Content-Type: application/json
 
-## Deployment constraints
+{
+  "cron": "0 6 * * *",
+  "timezone": "Europe/Oslo",
+  "enabled": true,
+  "publish": true,
+  "max_attempts": 3
+}
+```
 
-Exactly one OCS process or replica may set `scheduler.enabled: true`. Active-job detection
-and submission are not an atomic cross-process operation, and the store write lock is
-process-local. Enabling the clock in multiple replicas could therefore submit concurrent
-writers for the same store. API-only replicas must leave scheduling disabled.
+`cron` uses the standard five-field format. Omitting `timezone` applies the deployment default.
+The dataset ID is the resource key, so two schedules cannot exist for the same dataset.
 
-A read-only instance never starts its scheduler. Use a separate writable operator instance
-to maintain data served by a structurally read-only public instance.
+Edit timing or enablement without creating another schedule:
 
-## Current scope
+```http
+PATCH /schedules/chirps3_precipitation_daily
+Content-Type: application/json
 
-Scheduled sync supports previously ingested historical or otherwise append/rematerialize
-datasets. Future-facing forecast datasets are rejected at startup: refreshing a forecast
-requires replacing an overlapping forward window, not merely appending periods after the
-latest stored timestamp.
+{
+  "cron": "30 7 * * 1-5",
+  "enabled": true
+}
+```
 
-Event-driven derived workflows, cross-service orchestration, schedule mutation APIs,
-distributed leader election, and forecast-window refresh are later automation phases.
+Disable a schedule with `{"enabled": false}`. Delete it with
+`DELETE /schedules/{dataset_id}`; neither operation deletes the dataset or its job history.
+
+## Run now and inspect status
+
+`POST /schedules/{dataset_id}/run` queues an immediate sync without changing the recurring
+cadence, including when that schedule is disabled. `GET /schedules` and
+`GET /schedules/{dataset_id}` expose definitions, next checks, recent enqueue outcomes, and job
+IDs.
+
+When several schedules become due together, each callback enqueues and returns. The native job
+queue executes them according to the configured worker limit. The sync itself may complete as a
+no-op when upstream data has not changed; that outcome is retained on the native job record.
+
+Schedule definitions are stored in `data_dir/schedules/schedules.json` and reconstructed at
+startup. Native run history remains in `data_dir/jobs/jobs.json`.
+
+## Current constraints
+
+A read-only instance cannot create, edit, delete, or run schedules and never starts the clock.
+Because OCS does not yet authenticate individual users, schedule mutation belongs on a trusted
+writable/operator instance rather than a public endpoint.
+Future-facing forecast datasets are rejected until overlapping-window refresh is implemented.
+Event-driven workflows, distributed leader election, and cross-service orchestration remain later
+automation phases.

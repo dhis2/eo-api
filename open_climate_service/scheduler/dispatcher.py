@@ -5,16 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from open_climate_service import config as api_config
-from open_climate_service.ingestions import services
 from open_climate_service.ingestions.job_submission import submit_sync_job
-from open_climate_service.ingestions.schemas import SyncAction
 from open_climate_service.jobs.models import JobStatus
 from open_climate_service.jobs.service import get_job_service
-from open_climate_service.scheduler.config import DatasetSyncSchedule
+from open_climate_service.scheduler.models import DatasetSyncSchedule
 from open_climate_service.shared.time import utc_now
 
 _ACTIVE_JOB_STATUSES = {JobStatus.ACCEPTED, JobStatus.RUNNING, JobStatus.RETRYING}
@@ -25,9 +22,6 @@ class CheckOutcome(StrEnum):
     """Outcome of one scheduled dataset check."""
 
     SUBMITTED = "submitted"
-    UP_TO_DATE = "up_to_date"
-    NOT_MATERIALIZED = "not_materialized"
-    NOT_SYNCABLE = "not_syncable"
     ALREADY_RUNNING = "already_running"
     READ_ONLY = "read_only"
     ERROR = "error"
@@ -53,8 +47,8 @@ def _has_active_sync_job(dataset_id: str) -> bool:
     )
 
 
-def check_and_submit(schedule: DatasetSyncSchedule) -> CheckResult:
-    """Plan one sync and submit it only when actionable and not already active."""
+def enqueue_sync(schedule: DatasetSyncSchedule) -> CheckResult:
+    """Enqueue one due sync without doing upstream work in the clock callback."""
     if api_config.is_read_only():
         return CheckResult(
             schedule_id=schedule.schedule_id,
@@ -63,32 +57,6 @@ def check_and_submit(schedule: DatasetSyncSchedule) -> CheckResult:
             message="Scheduler is disabled for a read-only instance",
         )
 
-    try:
-        plan = services.plan_sync_dataset(dataset_id=schedule.dataset_id, end=None)
-    except HTTPException as exc:
-        if exc.status_code == 404:
-            return CheckResult(
-                schedule_id=schedule.schedule_id,
-                dataset_id=schedule.dataset_id,
-                outcome=CheckOutcome.NOT_MATERIALIZED,
-                message=str(exc.detail),
-            )
-        raise
-
-    if plan.action == SyncAction.NO_OP:
-        return CheckResult(
-            schedule_id=schedule.schedule_id,
-            dataset_id=schedule.dataset_id,
-            outcome=CheckOutcome.UP_TO_DATE,
-            message=plan.message,
-        )
-    if plan.action == SyncAction.NOT_SYNCABLE:
-        return CheckResult(
-            schedule_id=schedule.schedule_id,
-            dataset_id=schedule.dataset_id,
-            outcome=CheckOutcome.NOT_SYNCABLE,
-            message=plan.message,
-        )
     if _has_active_sync_job(schedule.dataset_id):
         return CheckResult(
             schedule_id=schedule.schedule_id,

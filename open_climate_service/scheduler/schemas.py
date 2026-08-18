@@ -10,14 +10,17 @@ from open_climate_service.scheduler.dispatcher import CheckOutcome
 
 
 class ScheduleStatus(BaseModel):
-    """Configuration and volatile runtime status for one dataset schedule."""
+    """Persisted definition and runtime status for one dataset schedule."""
 
     schedule_id: str
     dataset_id: str
     cron: str
     timezone: str
+    enabled: bool
     publish: bool
     max_attempts: int
+    created_at: datetime
+    updated_at: datetime
     next_check: datetime | None = None
     last_check: datetime | None = None
     last_outcome: CheckOutcome | None = None
@@ -31,4 +34,5 @@ class ScheduleListResponse(BaseModel):
     enabled: bool
     running: bool
     timezone: str
+    max_concurrent_syncs: int
     schedules: list[ScheduleStatus] = Field(default_factory=list)
