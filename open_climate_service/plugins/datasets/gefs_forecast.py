@@ -33,7 +33,7 @@ import numpy as np
 import xarray as xr
 
 from open_climate_service.shared import forecast
-from open_climate_service.streaming import BaseDatasetPlugin
+from open_climate_service.streaming import BaseDatasetPlugin, bbox_slices
 
 logger = logging.getLogger(__name__)
 
@@ -154,8 +154,12 @@ class GefsForecastPlugin(BaseDatasetPlugin):
         run = ds[[self._variable]].sel({self._upstream_init: init})
         # Subset before reducing: the global grid is 721 x 1440 across 31 members and 181 leads,
         # so reducing first would pull the whole world to produce one country.
-        # Latitude descends (90 to -90) upstream, so the slice runs high to low.
-        run = run.sel(latitude=slice(ymax, ymin), longitude=slice(xmin, xmax))
+        #
+        # `bbox_slices` rather than `slice(ymax, ymin)`: a plain label slice keeps only cells
+        # whose *centre* falls inside the bbox, so on this 0.25° grid the store ended up ~14 km
+        # short of the requested extent on each edge — an uncovered strip on the map and border
+        # districts aggregated from partial data. It also handles the descending latitude axis.
+        run = run.sel(bbox_slices(run, [xmin, ymin, xmax, ymax], x_dim="longitude", y_dim="latitude"))
         run = run.sel(lead_time=slice(None, np.timedelta64(self._max_lead_days, "D")))
 
         units = str(run[self._variable].attrs.get("units", ""))
