@@ -174,6 +174,42 @@ When the job finishes, the new change dataset appears under `/datasets` and on t
 
 ---
 
+## Aggregating dekads to months or weeks
+
+`aggregate_dekads_to_period` turns a published **dekadal** (10-daily) dataset into a monthly
+or weekly one, weighting each dekad by the number of days it shares with the target period.
+
+The weighting is the point. Dekads run day 1–10, 11–20, then 21 to the end of the month, so
+the third is 8, 9, 10 or 11 days long. Three of them tile a calendar month exactly, but they
+are not equal, so a plain `mean` over-weights a short third dekad — February's 8-day dekad by
+4.8 percentage points, a 14% relative error on its contribution. The error is systematic
+rather than noise: it always favours short dekads, so an unweighted monthly series carries a
+seasonal artefact that follows month length.
+
+Pick `method` by what the variable is:
+
+| `method` | For | Result |
+|---|---|---|
+| `mean` (default) | a per-day **rate**, e.g. CLMS GPP in `gC/m²/day` | the target period's average daily value, same units |
+| `sum` | a per-dekad **total** | the target period's total, conserved exactly regardless of dekad length |
+
+Passing `sum` for a per-day rate is logged as a warning — adding daily rates does not produce
+a total.
+
+`period: week` exists but is rarely what you want: dekads and ISO weeks never align (36
+against 52 or 53), so a weekly series has an effective resolution of about 10 days however it
+is derived, and the weights must be recomputed per year. Monthly is exact by comparison.
+
+**Not interpolation, deliberately.** Splining through dekad midpoints does not conserve the
+annual total, invents sub-dekad structure the sensor never observed, and can undershoot below
+zero for a non-negative quantity. If a smooth daily curve is ever genuinely needed, the
+defensible route is mean-preserving interpolation, not a plain spline.
+
+The output variable carries a `cell_methods` recording the weighting, so a consumer can tell a
+day-weighted aggregate from an observation. A partially covered period at either end of the
+record is computed from the dekads that exist rather than returning empty, and a dekad missing
+over part of the grid is dropped from the weights *there* and the remainder renormalised.
+
 ## Three sources of workflows
 
 Workflows are loaded from three places, each overriding the previous on id collision:

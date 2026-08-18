@@ -338,7 +338,20 @@
       }
 
       function stepLabelAt(steps, i) {
-        if (Array.isArray(steps)) return steps[i];
+        if (Array.isArray(steps)) {
+          const v = steps[i];
+          // Explicit `values` cover two kinds of axis: ordinal ones list numbers
+          // (day-of-year) or category names (sex), which pass through untouched, while an
+          // irregular temporal axis lists ISO timestamps. Those want the same granularity
+          // trimming the generated branches below apply, so a dekadal axis reads
+          // "2024-12-21" rather than "2024-12-21T00:00:00Z" on every step.
+          if (typeof v === "string") {
+            const midnight = v.match(/^(\d{4}-\d{2}-\d{2})T00:00(?::00(?:\.0+)?)?Z?$/);
+            if (midnight) return midnight[1];
+            if (/^\d{4}-\d{2}-\d{2}T/.test(v)) return v.slice(0, 16).replace("T", " ");
+          }
+          return v;
+        }
         const sd = new Date(steps.start);
         // Label at the granularity of the step: year for P1Y, year-month for P1M,
         // date for daily, date+time for sub-daily — so a yearly axis shows "2026",
