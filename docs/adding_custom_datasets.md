@@ -86,6 +86,41 @@ plugin import surface), alongside `BaseDatasetPlugin`.
   when the data carries none, so a **projected-grid** source should declare its CRS with the
   **`crs` class attribute** (an EPSG int or string).
 
+### Reading a remote Zarr source
+
+Open it with `chunks=None`, not `chunks={}`:
+
+```python
+ds = xr.open_zarr(url, chunks=None)   # lazy, but no dask graph
+```
+
+`chunks=None` is still lazy — xarray defers to zarr's own indexing, which range-reads only the
+chunks a selection touches. `chunks={}` looks like the careful choice, because it adopts the
+store's own chunking, but it makes dask graph the **whole array** at that granularity before
+any `.sel()` narrows it. Its cost therefore scales with the array's total chunk count rather
+than with what you asked for.
+
+That is harmless for a modest 3-D store and pathological for a large one. The built-in
+`gefs_forecast` plugin reads a 5-D `(2148, 31, 181, 721, 1440)` archive: at the store's
+chunking that is 24.9 million chunks, and fetching one forecast run over a country bbox cost
+24.4s and 5.9 GB of memory with `chunks={}`, against 13.8s and 328 MB with `chunks=None` — for
+an identical result. The give-away was that asking for a single lead step cost the same as
+asking for all 181, because the work was graph construction, not transfer.
+
+**Sharded stores make this easy to miss.** When a store shards, `array.chunks` reports the
+small *inner* chunk while the unit on disk is the much larger shard, so the chunk count is far
+higher than the store's layout suggests. Compare the two before deciding:
+
+```python
+a = zarr.open_group(url, mode="r")["temperature_2m"]
+a.chunks   # (1, 31, 64, 17, 16)      — what chunks={} would hand to dask
+a.shards   # (1, 31, 192, 374, 368)   — the actual storage unit, or None
+```
+
+If you do want dask, chunk explicitly to something coarse enough for the work at hand rather
+than accepting the store's granularity — but note that chunks spanning shard boundaries can
+fail outright (we saw a Blosc `Stored and computed checksum do not match`).
+
 ### Projected-grid (non-WGS84) sources
 
 For a source on a projected grid (e.g. a national UTM product), set the `crs` class attribute
