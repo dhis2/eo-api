@@ -176,8 +176,6 @@ When the job finishes, the new change dataset appears under `/datasets` and on t
 
 `climate_normal` computes a **climatological normal** — a WMO-style multi-year average of a variable for each **day-of-year** (1–366) or **month** (1–12) over a reference period (e.g. 1991–2020) — and publishes it as a new managed dataset. Use it to derive a "what's typical" baseline from a collection you have already ingested for the reference period; the anomaly workflow below then compares observations against it.
 
-It runs `load_collection(temporal_extent = reference period) → climatological_normal → save_result`. The temporal axis is reduced to an ordinal `dayofyear`/`month` dimension, which the STAC layer declares and the map viewer steps through. The per-bin mean is computed with [`earthkit.transforms.climatology`](https://earthkit-transforms.readthedocs.io) (`daily_mean` / `monthly_mean`); the day-of-year normal is optionally circular-smoothed with the WMO 31-day window.
-
 ### Parameters
 
 | Name | Description |
@@ -217,8 +215,6 @@ The `output_dataset_id` needs a **static dataset template** (`sync: {kind: stati
 
 `climate_anomaly` computes an **anomaly** — how far observations depart from a climatological normal — and publishes it as a new managed dataset that keeps the observed time axis. Positive values are above-normal and negative below-normal, so the result suits a diverging colormap centred on zero.
 
-It runs `load_collection(observed, temporal_extent) + load_collection(normal) → compute_anomaly → save_result`. `compute_anomaly` aligns the normal's ordinal axis (`dayofyear`/`month`) onto each observed timestep and combines them (`earthkit.transforms.climatology.anomaly`). Keep an anomaly current by re-running over the desired range — recomputing `observed − normal` is a cheap lazy subtract, so no incremental cascade is needed.
-
 ### Parameters
 
 | Name | Description |
@@ -241,7 +237,7 @@ The two methods publish **different units**, so a pre-registered template belong
 
 An auto-registered template takes its units from the computed result, so it is correct either way. A pre-registered one is authoritative, and publishing a relative anomaly into a template declaring `mm/d` is **refused** rather than relabelled — otherwise 20 % of normal would be stored as 20 mm of rain per day, which is plausible enough that nothing downstream could catch it. The shipped templates come in both forms: `*_anomaly_1991_2020` declares the observed unit for `absolute`, and `*_relative_anomaly_1991_2020` declares `%` for `relative`. Target the one matching the `method` you pass — precipitation only, since a relative anomaly is refused for temperature.
 
-The observed and normal cubes must be on the **same grid** — same cell count, same spacing, same positions. Coordinates differing by floating-point noise are normalised silently; anything larger is refused, because a normal offset by even part of a cell would otherwise be differenced against the wrong cells.
+The observed and normal cubes must be on the **same grid** — same cell count, same spacing, same positions.
 
 ### Example
 
