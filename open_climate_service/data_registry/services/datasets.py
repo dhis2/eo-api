@@ -1,5 +1,7 @@
 """Dataset registry backed by YAML config files."""
 
+import copy
+import functools
 import importlib.resources
 import logging
 import sys
@@ -16,6 +18,9 @@ logger = logging.getLogger(__name__)
 # Overridden in tests via monkeypatch to point to a temporary directory.
 # When set, only this directory is loaded (no built-ins, no config override).
 CONFIGS_DIR: Path | None = None
+
+# Template issues already logged this process, so a re-read path cannot repeat them.
+_WARNED_TEMPLATE_ISSUES: set[tuple[str, str, str]] = set()
 
 SUPPORTED_SYNC_KINDS = {"temporal", "release", "static"}
 SUPPORTED_SYNC_EXECUTIONS = {"append", "rematerialize"}
@@ -189,8 +194,37 @@ def write_dataset_template(dataset: dict[str, Any], *, overwrite: bool = False) 
     return destination
 
 
+def reset_template_caches() -> None:
+    """Forget the parsed built-in and plugin templates, and which warnings were logged.
+
+    Nothing in a running service needs this: both cached stages read files that cannot
+    change without a restart, and an instance's ``plugins_dir`` is not cached. It exists so
+    tests that install a fake entry point, or patch package data, do not leak state.
+    """
+    _parse_builtin_datasets.cache_clear()
+    _parse_entry_point_datasets.cache_clear()
+    _WARNED_TEMPLATE_ISSUES.clear()
+
+
 def _load_builtin_datasets() -> list[dict[str, Any]]:
-    """Load built-in dataset templates from package data via importlib.resources.
+    """Built-in dataset templates, parsed once per process.
+
+    Package data cannot change while the process runs, but this was re-reading and
+    re-validating every built-in YAML on each call — 13.5 ms per call, on a path some
+    requests take twice — and re-emitting the same validation warnings each time, which
+    is what filled deployment logs (CLIM-904). Under ``--reload`` the process restarts,
+    so edits during development are still picked up.
+
+    Callers get a deep copy: the cached parse is 13.5 ms and the copy 0.17 ms, so
+    isolating callers from each other costs almost nothing next to what caching saves,
+    and a mutation of a returned template cannot poison every later request.
+    """
+    return copy.deepcopy(_parse_builtin_datasets())
+
+
+@functools.lru_cache(maxsize=1)
+def _parse_builtin_datasets() -> list[dict[str, Any]]:
+    """Read and validate the built-in templates from package data.
 
     Using importlib.resources instead of __file__-relative path arithmetic ensures
     this works correctly in both editable installs and wheel installs, where the
@@ -217,7 +251,17 @@ def _load_builtin_datasets() -> list[dict[str, Any]]:
 
 
 def _load_entry_point_datasets() -> list[tuple[str, dict[str, Any]]]:
-    """Load dataset templates contributed by installed plugin packages (#118).
+    """Dataset templates from installed plugin packages, parsed once per process.
+
+    Cached and copied for the same reasons as :func:`_load_builtin_datasets`: an installed
+    package's templates cannot change without a reinstall, which needs a restart anyway.
+    """
+    return copy.deepcopy(_parse_entry_point_datasets())
+
+
+@functools.lru_cache(maxsize=1)
+def _parse_entry_point_datasets() -> list[tuple[str, dict[str, Any]]]:
+    """Read and validate dataset templates contributed by installed plugin packages (#118).
 
     A plugin's ``datasets/*.yaml`` templates are loaded here; the package's Python —
     the ``ingestion.plugin`` class — is importable by dotted path because the package
@@ -353,4 +397,11 @@ def _validate_dataset_template(dataset: object, *, source: str) -> None:
 
         message = validate_units(units)
         if message:
-            logger.warning("Dataset template '%s' in %s: %s", dataset_id, source, message)
+            # Once per (template, source, message) per process. Built-in templates are now
+            # parsed once, but an instance's plugins_dir is deliberately re-read on every
+            # request, so without this a questionable unit there would log on every request
+            # exactly as the built-ins used to (CLIM-904).
+            key = (dataset_id, source, message)
+            if key not in _WARNED_TEMPLATE_ISSUES:
+                _WARNED_TEMPLATE_ISSUES.add(key)
+                logger.warning("Dataset template '%s' in %s: %s", dataset_id, source, message)

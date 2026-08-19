@@ -297,3 +297,51 @@ def test_plugins_dir_overrides_entry_point_plugin(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(api_config, "get_config_path", lambda: tmp_path / "climate-service.yaml")
     result = {d["id"]: d for d in datasets.list_datasets()}
     assert result["x"]["name"] == "plugins_dir"
+
+
+def test_builtin_templates_are_parsed_once_per_process() -> None:
+    """The YAML parse is 13.5 ms; it used to run on every call, twice for some requests."""
+    datasets.reset_template_caches()
+    first = datasets._load_builtin_datasets()
+    second = datasets._load_builtin_datasets()
+
+    info = datasets._parse_builtin_datasets.cache_info()
+    assert (info.misses, info.hits) == (1, 1)
+    assert [d["id"] for d in first] == [d["id"] for d in second]
+
+
+def test_returned_templates_are_isolated_from_the_cache() -> None:
+    """A caller mutating a template must not poison every later request."""
+    datasets.reset_template_caches()
+    mutated = datasets._load_builtin_datasets()
+    mutated[0]["name"] = "clobbered"
+    mutated[0].setdefault("display", {})["colormap"] = "clobbered"
+
+    fresh = datasets._load_builtin_datasets()
+    assert fresh[0]["name"] != "clobbered"
+    assert fresh[0].get("display", {}).get("colormap") != "clobbered"
+
+
+def test_unrecognised_units_warn_once_per_template(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An instance's plugins_dir is re-read per request, so the warning must not repeat.
+
+    Counting calls on the module logger rather than using ``caplog``: validating units imports
+    xclim, which pulls in pint, and that import reshuffles root logging handlers so records
+    emitted afterwards can escape capture. The assertion here is the intent anyway — warn once.
+    """
+    datasets.reset_template_caches()
+    warnings: list[str] = []
+    monkeypatch.setattr(datasets.logger, "warning", lambda msg, *args: warnings.append(msg % args if args else msg))
+    template = {
+        "id": "counts",
+        "name": "Counts",
+        "variable": "n",
+        "sync": {"kind": "static"},
+        "units": "people",
+    }
+
+    for _ in range(3):
+        datasets._validate_dataset_template(template, source="counts.yaml")
+
+    assert len(warnings) == 1
+    assert "not a recognised CF/udunits unit" in warnings[0]
