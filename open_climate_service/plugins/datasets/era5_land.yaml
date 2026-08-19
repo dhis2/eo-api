@@ -284,6 +284,19 @@
     colormap: rdbu_r
     range: [-15.0, 15.0]
 
+- id: era5land_precipitation_daily_relative_anomaly_1991_2020
+  name: Precipitation daily relative anomaly (ERA5-Land, vs 1991–2020 normal)
+  short_name: Precipitation anomaly (%)
+  variable: tp
+  period_type: daily
+  sync:
+    kind: static
+  units: "%"
+  source: Derived (climate_anomaly workflow, method=relative)
+  display:
+    colormap: rdbu_r
+    range: [-100.0, 100.0]
+
 - id: era5land_precipitation_daily_anomaly_1991_2020
   name: Precipitation daily anomaly (ERA5-Land, vs 1991–2020 normal)
   short_name: Precipitation anomaly

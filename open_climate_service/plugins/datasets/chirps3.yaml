@@ -100,6 +100,23 @@
 
 # Anomaly output template for the `climate_anomaly` workflow (observed − normal, by
 # day-of-year). No ingestion plugin — produced by the workflow; refresh by re-running.
+# Relative counterpart of the template above, for `method: "relative"`. A separate template
+# because the process changes the unit: percent-of-normal is not a rain rate, and publishing
+# one under the other's `mm/d` is refused at save time. Range is percent, so ±100.
+- id: chirps3_precipitation_daily_relative_anomaly_1991_2020
+  name: Precipitation daily relative anomaly (CHIRPS3, vs 1991–2020 normal)
+  short_name: Precipitation anomaly (%)
+  variable: precip
+  period_type: daily
+  sync:
+    kind: static
+  units: "%"
+  source: Derived (climate_anomaly workflow, method=relative)
+  display:
+    colormap: rdbu_r
+    range: [-100.0, 100.0]
+    nodata: -9999.0
+
 - id: chirps3_precipitation_daily_anomaly_1991_2020
   name: Precipitation daily anomaly (CHIRPS3, vs 1991–2020 normal)
   short_name: Precipitation anomaly

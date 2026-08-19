@@ -239,7 +239,7 @@ The two methods publish **different units**, so a pre-registered template belong
 | `absolute` | the observed variable's unit (e.g. `mm/d`) | `[-20, 20]` for precipitation |
 | `relative` | `%` | `[-100, 100]` |
 
-An auto-registered template takes its units from the computed result, so it is correct either way. A pre-registered one is authoritative, and publishing a relative anomaly into a template declaring `mm/d` is **refused** rather than relabelled — otherwise 20 % of normal would be stored as 20 mm of rain per day, which is plausible enough that nothing downstream could catch it. The shipped `*_anomaly_1991_2020` templates declare absolute units, so a relative anomaly needs its own template.
+An auto-registered template takes its units from the computed result, so it is correct either way. A pre-registered one is authoritative, and publishing a relative anomaly into a template declaring `mm/d` is **refused** rather than relabelled — otherwise 20 % of normal would be stored as 20 mm of rain per day, which is plausible enough that nothing downstream could catch it. The shipped templates come in both forms: `*_anomaly_1991_2020` declares the observed unit for `absolute`, and `*_relative_anomaly_1991_2020` declares `%` for `relative`. Target the one matching the `method` you pass — precipitation only, since a relative anomaly is refused for temperature.
 
 The observed and normal cubes must be on the **same grid** — same cell count, same spacing, same positions. Coordinates differing by floating-point noise are normalised silently; anything larger is refused, because a normal offset by even part of a cell would otherwise be differenced against the wrong cells.
 
