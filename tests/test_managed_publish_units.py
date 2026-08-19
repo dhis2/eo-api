@@ -104,10 +104,35 @@ def test_template_units_of_a_different_dimension_are_refused() -> None:
         jobs._reject_incompatible_template_units(_cube("%"), "tp", {"units": "mm/d"})
 
 
-def test_template_units_within_the_same_dimension_are_allowed() -> None:
-    """Relabelling K as degC over a placeholder is the legitimate case (#280)."""
-    jobs._reject_incompatible_template_units(_cube("K"), "tp", {"units": "degC"})
+def test_a_different_spelling_of_the_same_unit_is_allowed() -> None:
+    """`mm/d` and `mm/day` are one unit, so a tidier spelling must not be an error."""
     jobs._reject_incompatible_template_units(_cube("mm/d"), "tp", {"units": "mm/day"})
+    jobs._reject_incompatible_template_units(_cube("degC"), "tp", {"units": "celsius"})
+
+
+@pytest.mark.parametrize(
+    ("produced", "declared"),
+    [("K", "degC"), ("m", "mm"), ("mm/d", "m/d")],
+)
+def test_the_same_quantity_on_a_different_scale_is_refused(produced: str, declared: str) -> None:
+    """Matching dimensionality is not enough to make a relabel safe.
+
+    `K` and `degC` differ by 273.15 and `m` and `mm` by a factor of 1000, so stamping one over
+    the other leaves the numbers meaning something else entirely — the same failure as the
+    percent case below, and just as invisible afterwards.
+    """
+    with pytest.raises(ValueError, match="same quantity on different scales"):
+        jobs._reject_incompatible_template_units(_cube(produced), "tp", {"units": declared})
+
+
+def test_a_blank_template_unit_asserts_nothing_and_is_not_checked() -> None:
+    """`""` is listed in _PLACEHOLDER_UNITS as carrying no information, on either side.
+
+    No shipped template declares an empty unit, so reading it as a positive claim of
+    dimensionlessness would invent intent rather than enforce it.
+    """
+    jobs._reject_incompatible_template_units(_cube("mm/d"), "tp", {"units": ""})
+    jobs._reject_incompatible_template_units(_cube("mm/d"), "tp", {"units": "   "})
 
 
 def test_no_units_on_either_side_is_not_an_error() -> None:

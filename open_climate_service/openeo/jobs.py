@@ -759,35 +759,57 @@ def _reject_incompatible_template_units(ds: Any, variable: str, cf_attrs: dict[s
     are plausible and the template's diverging range covers both, so no later check could
     notice.
 
-    Dimensionality, not string equality, because relabelling within a dimension is the
-    legitimate case this must not break (a template declaring `degC` over a `K` placeholder,
-    or a tidier spelling of the same unit). A dimensionless-vs-dimensional mismatch is the
-    one that cannot be a spelling difference.
+    The comparison is on the *parsed unit*, so a tidier spelling of the same unit passes
+    (`mm/d` and `mm/day` are one unit to pint) while anything that would change the meaning of
+    the numbers does not. Dimensionality alone is too weak a test: `K` and `degC` share a
+    dimensionality but differ by 273.15, as do `m` and `mm` by a factor of 1000, so a
+    dimensional check would wave through exactly the relabelling this exists to stop.
+
+    An empty or absent `units` declaration asserts nothing and so is not checked, matching
+    :data:`_PLACEHOLDER_UNITS`, which classes `""` on the produced side the same way. Treating
+    it as a positive claim of dimensionlessness would read intent into a blank field that no
+    shipped template uses.
+
+    Overwriting a *placeholder* unit remains the point of the call site — a placeholder is not
+    a parseable unit, so `_variable_units` reports it as absent and this never fires. What is
+    refused is overwriting a unit the result genuinely carries; `units` in the save_result
+    options is the way to say the relabel is intended.
     """
     declared = cf_attrs.get("units")
     produced = _variable_units(ds, variable)
     if not isinstance(declared, str) or not declared.strip() or produced is None:
         return
-    if declared.strip() == produced:
+    declared = declared.strip()
+    if declared == produced:
         return
     try:
         from xclim.core.units import units2pint
     except ImportError:
         return  # client-only install; validate_units() makes the same allowance
     try:
-        declared_dim = units2pint(declared).dimensionality
-        produced_dim = units2pint(produced).dimensionality
+        declared_unit = units2pint(declared)
+        produced_unit = units2pint(produced)
     except Exception:  # noqa: BLE001 — an unparseable unit is validate_units()' problem, not ours
         return
-    if declared_dim != produced_dim:
+    if declared_unit == produced_unit:
+        return
+    if declared_unit.dimensionality != produced_unit.dimensionality:
         raise ValueError(
-            f"dataset template declares units '{declared}' but the result carries '{produced}', "
-            f"which measures a different quantity ({declared_dim or 'dimensionless'} vs "
-            f"{produced_dim or 'dimensionless'}). Publishing would relabel the values rather "
-            "than convert them. Use a template whose units match the process output (a relative "
+            f"dataset template declares units '{declared or 'dimensionless'}' but the result carries "
+            f"'{produced}', which measures a different quantity "
+            f"({declared_unit.dimensionality or 'dimensionless'} vs "
+            f"{produced_unit.dimensionality or 'dimensionless'}). Publishing would relabel the values "
+            "rather than convert them. Use a template whose units match the process output (a relative "
             "anomaly is a percentage, not the observed variable's unit), or pass an explicit "
             "'units' in the save_result options."
         )
+    raise ValueError(
+        f"dataset template declares units '{declared or 'dimensionless'}' but the result carries "
+        f"'{produced}'. They measure the same quantity on different scales, so publishing would "
+        "relabel the values without converting them. Convert the result in the process graph, use a "
+        "template declaring the units the process produces, or pass an explicit 'units' in the "
+        "save_result options."
+    )
 
 
 def _derive_template_name(

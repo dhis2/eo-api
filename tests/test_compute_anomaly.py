@@ -193,3 +193,69 @@ def test_rejects_monthly_observed_with_dayofyear_normal() -> None:
     )
     with pytest.raises(ValueError, match="daily observed"):
         compute_anomaly(obs, _normal_doy())
+
+
+# --- non-spatial axes ---------------------------------------------------------------------
+
+
+def test_a_bands_axis_does_not_reach_the_grid_check() -> None:
+    """Only x/y are grid axes; `bands` labels are strings and must be left to xarray.
+
+    Treating every shared non-temporal dimension as spatial made the spacing check call
+    `astype(float)` on band labels, so a standard multi-band openEO cube failed with
+    `could not convert string to float` before earthkit ever ran.
+    """
+    observed = _observed_doy().expand_dims(bands=["tp"]).transpose("t", "bands", "y", "x")
+    normal = _normal_doy().expand_dims(bands=["tp"]).transpose("dayofyear", "bands", "y", "x")
+
+    out = compute_anomaly(observed, normal, method="absolute")
+
+    assert "bands" in out.dims
+    assert float(out.isel(t=99, bands=0, y=0, x=0)) == pytest.approx(0.0)
+
+
+# --- units -------------------------------------------------------------------------------
+
+
+def _with_units(da: xr.DataArray, units: str) -> xr.DataArray:
+    out = da.copy()
+    out.attrs = {"units": units, "standard_name": "precipitation_amount"}
+    return out
+
+
+def test_a_normal_in_a_convertible_unit_is_converted_not_subtracted_raw() -> None:
+    """earthkit subtracts with plain xarray arithmetic, which ignores units entirely.
+
+    An observed cube in mm/d against a normal in m/d would otherwise come back as
+    observed − 0.001·observed, a plausible number that is wrong by three orders of magnitude.
+    """
+    observed = _with_units(_observed_doy(offset=5.0), "mm/d")
+    normal_m = _with_units(_normal_doy() / 1000.0, "m/d")
+
+    out = compute_anomaly(observed, normal_m, method="absolute")
+
+    assert float(out.isel(t=99, y=0, x=0)) == pytest.approx(5.0, abs=1e-3)
+
+
+def test_an_alias_spelling_needs_no_conversion() -> None:
+    observed = _with_units(_observed_doy(offset=5.0), "mm/d")
+    normal = _with_units(_normal_doy(), "mm/day")
+
+    assert float(compute_anomaly(observed, normal, method="absolute").isel(t=99, y=0, x=0)) == pytest.approx(5.0)
+
+
+def test_a_normal_measuring_a_different_quantity_is_refused() -> None:
+    """A percentage normal against a rate observed is not an anomaly, at any scale."""
+    observed = _with_units(_observed_doy(), "mm/d")
+    normal = _with_units(_normal_doy(), "%")
+
+    with pytest.raises(ValueError, match="measures a different quantity"):
+        compute_anomaly(observed, normal, method="absolute")
+
+
+def test_an_unlabelled_cube_is_left_alone() -> None:
+    """The guard adds a refusal, not a requirement that every cube declare units."""
+    observed = _with_units(_observed_doy(offset=5.0), "mm/d")
+    normal = _normal_doy()  # no units attribute at all
+
+    assert float(compute_anomaly(observed, normal, method="absolute").isel(t=99, y=0, x=0)) == pytest.approx(5.0)

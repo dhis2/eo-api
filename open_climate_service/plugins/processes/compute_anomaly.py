@@ -32,6 +32,7 @@ import numpy as np
 import xarray as xr
 from earthkit.transforms import climatology as ek_climatology
 
+from open_climate_service.data_manager.services.utils import get_x_y_dims
 from open_climate_service.process import process
 
 _ORDINALS = ("dayofyear", "month")
@@ -87,6 +88,51 @@ headroom, while still being five orders below any offset that could represent a 
 """
 
 
+def _align_units(normal: xr.DataArray, observed: xr.DataArray) -> xr.DataArray:
+    """Convert the normal onto the observed cube's units, or refuse the pairing.
+
+    earthkit subtracts (or divides, for ``relative``) with plain xarray arithmetic, which
+    ignores units entirely. An observed cube in ``degC`` against a normal in ``K`` therefore
+    yields an anomaly near −273 — and the result still carries the observed cube's units, so
+    the number is plausible and nothing downstream can tell. Rate units are the same trap
+    (``mm/d`` against ``m/s``), and ``relative`` is worse again: a ratio of two different units
+    is meaningless rather than merely offset.
+
+    Both cubes are usually CF-stamped from their dataset templates, so the units are known and
+    the fix is a conversion. Where a unit is absent or unparseable there is nothing to check
+    against, so alignment is left to earthkit as before — this guard adds a refusal, it does
+    not add a requirement that every cube be labelled.
+    """
+    observed_units = str((getattr(observed, "attrs", None) or {}).get("units", "")).strip()
+    normal_units = str((getattr(normal, "attrs", None) or {}).get("units", "")).strip()
+    if not observed_units or not normal_units or observed_units == normal_units:
+        return normal
+
+    try:
+        from xclim.core.units import convert_units_to, units2pint
+    except ImportError:  # pragma: no cover - client-only install
+        return normal
+
+    try:
+        same_unit = units2pint(observed_units) == units2pint(normal_units)
+        compatible = units2pint(observed_units).dimensionality == units2pint(normal_units).dimensionality
+    except Exception:  # noqa: BLE001 — an unparseable unit is not ours to adjudicate
+        return normal
+
+    if same_unit:
+        return normal  # a spelling difference such as `mm/d` vs `mm/day`
+    if not compatible:
+        raise ValueError(
+            f"observed is in '{observed_units}' but the normal is in '{normal_units}', which measures a "
+            "different quantity; an anomaly between them is not defined. Pair the observed dataset with a "
+            "normal computed from it."
+        )
+    # `convert_units_to` is typed as accepting/returning scalars too; ours is always a cube.
+    converted = cast(xr.DataArray, convert_units_to(normal, observed_units))
+    converted.attrs = {**normal.attrs, "units": observed_units}
+    return converted
+
+
 def _match_spatial_grid(normal: xr.DataArray, observed: xr.DataArray, t_dim: str) -> xr.DataArray:
     """Relabel the normal's spatial coordinates with the observed cube's, or raise.
 
@@ -120,8 +166,17 @@ def _match_spatial_grid(normal: xr.DataArray, observed: xr.DataArray, t_dim: str
 
     A *regular* grid is assumed (true for the lat/lon and UTM grids this serves); the spacing
     check below is what makes that assumption explicit rather than silent.
+
+    Only the x/y axes are considered. "Every non-temporal shared dimension" would also catch
+    `bands`, whose labels are strings — the spacing check would raise
+    ``could not convert string to float`` before earthkit ever ran — and axes like `quantile`,
+    where numeric closeness has no grid meaning. Those align by ordinary xarray rules.
     """
-    spatial_dims = [str(d) for d in observed.dims if d != t_dim and d in normal.dims and d in observed.coords]
+    try:
+        x_dim, y_dim = get_x_y_dims(observed)
+    except ValueError:
+        return normal  # no recognisable spatial axes; leave alignment to xarray
+    spatial_dims = [d for d in (x_dim, y_dim) if d in normal.dims and d in observed.coords]
     if not spatial_dims:
         return normal
 
@@ -241,6 +296,7 @@ def compute_anomaly(observed: xr.DataArray, normal: xr.DataArray, method: str = 
 
     # Guard the float-noise grid mismatch before earthkit's xarray subtraction (see helper).
     normal = _match_spatial_grid(normal, observed, t_dim)
+    normal = _align_units(normal, observed)
     return cast(
         xr.DataArray,
         ek_climatology.anomaly(observed, climatology=normal, time_dim=t_dim, relative=method == "relative"),
