@@ -259,3 +259,71 @@ def test_an_unlabelled_cube_is_left_alone() -> None:
     normal = _normal_doy()  # no units attribute at all
 
     assert float(compute_anomaly(observed, normal, method="absolute").isel(t=99, y=0, x=0)) == pytest.approx(5.0)
+
+
+# --- grid identity: names and CRS --------------------------------------------------------
+
+
+def _normal_named(y_name: str, x_name: str) -> xr.DataArray:
+    """A day-of-year normal on the same grid as `_normal_doy`, under different axis names."""
+    return _normal_doy().rename({"y": y_name, "x": x_name})
+
+
+def test_a_normal_naming_its_axes_lat_lon_is_renamed_not_broadcast() -> None:
+    """Sharing no dimension name meant nothing was compared and xarray multiplied out.
+
+    A (366, 2, 2) normal against a (366, 2, 2) observed came back (366, 2, 2, 2, 2) — on a
+    country grid that is thousands of times the memory, for a meaningless result.
+    """
+    observed = _observed_doy(offset=5.0)
+
+    out = compute_anomaly(observed, _normal_named("latitude", "longitude"), method="absolute")
+
+    assert out.dims == observed.dims, f"broadcast instead of aligned: {out.dims}"
+    assert out.shape == observed.shape
+    assert float(out.isel(t=99, y=0, x=0)) == pytest.approx(5.0)
+
+
+def test_a_normal_with_unrecognised_extra_axes_is_refused() -> None:
+    """Axis names that cannot be mapped onto x/y would broadcast just the same."""
+    normal = _normal_named("northing", "easting")
+
+    with pytest.raises(ValueError, match="broadcast rather than align"):
+        compute_anomaly(_observed_doy(), normal, method="absolute")
+
+
+def _with_crs(da: xr.DataArray, epsg: int) -> xr.DataArray:
+    import rioxarray  # noqa: F401  # pyright: ignore[reportUnusedImport]  # activates .rio
+
+    return da.rio.write_crs(epsg)
+
+
+def test_a_normal_in_a_different_projection_is_refused() -> None:
+    """Coordinates only compare within one projection.
+
+    Neighbouring UTM zones carry overlapping eastings and northings, so identical numbers can
+    describe places hundreds of kilometres apart and every numeric check still passes.
+    """
+    observed = _with_crs(_observed_doy(), 32645)
+    normal = _with_crs(_normal_doy(), 32644)
+
+    with pytest.raises(ValueError, match="coordinates are not comparable"):
+        compute_anomaly(observed, normal, method="absolute")
+
+
+def test_the_same_projection_on_both_sides_is_fine() -> None:
+    observed = _with_crs(_observed_doy(offset=5.0), 32645)
+    normal = _with_crs(_normal_doy(), 32645)
+
+    out = compute_anomaly(observed, normal, method="absolute")
+
+    assert float(out.isel(t=99, y=0, x=0)) == pytest.approx(5.0)
+
+
+def test_a_crs_on_only_one_side_is_not_an_error() -> None:
+    """Nothing to compare against, so the numeric checks stand alone."""
+    observed = _with_crs(_observed_doy(offset=5.0), 4326)
+
+    out = compute_anomaly(observed, _normal_doy(), method="absolute")
+
+    assert float(out.isel(t=99, y=0, x=0)) == pytest.approx(5.0)

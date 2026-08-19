@@ -88,6 +88,76 @@ headroom, while still being five orders below any offset that could represent a 
 """
 
 
+def _declared_crs(da: xr.DataArray) -> Any:
+    """The cube's CRS if it declares one, else None. Never raises."""
+    try:
+        import rioxarray  # noqa: F401  # pyright: ignore[reportUnusedImport]  # activates .rio
+
+        return da.rio.crs
+    except Exception:  # noqa: BLE001 — a cube without a grid mapping simply has no CRS
+        return None
+
+
+def _crs_label(crs: Any) -> str:
+    """A short name for a CRS: its EPSG code when resolvable, else a trimmed description.
+
+    ``to_string()`` returns the full WKT when the authority cannot be looked up (a broken or
+    mismatched PROJ database will do that), which is unreadable in an error message.
+    """
+    try:
+        code = crs.to_epsg()
+    except Exception:  # noqa: BLE001 — falls through to the textual form
+        code = None
+    if code:
+        return f"EPSG:{code}"
+    text = str(getattr(crs, "name", "") or crs.to_string())
+    return text if len(text) <= 60 else f"{text[:57]}..."
+
+
+def _require_matching_crs(normal: xr.DataArray, observed: xr.DataArray) -> xr.DataArray:
+    """Refuse an observed/normal pair that declares two different projections.
+
+    `load_collection` attaches each store's CRS, so this is usually known. Where only one side
+    declares one there is nothing to compare and the numeric checks stand alone.
+    """
+    observed_crs = _declared_crs(observed)
+    normal_crs = _declared_crs(normal)
+    if observed_crs is None or normal_crs is None or observed_crs == normal_crs:
+        return normal
+    raise ValueError(
+        f"observed is in {_crs_label(observed_crs)} but the normal is in {_crs_label(normal_crs)}; "
+        "their coordinates are not comparable, so reproject the normal onto the observed grid before "
+        "computing an anomaly"
+    )
+
+
+def _rename_spatial_axes_onto(normal: xr.DataArray, *, x_dim: str, y_dim: str) -> xr.DataArray:
+    """Rename the normal's recognised spatial axes onto the observed cube's names."""
+    try:
+        normal_x, normal_y = get_x_y_dims(normal)
+    except ValueError:
+        return normal  # no recognisable pair; a spatially constant normal broadcasts legitimately
+    if (normal_x, normal_y) == (x_dim, y_dim):
+        return normal
+    return normal.rename({normal_x: x_dim, normal_y: y_dim})
+
+
+def _reject_broadcasting_dimensions(normal: xr.DataArray, observed: xr.DataArray, t_dim: str) -> None:
+    """Refuse dimensions on the normal that the observed cube lacks.
+
+    xarray would multiply them out rather than align them, so the result grows by a factor of
+    their length while meaning nothing. The climatology's own ordinal axis is exempt — indexing
+    it onto the observed time axis is precisely what earthkit does.
+    """
+    extra = [str(d) for d in normal.dims if d not in observed.dims and str(d) not in _ORDINALS and d != t_dim]
+    if extra:
+        raise ValueError(
+            f"the normal has dimension(s) {extra} that the observed cube does not, so subtracting would "
+            "broadcast rather than align them; regrid or reduce the normal onto the observed cube's axes "
+            "before computing an anomaly"
+        )
+
+
 def _align_units(normal: xr.DataArray, observed: xr.DataArray) -> xr.DataArray:
     """Convert the normal onto the observed cube's units, or refuse the pairing.
 
@@ -171,11 +241,32 @@ def _match_spatial_grid(normal: xr.DataArray, observed: xr.DataArray, t_dim: str
     `bands`, whose labels are strings — the spacing check would raise
     ``could not convert string to float`` before earthkit ever ran — and axes like `quantile`,
     where numeric closeness has no grid meaning. Those align by ordinary xarray rules.
+
+    Three things are settled before the numeric comparison, because each would otherwise make
+    it meaningless:
+
+    * **The CRS.** Coordinates are only comparable within one projection. Two UTM cubes an
+      hour's drive apart carry overlapping eastings and northings, so identical numbers can
+      describe entirely different places — UTM 45N against 44N passes every numeric check.
+    * **Axis naming.** A normal on the same grid but naming its axes `latitude`/`longitude`
+      shares no dimension name with an `x`/`y` observed cube, so nothing was compared and
+      xarray broadcast the subtraction across all four axes: a `(10, 3, 3)` cube came back
+      `(10, 3, 3, 3, 3)`, which on a country grid is thousands of times the memory for a
+      meaningless result. Recognised spellings are renamed onto the observed cube's.
+    * **Leftover dimensions.** Anything still on the normal that the observed cube lacks —
+      and that is not the climatology's own ordinal axis — would broadcast the same way, so it
+      is refused rather than silently multiplied out.
     """
+    normal = _require_matching_crs(normal, observed)
+
     try:
         x_dim, y_dim = get_x_y_dims(observed)
     except ValueError:
         return normal  # no recognisable spatial axes; leave alignment to xarray
+
+    normal = _rename_spatial_axes_onto(normal, x_dim=x_dim, y_dim=y_dim)
+    _reject_broadcasting_dimensions(normal, observed, t_dim)
+
     spatial_dims = [d for d in (x_dim, y_dim) if d in normal.dims and d in observed.coords]
     if not spatial_dims:
         return normal
