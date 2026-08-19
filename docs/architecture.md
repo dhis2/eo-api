@@ -135,8 +135,9 @@ Successful native jobs may also contain domain events in their `events` field. T
 persisted in the same update that marks the job successful, so consumers never observe an event
 for failed work. An async sync that actually appends or rematerializes data records one
 `dataset.updated` event with the dataset, artifact, executed action, and previous/current coverage.
-An up-to-date sync records no event. The event is a durable completion outcome; dispatching
-downstream workflows or external notifications is a separate concern.
+An up-to-date sync records no event. Instance-configured workflow triggers consume these durable
+outcomes and submit existing openEO workflows. A deterministic job ID makes replay after restart
+idempotent. External notification remains a separate concern.
 
 Jobs provide:
 

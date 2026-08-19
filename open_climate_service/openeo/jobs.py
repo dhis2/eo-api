@@ -12,7 +12,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, TypeVar
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import portalocker
 from fastapi import HTTPException
@@ -230,6 +230,69 @@ class OpenEOJobService:
             ],
         )
         return store_create_job(record)
+
+    def create_triggered_job(
+        self,
+        body: OpenEOJobCreate,
+        *,
+        source_event_id: str,
+        trigger_id: str,
+    ) -> tuple[OpenEOJobRecord, bool]:
+        """Create at most one job for a durable event and automation trigger."""
+        if not isinstance(body.process.get("process_graph"), dict):
+            raise ValueError("process.process_graph must be an object")
+        job_id = str(uuid5(NAMESPACE_URL, f"ocs:{source_event_id}:{trigger_id}"))
+        existing = store_get_job(job_id)
+        if existing is not None:
+            return existing, False
+        now = utc_now()
+        candidate = OpenEOJobRecord(
+            id=job_id,
+            title=body.title,
+            description=body.description,
+            process=body.process,
+            status=OpenEOJobStatus.CREATED,
+            created=now,
+            updated=now,
+            links=[
+                {"rel": "self", "href": f"/jobs/{job_id}", "type": "application/json"},
+                {"rel": "results", "href": f"/jobs/{job_id}/results", "type": "application/json"},
+            ],
+        )
+
+        def _create_once(records: list[dict[str, object]]) -> tuple[OpenEOJobRecord, bool]:
+            for raw in records:
+                if raw.get("id") == job_id:
+                    return OpenEOJobRecord.model_validate(raw), False
+            records.append(_serialize(candidate))
+            return candidate, True
+
+        return _mutate_store(_create_once)
+
+    def start_triggered_job(self, job_id: str) -> bool:
+        """Atomically claim and enqueue a created automation job.
+
+        The conditional transition prevents two OCS processes replaying the same
+        durable event from both executing its deterministic job.
+        """
+
+        def _claim(records: list[dict[str, object]]) -> bool:
+            for index, raw in enumerate(records):
+                if raw.get("id") != job_id:
+                    continue
+                current = OpenEOJobRecord.model_validate(raw)
+                if current.status != OpenEOJobStatus.CREATED:
+                    return False
+                records[index] = _serialize(
+                    current.model_copy(update={"status": OpenEOJobStatus.QUEUED, "updated": utc_now()})
+                )
+                return True
+            raise KeyError(job_id)
+
+        claimed = _mutate_store(_claim)
+        if claimed:
+            self._enqueue(job_id)
+        return claimed
 
     def get_job_or_404(self, job_id: str) -> OpenEOJobRecord:
         record = store_get_job(job_id)

@@ -12,6 +12,19 @@ extent:
 
 data_dir: ./data   # required — directory for downloaded NetCDF files and Zarr stores
 
+# Event-driven workflows are instance-specific bindings. Event references are resolved from
+# the successful dataset sync outcome; literal argument values are passed through unchanged.
+# automation:
+#   workflow_triggers:
+#     - id: chirps-to-chap
+#       on_update_of: chirps3_precipitation_daily
+#       workflow_id: aggregate_to_chap_csv
+#       arguments:
+#         dataset_id: $event.dataset_id
+#         temporal_extent: [$event.previous_end, $event.current_end]
+#         geometries: {type: FeatureCollection, features: []}
+#         period_type: day
+
 # plugins_dir: ./plugins/   # optional — plugin root: YAML templates in plugins/datasets/, Python modules importable by dotted path
 # crs: EPSG:4326             # optional — CRS for stored GeoZarr files (default: EPSG:4326); use e.g. EPSG:25833 for UTM33
 # utc_offset_hours: 0        # optional — UTC offset in hours for local-day aggregation in daily_from_hourly datasets (default: 0 = UTC)
