@@ -388,7 +388,30 @@ def compute_anomaly(observed: xr.DataArray, normal: xr.DataArray, method: str = 
     # Guard the float-noise grid mismatch before earthkit's xarray subtraction (see helper).
     normal = _match_spatial_grid(normal, observed, t_dim)
     normal = _align_units(normal, observed)
-    return cast(
+    result = cast(
         xr.DataArray,
         ek_climatology.anomaly(observed, climatology=normal, time_dim=t_dim, relative=method == "relative"),
     )
+    return _restore_scalar_coords(result, observed, ordinal)
+
+
+def _restore_scalar_coords(result: xr.DataArray, observed: xr.DataArray, ordinal: str) -> xr.DataArray:
+    """Undo the coordinate broadcasting earthkit's per-timestep indexing leaves behind.
+
+    Indexing the normal by each observed timestep carries the normal's non-dimension coords
+    along, so a scalar ``spatial_ref`` returns with a length-N time dimension. Publishing that
+    fails at ``xproj.assign_crs`` — "can only create a CRSIndex from one scalar variable" — and
+    a per-timestep CRS would be meaningless even if it wrote. The normal's ordinal coord
+    (``month``/``dayofyear``) rides along too and is not part of the anomaly's own geometry.
+
+    Only coords that are scalar on the observed cube are restored, so nothing that legitimately
+    varies is touched.
+    """
+    if ordinal in result.coords and ordinal not in result.dims:
+        result = result.drop_vars(ordinal, errors="ignore")
+    for name, coord in observed.coords.items():
+        if coord.dims:
+            continue
+        if name in result.coords and result[name].dims:
+            result = result.assign_coords({name: coord})
+    return result

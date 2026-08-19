@@ -327,3 +327,31 @@ def test_a_crs_on_only_one_side_is_not_an_error() -> None:
     out = compute_anomaly(observed, _normal_doy(), method="absolute")
 
     assert float(out.isel(t=99, y=0, x=0)) == pytest.approx(5.0)
+
+
+def test_anomaly_keeps_the_crs_coordinate_scalar() -> None:
+    """earthkit's per-timestep indexing broadcasts the normal's scalar coords along time.
+
+    A `spatial_ref` with a time dimension cannot be published — `xproj.assign_crs` raises
+    "can only create a CRSIndex from one scalar variable" — and a per-timestep CRS would be
+    meaningless if it wrote. Found by publishing a real monthly temperature anomaly.
+    """
+    times = pd.date_range("2026-01-01", periods=3, freq="MS")
+    observed = xr.DataArray(
+        np.ones((3, 2, 2), dtype="float32"),
+        dims=("t", "y", "x"),
+        coords={"t": times, "y": [1.0, 0.0], "x": [0.0, 1.0], "spatial_ref": 0},
+        attrs={"units": "degC"},
+    )
+    normal = xr.DataArray(
+        np.zeros((12, 2, 2), dtype="float32"),
+        dims=("month", "y", "x"),
+        coords={"month": range(1, 13), "y": [1.0, 0.0], "x": [0.0, 1.0], "spatial_ref": 0},
+        attrs={"units": "degC"},
+    )
+
+    result = compute_anomaly(observed, normal, method="absolute")
+
+    assert result["spatial_ref"].dims == (), f"spatial_ref gained dims {result['spatial_ref'].dims}"
+    assert "month" not in result.coords, "the normal's ordinal coord leaked into the anomaly"
+    assert result.dims == ("t", "y", "x")
