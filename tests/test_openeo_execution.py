@@ -1660,3 +1660,38 @@ def test_derive_coverage_returns_spatial_and_temporal_from_dataset() -> None:
     assert coverage.spatial.ymax == pytest.approx(30.0)
     assert coverage.temporal.start == "2025-01-01"
     assert coverage.temporal.end == "2025-01-03"
+
+
+def test_batch_job_with_unwritable_format_errors_without_a_result_asset(
+    job_service: OpenEOJobService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The batch half of CLIM-909: the job must fail, not finish with mislabelled output.
+
+    Before the fix `_write_raster` fell back to Zarr, so the job wrote `result.zarr`, was marked
+    FINISHED, and advertised it as the requested format — quieter than the synchronous 500 and
+    harder to notice.
+    """
+    ds = xr.Dataset(
+        {"temperature": xr.DataArray(np.ones((2, 2), dtype=np.float32), dims=["y", "x"])},
+        coords={"y": [1.0, 0.0], "x": [0.0, 1.0]},
+    )
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        lambda process: SaveResultEnvelope(ds, "GEOJSON"),
+    )
+
+    record = job_service.create_job(
+        OpenEOJobCreate(
+            process={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+        )
+    )
+    job_service._execute(record.id)
+
+    failed = job_service.get_job_or_404(record.id)
+    assert failed.status == OpenEOJobStatus.ERROR
+    assert "describes vector features" in (failed.error_message or "")
+    assert not (failed.usage or {}).get("output_path")
+
+    with pytest.raises(HTTPException) as exc_info:
+        job_service.get_results(record.id)
+    assert exc_info.value.status_code == 424
