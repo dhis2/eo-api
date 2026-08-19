@@ -129,8 +129,18 @@ def is_store_empty(store_path: Path) -> bool:
     This is a conservative safety check for first-write detection. If the store
     cannot be inspected, we treat it as non-empty to avoid a destructive
     `mode="w"` rewrite of data that may already exist.
+
+    A repository created but never written to is the one inspection failure that means
+    the opposite. Ingest creates the repo before fetching, so any failure before the
+    first period commits leaves a repo whose branch tip holds only the initial snapshot
+    and no zarr hierarchy at all — `zarr.open_group` raises `GroupNotFoundError` there.
+    Reading that as "cannot inspect, assume data" made the emptiest possible store look
+    occupied, and the orchestrator's first-write guard then refused every retry until
+    the directory was deleted by hand (CLIM-898). No group is not an unknown state: it
+    is an empty one, and there is nothing for a `mode="w"` write to destroy.
     """
     import zarr
+    from zarr.errors import GroupNotFoundError
 
     if not store_path.exists():
         return True
@@ -138,7 +148,11 @@ def is_store_empty(store_path: Path) -> bool:
     try:
         repo = open_or_create_repo(store_path)
         session = repo.readonly_session("main")
-        root = zarr.open_group(session.store, mode="r")
+        try:
+            root = zarr.open_group(session.store, mode="r")
+        except GroupNotFoundError:
+            logger.debug("%s holds no zarr group; treating as empty", store_path)
+            return True
         return not list(root.array_keys()) and not list(root.group_keys()) and not bool(root.attrs.asdict())
     except Exception:
         logger.debug("Could not determine whether %s is empty", store_path, exc_info=True)
