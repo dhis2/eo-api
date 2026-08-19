@@ -345,3 +345,44 @@ def test_unrecognised_units_warn_once_per_template(monkeypatch: pytest.MonkeyPat
 
     assert len(warnings) == 1
     assert "not a recognised CF/udunits unit" in warnings[0]
+
+
+def test_missing_plugins_dir_serves_built_ins_instead_of_raising(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A configured plugins_dir that does not exist must not break template listing.
+
+    Startup warns and keeps serving, so raising here left the instance reporting healthy with
+    /dataset-templates/ returning 500 — the one route the ingest form needs (CLIM-910).
+    """
+    monkeypatch.setattr(datasets, "CONFIGS_DIR", None)
+    monkeypatch.setattr(
+        datasets, "_load_builtin_datasets", lambda: [{"id": "built_in", "name": "b", "sync": {"kind": "static"}}]
+    )
+    monkeypatch.setattr(
+        datasets,
+        "_load_entry_point_datasets",
+        lambda: [("p", {"id": "from_plugin", "name": "p", "sync": {"kind": "static"}})],
+    )
+    absent = tmp_path / "not-created"
+    monkeypatch.setattr(api_config, "get_config", lambda: {"plugins_dir": str(absent)})
+    monkeypatch.setattr(api_config, "get_config_path", lambda: tmp_path / "climate-service.yaml")
+
+    assert not absent.exists()
+    assert {d["id"] for d in datasets.list_datasets()} == {"built_in", "from_plugin"}
+
+
+def test_plugins_dir_of_the_wrong_type_still_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A misconfigured type is a config error, not a missing directory — keep failing loudly."""
+    monkeypatch.setattr(datasets, "CONFIGS_DIR", None)
+    monkeypatch.setattr(datasets, "_load_builtin_datasets", lambda: [])
+    monkeypatch.setattr(datasets, "_load_entry_point_datasets", lambda: [])
+    monkeypatch.setattr(api_config, "get_config", lambda: {"plugins_dir": ["a", "list"]})
+    monkeypatch.setattr(api_config, "get_config_path", lambda: tmp_path / "climate-service.yaml")
+
+    with pytest.raises(ValueError, match="must be a path string"):
+        datasets.list_datasets()
