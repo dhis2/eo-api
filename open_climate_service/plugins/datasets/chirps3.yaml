@@ -130,3 +130,33 @@
     colormap: rdbu_r
     range: [-20.0, 20.0]
     nodata: -9999.0
+
+- id: chirps3_precipitation_monthly_anomaly_1991_2020
+  name: Precipitation monthly anomaly (CHIRPS3, vs 1991–2020 normal)
+  short_name: Precipitation monthly anomaly
+  variable: precip
+  period_type: monthly
+  sync:
+    kind: static
+  units: mm/d
+  source: Derived (climate_anomaly workflow)
+  display:
+    colormap: rdbu_r
+    # Tighter than the daily ±20: a monthly mean rate averages the extremes away, so a
+    # measured Sierra Leone monsoon anomaly sits near ±2.5 mm/d and ±20 renders as blank white.
+    range: [-10.0, 10.0]
+    nodata: -9999.0
+
+- id: chirps3_precipitation_monthly_relative_anomaly_1991_2020
+  name: Precipitation monthly relative anomaly (CHIRPS3, vs 1991–2020 normal)
+  short_name: Precipitation anomaly (%)
+  variable: precip
+  period_type: monthly
+  sync:
+    kind: static
+  units: "%"
+  source: Derived (climate_anomaly workflow, method=relative)
+  display:
+    colormap: rdbu_r
+    range: [-100.0, 100.0]
+    nodata: -9999.0
