@@ -7,9 +7,9 @@ refuses to touch a store it cannot classify, and an operator has no supported wa
 (CLIM-898), so a false "not empty" here wedges the dataset until someone removes the directory on
 the host.
 
-The pair of assertions matters more than either alone. Reading "no group" as empty must not widen
-into reading "cannot inspect" as empty, because the value returned here decides whether ingest is
-allowed to write with ``mode="w"``.
+The negative cases matter as much as the positive ones: "nothing committed" must not widen into
+"cannot inspect", because the value returned here decides whether ingest may write with
+``mode="w"``.
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ import numpy as np
 import pytest
 
 xr = pytest.importorskip("xarray")
-icechunk = pytest.importorskip("icechunk")
 zarr = pytest.importorskip("zarr")
 zarr_errors = pytest.importorskip("zarr.errors")
+pytest.importorskip("icechunk")  # required by the store helpers, not referenced here
 
 from open_climate_service.streaming.orchestrator import run_streaming_ingest_sync  # noqa: E402
 from open_climate_service.streaming.store import is_store_empty, open_or_create_repo  # noqa: E402
@@ -113,3 +113,23 @@ def test_repo_with_only_root_attrs_is_not_empty(tmp_path: Path) -> None:
     session.commit("root attrs only")
 
     assert is_store_empty(store_path) is False
+
+
+def test_never_written_repo_is_empty_even_if_group_probing_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The decision comes from Icechunk history, not from how zarr reports a missing group.
+
+    How ``zarr.open_group`` signals "no hierarchy here" varies by version, so a fix that
+    depended on catching one exception type would be one upgrade away from wedging again.
+    """
+
+    def explode(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("some other zarr version's idea of a missing group")
+
+    store_path = tmp_path / "never-written.icechunk"
+    open_or_create_repo(store_path)
+    monkeypatch.setattr(zarr, "open_group", explode)
+
+    assert is_store_empty(store_path) is True

@@ -131,14 +131,20 @@ def is_store_empty(store_path: Path) -> bool:
     `mode="w"` rewrite of data that may already exist.
 
     A repository created but never written to is the one inspection failure that means
-    the opposite. Ingest creates the repo before fetching, so any failure before the
-    first period commits leaves a repo whose branch tip holds only the initial snapshot
-    and no zarr hierarchy at all — `zarr.open_group` raises `GroupNotFoundError` there.
-    Reading that as "cannot inspect, assume data" made the emptiest possible store look
-    occupied, and the orchestrator's first-write guard then refused every retry until
-    the directory was deleted by hand (CLIM-898). No group is not an unknown state: it
-    is an empty one, and there is nothing for a `mode="w"` write to destroy.
+    the opposite. Ingest creates the repo before fetching, so any failure before the first
+    period commits leaves a repo holding nothing but its initial snapshot. Reading that as
+    "cannot inspect, assume data" made the emptiest possible store look occupied, and the
+    orchestrator's first-write guard then refused every retry until the directory was
+    deleted by hand (CLIM-898). Nothing committed is not an unknown state: it is an empty
+    one, and there is nothing for a `mode="w"` write to destroy.
+
+    That case is decided from Icechunk's own history rather than from how `zarr.open_group`
+    reports a missing hierarchy, which varies by version. The `GroupNotFoundError` branch
+    below then only covers a repo that has commits but no group, and cannot be the sole
+    signal for a never-written store.
     """
+    import itertools
+
     import zarr
     from zarr.errors import GroupNotFoundError
 
@@ -147,6 +153,11 @@ def is_store_empty(store_path: Path) -> bool:
 
     try:
         repo = open_or_create_repo(store_path)
+        # Two is enough to answer "more than the initial snapshot?" — ancestry is lazy, so
+        # this does not walk the history of a store with thousands of commits.
+        if len(list(itertools.islice(repo.ancestry(branch="main"), 2))) < 2:
+            logger.debug("%s has no commits beyond initialization; treating as empty", store_path)
+            return True
         session = repo.readonly_session("main")
         try:
             root = zarr.open_group(session.store, mode="r")
