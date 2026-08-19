@@ -5,6 +5,7 @@ import functools
 import importlib.resources
 import logging
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,16 @@ logger = logging.getLogger(__name__)
 CONFIGS_DIR: Path | None = None
 
 # Template issues already logged this process, so a re-read path cannot repeat them.
+# Guarded by its own lock: FastAPI runs sync endpoints in worker threads, so the
+# check-then-add would otherwise let two threads both decide a warning is new.
 _WARNED_TEMPLATE_ISSUES: set[tuple[str, str, str]] = set()
+_WARNED_LOCK = threading.Lock()
+
+# Serialises cache population. `lru_cache` protects its own state but calls the wrapped
+# function outside that lock, so concurrent cold calls would each parse every template.
+# Only contended on a cold cache; the warm path takes it and returns immediately.
+# Lock order is one-way — a parse takes this and then `_WARNED_LOCK` while validating.
+_PARSE_LOCK = threading.Lock()
 
 SUPPORTED_SYNC_KINDS = {"temporal", "release", "static"}
 SUPPORTED_SYNC_EXECUTIONS = {"append", "rematerialize"}
@@ -209,9 +219,11 @@ def reset_template_caches() -> None:
     change without a restart, and an instance's ``plugins_dir`` is not cached. It exists so
     tests that install a fake entry point, or patch package data, do not leak state.
     """
-    _parse_builtin_datasets.cache_clear()
-    _parse_entry_point_datasets.cache_clear()
-    _WARNED_TEMPLATE_ISSUES.clear()
+    with _PARSE_LOCK:
+        _parse_builtin_datasets.cache_clear()
+        _parse_entry_point_datasets.cache_clear()
+    with _WARNED_LOCK:
+        _WARNED_TEMPLATE_ISSUES.clear()
 
 
 def _load_builtin_datasets() -> list[dict[str, Any]]:
@@ -227,7 +239,9 @@ def _load_builtin_datasets() -> list[dict[str, Any]]:
     isolating callers from each other costs almost nothing next to what caching saves,
     and a mutation of a returned template cannot poison every later request.
     """
-    return copy.deepcopy(_parse_builtin_datasets())
+    with _PARSE_LOCK:
+        parsed = _parse_builtin_datasets()
+    return copy.deepcopy(parsed)
 
 
 @functools.lru_cache(maxsize=1)
@@ -264,7 +278,9 @@ def _load_entry_point_datasets() -> list[tuple[str, dict[str, Any]]]:
     Cached and copied for the same reasons as :func:`_load_builtin_datasets`: an installed
     package's templates cannot change without a reinstall, which needs a restart anyway.
     """
-    return copy.deepcopy(_parse_entry_point_datasets())
+    with _PARSE_LOCK:
+        parsed = _parse_entry_point_datasets()
+    return copy.deepcopy(parsed)
 
 
 @functools.lru_cache(maxsize=1)
@@ -410,6 +426,8 @@ def _validate_dataset_template(dataset: object, *, source: str) -> None:
             # request, so without this a questionable unit there would log on every request
             # exactly as the built-ins used to (CLIM-904).
             key = (dataset_id, source, message)
-            if key not in _WARNED_TEMPLATE_ISSUES:
+            with _WARNED_LOCK:
+                first_time = key not in _WARNED_TEMPLATE_ISSUES
                 _WARNED_TEMPLATE_ISSUES.add(key)
+            if first_time:
                 logger.warning("Dataset template '%s' in %s: %s", dataset_id, source, message)

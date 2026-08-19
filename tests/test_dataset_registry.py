@@ -386,3 +386,57 @@ def test_plugins_dir_of_the_wrong_type_still_raises(
 
     with pytest.raises(ValueError, match="must be a path string"):
         datasets.list_datasets()
+
+
+def test_concurrent_cold_calls_parse_the_templates_once() -> None:
+    """FastAPI runs sync endpoints in worker threads, so a cold cache is hit concurrently.
+
+    ``lru_cache`` calls the wrapped function outside its own lock, so without serialising
+    population every thread arriving on a cold cache parses every template.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    datasets.reset_template_caches()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = [f.result() for f in [pool.submit(datasets._load_builtin_datasets) for _ in range(8)]]
+
+    assert datasets._parse_builtin_datasets.cache_info().misses == 1
+    assert all([d["id"] for d in r] == [d["id"] for d in results[0]] for r in results)
+
+
+def test_concurrent_validation_warns_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Concurrent validation of one template yields one warning.
+
+    A smoke test, not a race guard: it also passes without the lock in `_validate_dataset_template`,
+    because the check-then-add window is a few bytecodes and the GIL rarely interleaves there. The
+    lock is still worth having — it makes "once" true rather than merely probable — but this test
+    cannot demonstrate its absence, unlike the parse test above (8 misses instead of 1).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    datasets.reset_template_caches()
+    warnings: list[str] = []
+    warn_lock = __import__("threading").Lock()
+
+    def record(msg: str, *args: object) -> None:
+        with warn_lock:  # the assertion is about datasets.py's locking, not this list's
+            warnings.append(msg % args if args else msg)
+
+    monkeypatch.setattr(datasets.logger, "warning", record)
+    template = {
+        "id": "counts",
+        "name": "Counts",
+        "variable": "n",
+        "sync": {"kind": "static"},
+        "units": "people",
+    }
+    # Warm xclim outside the threads so import timing does not shape the result.
+    datasets._validate_dataset_template(template, source="warmup.yaml")
+    datasets.reset_template_caches()
+    warnings.clear()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for f in [pool.submit(datasets._validate_dataset_template, template, source="counts.yaml") for _ in range(8)]:
+            f.result()
+
+    assert len(warnings) == 1
