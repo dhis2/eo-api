@@ -620,6 +620,67 @@ def test_result_route_rejects_synchronous_zarr_datacube(client: TestClient, monk
     assert "do not support ZARR output" in response.json()["detail"]
 
 
+@pytest.mark.parametrize(
+    ("fmt", "expected_fragment"),
+    [
+        ("GEOJSON", "describes vector features"),
+        ("PARQUET", "describes vector features"),
+        ("JSON", "Unsupported output format"),
+    ],
+)
+def test_result_route_rejects_formats_a_raster_cube_cannot_produce(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    fmt: str,
+    expected_fragment: str,
+) -> None:
+    """A raster cube asked for a vector or unknown format must 4xx, not 500.
+
+    These used to fall through to the Zarr default, writing a `result.zarr` directory that the
+    route then tried to read as a file: `IsADirectoryError`, surfaced as 500 (CLIM-909).
+    """
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        lambda process, request=None: SaveResultEnvelope(
+            xr.Dataset({"temperature": xr.DataArray(np.ones((2, 2), dtype=np.float32), dims=["y", "x"])}),
+            fmt,
+        ),
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 400
+    assert expected_fragment in response.json()["detail"]
+
+
+@pytest.mark.parametrize("fmt", ["NETCDF", "GTIFF", "CSV"])
+def test_result_route_still_serves_raster_formats(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    fmt: str,
+) -> None:
+    """The refusal above must not catch formats a raster cube genuinely produces."""
+    ds = xr.Dataset(
+        {"temperature": xr.DataArray(np.ones((2, 2), dtype=np.float32), dims=["y", "x"])},
+        coords={"y": [1.0, 0.0], "x": [0.0, 1.0]},
+    )
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        lambda process, request=None: SaveResultEnvelope(ds, fmt),
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.content
+
+
 def test_result_route_returns_geojson_payload_for_synchronous_vector_result(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

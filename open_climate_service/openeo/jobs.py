@@ -1115,7 +1115,20 @@ def _write_raster(ds: Any, results_dir: Any, fmt: str) -> str | None:
         except Exception:
             logger.debug("geometry→GeoDataFrame conversion failed", exc_info=True)
 
-    ext, _ = _RASTER_FORMATS.get(fmt, (".zarr", "application/vnd+zarr"))
+    if fmt not in _RASTER_FORMATS:
+        # Defaulting an unwritable format to Zarr wrote a `result.zarr` directory and called it
+        # the requested format. Synchronously that surfaced as a 500 — `IsADirectoryError` when
+        # the route read the "file" back — and in a batch job as a job that succeeded while
+        # advertising output it had not produced (CLIM-909).
+        if fmt in _VECTOR_FORMATS:
+            raise ValueError(
+                f"Format '{fmt}' describes vector features, but this result is a raster datacube "
+                "with no geometry dimension. Aggregate to geometries first (e.g. aggregate_spatial), "
+                "or request a raster format: " + ", ".join(sorted(_RASTER_FORMATS))
+            )
+        raise ValueError(f"Unsupported output format '{fmt}'. Supported: " + ", ".join(sorted(_RASTER_FORMATS)))
+
+    ext, _ = _RASTER_FORMATS[fmt]
 
     if ext == ".zarr":
         path = str(results_dir / "result.zarr")
