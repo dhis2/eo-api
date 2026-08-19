@@ -1629,6 +1629,7 @@ def test_write_raster_keeps_attrs_the_writer_can_encode(tmp_path: Path) -> None:
     from open_climate_service.openeo.jobs import _write_raster
 
     output = _write_raster(_reduced_dataset(), tmp_path, "NETCDF")
+    assert output is not None
 
     reopened = xr.open_dataset(output)
     try:
