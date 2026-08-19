@@ -33,9 +33,11 @@ def circular_rolling_mean(da: xr.DataArray, window: int, dim: str = "dayofyear")
     axis, let earthkit reduce, then drop the padding. The padded region absorbs the NaN
     edges, leaving every ordinal step with a full window.
 
-    Laziness is preserved throughout — ``concat`` and ``rolling_reduce`` are both
-    dask-aware, so a ``(dim, y, x)`` cube is never materialised and chunking survives to
-    the final write.
+    Laziness is preserved throughout — ``concat`` and ``rolling_reduce`` are both dask-aware,
+    so a ``(dim, y, x)`` cube is never materialised. The input's chunking along ``dim`` is
+    restored at the end: padding and slicing leave the axis fragmented (a 13-chunk input came
+    back as ``(15, 30, …, 36, 15)``), and Zarr accepts uniform chunks with a smaller final one
+    and nothing else, so writing that result would fail.
 
     Args:
         da: cube with ``dim`` as a cyclic ordinal axis.
@@ -75,4 +77,9 @@ def circular_rolling_mean(da: xr.DataArray, window: int, dim: str = "dayofyear")
 
     # Drop the wrap padding and restore the original ordinal coordinate: concat left the
     # coordinate values duplicated across the padded region.
-    return smoothed.isel({dim: slice(half, half + n)}).assign_coords({dim: da[dim]})
+    result = smoothed.isel({dim: slice(half, half + n)}).assign_coords({dim: da[dim]})
+
+    # Restore the caller's chunking along `dim`; see the note on Zarr's chunk rules above.
+    if da.chunks is not None:
+        result = result.chunk({dim: da.chunksizes[dim]})
+    return result

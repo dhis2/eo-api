@@ -76,6 +76,26 @@ def test_preserves_dask_laziness() -> None:
     assert result.chunks is not None
 
 
+@pytest.mark.parametrize("chunk", [30, 100, 122, 366])
+def test_result_keeps_the_input_chunking_so_it_stays_writable(chunk: int) -> None:
+    """Zarr takes uniform chunks with a smaller final one, and nothing else.
+
+    Padding and slicing the cyclic axis fragments it — chunking at 30 came back as
+    ``(15, 30, …, 36, 15)`` — which no Zarr write would accept. Laziness alone is not enough
+    to assert, since a lazy result can still be unwritable.
+    """
+    da = _cube(366).chunk({"dayofyear": chunk})
+    assert da.chunks is not None  # precondition: the input really is chunked
+    expected = da.chunks[0]
+
+    result = circular_rolling_mean(da, 31)
+
+    assert result.chunks is not None
+    sizes = result.chunks[0]
+    assert sizes == expected, f"chunking changed: {expected} -> {sizes}"
+    assert len(set(sizes[:-1])) <= 1 and sizes[-1] <= sizes[0], f"not writable: {sizes}"
+
+
 def test_constant_field_is_unchanged() -> None:
     da = xr.DataArray(
         np.full((366, 2, 2), 7.5),
