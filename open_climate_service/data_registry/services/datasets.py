@@ -108,7 +108,15 @@ def list_datasets() -> list[dict[str, Any]]:
         base = config_path.parent if config_path else Path()
         root = (base / config_plugins_dir).resolve()
         if not root.is_dir():
-            raise ValueError(f"plugins_dir '{root}' does not exist or is not a directory")
+            # Startup already warns about this (plugins_diagnostics.log_plugin_loading) and lets the
+            # service run, so raising here made the two disagree: the instance reported healthy and
+            # served /datasets, /collections and /processes while /dataset-templates/ returned 500 —
+            # the one route the ingest form needs. A configured-but-absent plugins_dir is a
+            # deployment slip, not a reason to refuse service, so degrade to the built-in and
+            # entry-point templates instead. Debug rather than warning because startup has already
+            # said it loudly, once, and this runs per request.
+            logger.debug("plugins_dir '%s' does not exist; serving built-in and plugin templates only", root)
+            return list(merged.values())
         root_str = str(root)
         if root_str not in sys.path:
             sys.path.append(root_str)
