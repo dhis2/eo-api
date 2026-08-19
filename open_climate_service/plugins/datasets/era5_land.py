@@ -444,15 +444,29 @@ class _ERA5LandEDHBase(BaseDatasetPlugin):
             ds.close()
 
 
+_GRID_MAPPING_NAMES = ("spatial_ref", "crs")
+"""Scalar coordinates that carry the CRS rather than data, so they must survive the cleanup."""
+
+
 def _drop_auxiliary_variables(ds: xr.Dataset, variable: str) -> xr.Dataset:
-    """Keep only ``variable`` and the dimension coordinates, dropping everything else.
+    """Keep ``variable``, the dimension coordinates and the CRS, dropping everything else.
 
     ERA5 sources attach scalar ensemble-member coordinates (``number``, value 0 for
     ERA5-Land reanalysis; sometimes ``expver``) that otherwise persist as phantom data
     variables — which then load as a spurious ``bands`` dimension downstream (e.g. anomalies
     came out with a stray ``number`` band). Shared by the daily ERA5-Land fetch paths.
+
+    The grid mapping is exempt. "Everything that is not a dimension coordinate" would also
+    take rioxarray's ``spatial_ref``, which is where the CRS lives — and since grid inference
+    falls back to EPSG:4326 when a cube carries none, ERA5-Land would still be recorded
+    correctly, by luck rather than because the data said so. A projected source cleaned the
+    same way would be silently mislabelled.
     """
-    extras = [v for v in ds.variables if v != variable and v not in ds.dims]
+    keep = {variable, *ds.dims, *_GRID_MAPPING_NAMES}
+    declared = ds[variable].attrs.get("grid_mapping") if variable in ds else None
+    if isinstance(declared, str) and declared:
+        keep.add(declared)
+    extras = [v for v in ds.variables if v not in keep]
     return ds.drop_vars(extras, errors="ignore")
 
 
