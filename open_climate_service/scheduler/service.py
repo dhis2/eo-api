@@ -114,7 +114,7 @@ class SchedulerService:
             )
             logger.exception("Scheduled sync check failed for %s", schedule.dataset_id)
         self._last_results[schedule.schedule_id] = result
-        log = logger.warning if result.outcome in {CheckOutcome.NOT_MATERIALIZED, CheckOutcome.ERROR} else logger.info
+        log = logger.warning if result.outcome == CheckOutcome.ERROR else logger.info
         log(
             "Scheduled sync check for %s: %s (%s)",
             schedule.dataset_id,

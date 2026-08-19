@@ -13,7 +13,6 @@ Schedules are an instance-level operational choice in `climate-service.yaml`:
 scheduler:
   enabled: true
   timezone: UTC
-  max_concurrent_syncs: 1
   dataset_sync:
     - dataset_id: chirps3_precipitation_daily
       cron: "0 6 * * *"
@@ -31,9 +30,10 @@ and returns immediately. Planning and synchronization happen in the native queue
 check therefore completes as a normal no-op job record instead of doing upstream work in the
 clock callback.
 
-`max_concurrent_syncs` configures the native ingestion/sync worker pool and defaults to one, so
-multiple due schedules wait in the queue and dataset writes run sequentially. An active manual
-ingestion or sync for the same dataset suppresses duplicate scheduled submission.
+Scheduled work uses the same native job pool as manual ingestion and sync requests. Scheduling
+does not change that pool's concurrency. An active manual ingestion or sync for the same dataset
+suppresses duplicate scheduled submission; the per-store lock remains the final write-safety
+boundary.
 
 ## Inspect status
 
@@ -41,6 +41,10 @@ ingestion or sync for the same dataset suppresses duplicate scheduled submission
 its next check, latest enqueue outcome, message, and submitted native job ID. This status does
 not mirror the terminal job state; follow `last_job_id` through the native jobs API. Check state
 is volatile and resets when the process restarts; submitted jobs remain durable.
+
+Every due check creates a native job, including checks that finish without finding new periods.
+Native job history is currently retained in `jobs.json`; retention and indexed active-job lookup
+are follow-up work for the persistent job-store implementation.
 
 ## Deployment constraints
 

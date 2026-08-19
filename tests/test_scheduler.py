@@ -48,7 +48,6 @@ def test_scheduler_configuration_defaults_to_utc_and_three_attempts() -> None:
     )
 
     assert config.timezone_info.key == "UTC"
-    assert config.max_concurrent_syncs == 1
     assert config.dataset_sync[0].max_attempts == 3
     assert config.dataset_sync[0].schedule_id == "dataset-sync:chirps3_precipitation_daily"
 
@@ -57,7 +56,6 @@ def test_scheduler_configuration_defaults_to_utc_and_three_attempts() -> None:
     "payload,match",
     [
         ({"timezone": "Not/A_Zone"}, "timezone"),
-        ({"max_concurrent_syncs": 0}, "greater than"),
         ({"dataset_sync": [{"dataset_id": "x", "cron": "daily"}]}, "cron"),
         ({"dataset_sync": [{"dataset_id": "x", "cron": "0 6 * * *", "max_attempts": 0}]}, "greater than"),
         (

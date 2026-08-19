@@ -448,9 +448,7 @@ def get_job_service() -> JobService:
     """Return the singleton native job runtime."""
     global _job_service
     if _job_service is None:
-        from open_climate_service.scheduler.config import get_scheduler_config
-
-        _job_service = JobService(max_workers=get_scheduler_config().max_concurrent_syncs)
+        _job_service = JobService()
     return _job_service
 
 

@@ -24,9 +24,6 @@ class CheckOutcome(StrEnum):
     """Outcome of one scheduled dataset check."""
 
     SUBMITTED = "submitted"
-    UP_TO_DATE = "up_to_date"
-    NOT_MATERIALIZED = "not_materialized"
-    NOT_SYNCABLE = "not_syncable"
     ALREADY_RUNNING = "already_running"
     READ_ONLY = "read_only"
     ERROR = "error"
