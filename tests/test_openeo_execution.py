@@ -1599,3 +1599,57 @@ def test_derive_coverage_returns_spatial_and_temporal_from_dataset() -> None:
     assert coverage.spatial.ymax == pytest.approx(30.0)
     assert coverage.temporal.start == "2025-01-01"
     assert coverage.temporal.end == "2025-01-03"
+
+
+def _reduced_dataset() -> Any:
+    """A dataset shaped like `reduce_dimension` output: dict-valued bookkeeping attrs."""
+    ds = xr.Dataset(
+        {"precip": xr.DataArray(np.ones((2, 2), dtype=np.float32), dims=["y", "x"])},
+        coords={"y": [1.0, 0.0], "x": [0.0, 1.0]},
+    )
+    ds.attrs["reduced_dimensions_min_values"] = {"t": np.datetime64("2025-01-01")}
+    ds.attrs["units"] = "mm/d"
+    ds["precip"].attrs["reduced_dimensions_max_values"] = {"t": np.datetime64("2025-02-01")}
+    return ds
+
+
+@pytest.mark.parametrize("fmt", ["NETCDF", "ZARR"])
+def test_write_raster_scrubs_attrs_no_writer_can_encode(tmp_path: Path, fmt: str) -> None:
+    """netCDF rejects a dict attr outright; Zarr rejects it as non-JSON (CLIM-825)."""
+    from open_climate_service.openeo.jobs import _write_raster
+
+    output = _write_raster(_reduced_dataset(), tmp_path, fmt)
+
+    assert output is not None
+    assert Path(output).exists()
+
+
+def test_write_raster_keeps_attrs_the_writer_can_encode(tmp_path: Path) -> None:
+    """The scrub must drop only what cannot be written, not all metadata."""
+    from open_climate_service.openeo.jobs import _write_raster
+
+    output = _write_raster(_reduced_dataset(), tmp_path, "NETCDF")
+
+    reopened = xr.open_dataset(output)
+    try:
+        assert reopened.attrs["units"] == "mm/d"
+        assert "reduced_dimensions_min_values" not in reopened.attrs
+        assert "reduced_dimensions_max_values" not in reopened["precip"].attrs
+    finally:
+        reopened.close()
+
+
+def test_result_route_serves_netcdf_after_reduce_dimension(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The reported symptom: a graph ending in reduce_dimension, exported as NETCDF, 500d."""
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        lambda process, request=None: SaveResultEnvelope(_reduced_dataset(), "NETCDF"),
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.content

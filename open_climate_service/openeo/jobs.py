@@ -1117,6 +1117,16 @@ def _write_raster(ds: Any, results_dir: Any, fmt: str) -> str | None:
 
     ext, _ = _RASTER_FORMATS.get(fmt, (".zarr", "application/vnd+zarr"))
 
+    if ext in {".zarr", ".nc"}:
+        # `reduce_dimension` (openeo-processes-dask) stamps dict-valued bookkeeping attrs such
+        # as `reduced_dimensions_min_values={'t': numpy.datetime64(...)}`, which neither writer
+        # can encode — netCDF rejects the dict outright and Zarr rejects it as non-JSON. The
+        # managed-publish path already scrubs these; the file export paths did not, so a graph
+        # ending in reduce_dimension failed at write time (CLIM-825). Temporal extent is
+        # recovered from these attrs elsewhere, before this point, so dropping them here
+        # loses nothing the output needed.
+        ds = _strip_non_serializable_attrs(ds)
+
     if ext == ".zarr":
         path = str(results_dir / "result.zarr")
         ds.to_zarr(path, mode="w")
