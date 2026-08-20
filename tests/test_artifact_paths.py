@@ -67,14 +67,6 @@ def test_to_portable_keeps_paths_outside_the_data_root(monkeypatch: pytest.Monke
     assert to_portable(external) == external
 
 
-@pytest.mark.parametrize("uri", ["s3://bucket/chirps3.icechunk", "https://example.org/chirps3.icechunk"])
-def test_to_portable_keeps_remote_uris(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, uri: str) -> None:
-    _use_data_dir(monkeypatch, tmp_path / "data")
-
-    assert to_portable(uri) == uri
-    assert to_absolute(uri) == uri
-
-
 def test_to_absolute_resolves_against_the_current_data_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     data_dir = _use_data_dir(monkeypatch, tmp_path / "data")
 

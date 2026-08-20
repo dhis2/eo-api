@@ -11,37 +11,22 @@ when loaded, so everything downstream of :func:`decode_record_paths` keeps seein
 absolute paths it always did.
 """
 
-import re
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from open_climate_service import config as api_config
 
-_URI_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.\-]*://")
-
 _PATH_FIELD = "path"
 _PATH_LIST_FIELD = "asset_paths"
-
-
-def _is_windows_absolute(raw: str) -> bool:
-    """Return whether raw is a drive-letter path, which urlparse misreads as a URI scheme."""
-    return len(raw) >= 3 and raw[0].isalpha() and raw[1] == ":" and raw[2] in ("\\", "/")
-
-
-def _is_remote(raw: str) -> bool:
-    """Return whether raw addresses a remote store rather than a local filesystem path."""
-    if _is_windows_absolute(raw):
-        return False
-    return bool(_URI_SCHEME.match(raw)) and not raw.startswith("file://")
 
 
 def to_portable(raw: str) -> str:
     """Return raw relative to the data root when it points inside it.
 
-    Anything else - a remote URI, an already-relative path, or a store deliberately
-    kept outside the data directory - is returned untouched.
+    An already-relative path, or a store deliberately kept outside the data
+    directory, is returned untouched.
     """
-    if not raw or _is_remote(raw):
+    if not raw:
         return raw
     candidate = Path(raw)
     if not candidate.is_absolute():
@@ -61,7 +46,7 @@ def to_absolute(raw: str) -> str:
     legacy records written before this module existed; they are re-rooted onto the
     current data root when the original no longer resolves but a re-rooted suffix does.
     """
-    if not raw or _is_remote(raw):
+    if not raw:
         return raw
     root = api_config.get_data_root()
     candidate = Path(raw)

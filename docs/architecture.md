@@ -42,7 +42,7 @@ Multiple artifacts can exist for the same dataset template if data was ingested 
 
 Artifacts are stored in `{data_dir}/artifacts/records.json`, where `data_dir` is the path configured in `climate-service.yaml`. This is an internal implementation detail — consumers should never depend on artifact IDs or artifact paths directly.
 
-Store paths are persisted relative to `data_dir` (`downloads/foo.icechunk`) and resolved to absolute paths when records are loaded, so the data directory stays portable: it can be moved, copied to another host, or written in a container at `/app/data` and read from the host. Records written before this convention hold absolute paths and are re-rooted onto the current `data_dir` on read, then rewritten in relative form on the next update. Stores kept outside `data_dir`, and remote URIs such as `s3://`, are recorded as-is.
+Store paths are persisted relative to `data_dir` (`downloads/foo.icechunk`) and resolved to absolute paths when records are loaded, so the data directory stays portable: it can be moved, copied to another host, or written in a container at `/app/data` and read from the host. Records written before this convention hold absolute paths and are re-rooted onto the current `data_dir` on read, then rewritten in relative form on the next update. Stores kept outside `data_dir` are recorded as absolute paths.
 
 ### Managed dataset
 
