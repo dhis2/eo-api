@@ -190,7 +190,7 @@ def test_netcdf_export_survives_a_store_carrying_geozarr_metadata(tmp_path) -> N
     ds.attrs["zarr_conventions"] = [{"uuid": "689b58e2", "schema_url": "https://example.invalid/geozarr"}]
     ds.attrs["spatial:transform"] = [1.0, 0.0, 33.0, 0.0, -1.0, -9.0]
 
-    path = _write_raster(ds, tmp_path, "NetCDF")
+    path = _write_raster(ds, tmp_path, "NETCDF")
 
     assert path is not None
     written = xr.open_dataset(path)
