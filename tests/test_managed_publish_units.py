@@ -69,8 +69,8 @@ def test_absolute_anomaly_still_inherits_the_observed_unit() -> None:
     assert template["units"] == "mm/d"
 
 
-@pytest.mark.parametrize("placeholder", ["", "1", "unknown", "   "])
-def test_placeholder_units_on_the_cube_still_inherit(placeholder: str) -> None:
+@pytest.mark.parametrize("placeholder", ["unknown", "-", "none", "n/a", "na"])
+def test_uninformative_units_on_the_cube_still_inherit(placeholder: str) -> None:
     """A cube that asserts nothing about its units is what inheritance exists for."""
     template = jobs._derive_managed_dataset_template(
         _cube(placeholder),
@@ -79,6 +79,22 @@ def test_placeholder_units_on_the_cube_still_inherit(placeholder: str) -> None:
         "t",
     )
     assert template["units"] == "mm/d"
+
+
+@pytest.mark.parametrize("dimensionless", ["", "1", "unitless", "   "])
+def test_declared_dimensionless_units_are_not_inherited_over(dimensionless: str) -> None:
+    """Dimensionless is a claim about the data, not a gap to be filled from the source.
+
+    Inheriting here registered a ratio or an index — SPI carries `units: ""` — as the source's
+    `mm/d`, which is the silent relabelling the unit checks exist to prevent.
+    """
+    template = jobs._derive_managed_dataset_template(
+        _cube(dimensionless),
+        {"dataset_id": "chirps3_precipitation_ratio", "variable": "tp"},
+        _OBSERVED_TEMPLATE,
+        "t",
+    )
+    assert template["units"] != "mm/d"
 
 
 def test_explicit_units_option_still_wins() -> None:
@@ -135,9 +151,14 @@ def test_a_blank_template_unit_asserts_nothing_and_is_not_checked() -> None:
     jobs._reject_incompatible_template_units(_cube("mm/d"), "tp", {"units": "   "})
 
 
-def test_no_units_on_either_side_is_not_an_error() -> None:
-    jobs._reject_incompatible_template_units(_cube(""), "tp", {"units": "mm/d"})
+def test_an_absent_template_declaration_is_not_an_error() -> None:
     jobs._reject_incompatible_template_units(_cube("mm/d"), "tp", {})
+
+
+def test_a_dimensionless_result_is_refused_by_a_dimensional_template() -> None:
+    """The produced side declaring `""` is a claim, so relabelling it `mm/d` is a mismatch."""
+    with pytest.raises(ValueError, match="different quantity"):
+        jobs._reject_incompatible_template_units(_cube(""), "tp", {"units": "mm/d"})
 
 
 # --- end to end --------------------------------------------------------------------------

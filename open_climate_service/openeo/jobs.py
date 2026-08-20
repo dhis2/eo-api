@@ -530,6 +530,7 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         )
 
     from open_climate_service.data_registry.services import datasets as _reg
+    from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
 
     # Rename the variable in the store to match the user-specified variable name,
     # so the on-disk name matches what is advertised in the STAC collection.
@@ -553,8 +554,13 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     source_template = _resolve_source_template(options)
     template = _reg.get_dataset(dataset_id)
     if template is None:
+        # Validate the candidate before it reaches disk. Persisting first left an incompatible
+        # template behind when publication then failed, and the corrected retry reloaded that
+        # template and failed again — the operator had to delete a YAML to get unstuck.
+        candidate = _derive_managed_dataset_template(ds, options, source_template, t_dim)
+        _reject_incompatible_template_units(ds, variable, cf_attrs_from_template(candidate))
         try:
-            _reg.write_dataset_template(_derive_managed_dataset_template(ds, options, source_template, t_dim))
+            _reg.write_dataset_template(candidate)
         except FileExistsError:
             pass
         template = _reg.get_dataset(dataset_id)
@@ -577,8 +583,6 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     # Stamp CF attributes (units / standard_name / cell_methods) from the template so the
     # published store is CF-compliant on disk (#280). The template is authoritative for the
     # fields it declares, so overwrite any placeholder/generic value left on the variable.
-    from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
-
     cf_attrs = cf_attrs_from_template(template)
     _reject_incompatible_template_units(ds, variable, cf_attrs)
     apply_cf_metadata(ds, cf_attrs, overwrite=True)
@@ -729,11 +733,13 @@ def _derive_managed_dataset_template(
     return template
 
 
-_PLACEHOLDER_UNITS = frozenset({"", "1", "-", "none", "unknown", "unitless", "n/a", "na"})
-"""Unit strings that carry no information, so inheriting over them is an improvement.
+_UNKNOWN_UNITS = frozenset({"-", "none", "unknown", "n/a", "na"})
+"""Unit strings that assert nothing, so inheriting the source's units over them is an improvement.
 
-A cube arriving with one of these has not asserted anything about its units, which is the
-case the source-template inheritance exists to fill in.
+`""`, `"1"` and `"unitless"` are deliberately *not* here: they declare a dimensionless quantity,
+which is a claim, not a gap. Treating them as gaps let a dimensionless result — an SPI value, a
+ratio — inherit `mm/d` from its precipitation source, which is the silent relabelling the unit
+checks exist to prevent. `shared/cf.py` already treats `""` as a declared dimensionless unit.
 """
 
 
@@ -746,7 +752,9 @@ def _variable_units(ds: Any, variable: str) -> str | None:
     if not isinstance(units, str):
         return None
     text = units.strip()
-    return text if text and text.lower() not in _PLACEHOLDER_UNITS else None
+    # A declared dimensionless unit ("" / "1" / "unitless") is returned as-is: it is an assertion
+    # about the data, and the caller must not paper over it with the source's units.
+    return None if text.lower() in _UNKNOWN_UNITS else text
 
 
 def _reject_incompatible_template_units(ds: Any, variable: str, cf_attrs: dict[str, str]) -> None:
@@ -766,10 +774,9 @@ def _reject_incompatible_template_units(ds: Any, variable: str, cf_attrs: dict[s
     dimensionality but differ by 273.15, as do `m` and `mm` by a factor of 1000, so a
     dimensional check would wave through exactly the relabelling this exists to stop.
 
-    An empty or absent `units` declaration asserts nothing and so is not checked, matching
-    :data:`_PLACEHOLDER_UNITS`, which classes `""` on the produced side the same way. Treating
-    it as a positive claim of dimensionlessness would read intent into a blank field that no
-    shipped template uses.
+    An absent or uninformative *declaration* on the template side asserts nothing and so is not
+    checked. A `""` on the *produced* side is different: it is a claim of dimensionlessness, so
+    publishing it into a template declaring `mm/d` is refused like any other mismatch.
 
     Overwriting a *placeholder* unit remains the point of the call site — a placeholder is not
     a parseable unit, so `_variable_units` reports it as absent and this never fires. What is

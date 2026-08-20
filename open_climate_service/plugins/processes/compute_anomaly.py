@@ -42,6 +42,12 @@ _METHODS = ("absolute", "relative")
 # Day count separating a sub-daily/daily observed cube from a monthly one: a day-of-year
 # normal expects the former, a month normal the latter.
 _MONTHLY_STEP_DAYS = 20
+_MONTHLY_STEP_DAYS_MAX = 32
+"""Upper bound on what counts as monthly. A one-sided `>= 20` test accepted bimonthly (~61),
+quarterly (~91) and yearly (~365) series as monthly, indexing a 12-bin normal by each
+timestep's calendar month and returning a plausible anomaly for a pairing nobody intended.
+Calendar months span 28-31 days, so 32 leaves room for a median over a leap year.
+"""
 
 
 def _observed_step_days(observed: xr.DataArray, t_dim: str) -> float | None:
@@ -236,8 +242,15 @@ def _match_spatial_grid(normal: xr.DataArray, observed: xr.DataArray, t_dim: str
     try:
         x_dim, y_dim = get_x_y_dims(observed)
     except ValueError:
-        return normal  # no recognisable spatial axes; leave alignment to xarray
+        # No axes to rename onto, but the guard still applies. Returning ahead of it let an
+        # observed `(t, northing, easting)` cube reach xarray's arithmetic unchecked and
+        # broadcast against a `(dayofyear, y, x)` normal to five dimensions — the blow-up the
+        # guard exists to stop. It compares dimension names, so it needs no axis of its own.
+        _reject_broadcasting_dimensions(normal, observed, t_dim)
+        return normal
 
+    # After the rename, not before: a normal spelling its axes `lat`/`lon` is renameable onto the
+    # observed grid, and checking first would refuse it as an extra dimension.
     normal = _rename_spatial_axes_onto(normal, x_dim=x_dim, y_dim=y_dim)
     _reject_broadcasting_dimensions(normal, observed, t_dim)
 
@@ -348,7 +361,7 @@ def compute_anomaly(observed: xr.DataArray, normal: xr.DataArray, method: str = 
     # could reasonably warn; refusing outright is our decision, so this guard also stays.
     step = _observed_step_days(observed, t_dim)
     if step is not None:
-        if ordinal == "month" and step < _MONTHLY_STEP_DAYS:
+        if ordinal == "month" and not _MONTHLY_STEP_DAYS <= step <= _MONTHLY_STEP_DAYS_MAX:
             raise ValueError(
                 f"a 'month' normal expects a monthly observed dataset, but the observed steps ~{step:.0f} "
                 "day(s); pair it with a monthly observed, or use a 'dayofyear' normal"
@@ -366,7 +379,23 @@ def compute_anomaly(observed: xr.DataArray, normal: xr.DataArray, method: str = 
         xr.DataArray,
         ek_climatology.anomaly(observed, climatology=normal, time_dim=t_dim, relative=method == "relative"),
     )
+    if method == "relative":
+        result = _mask_undefined_ratios(result)
     return _restore_scalar_coords(result, observed, ordinal)
+
+
+def _mask_undefined_ratios(result: xr.DataArray) -> xr.DataArray:
+    """Blank the cells where dividing by the normal has no answer.
+
+    A relative anomaly is `100 * (observed - normal) / normal`, and a zero normal is ordinary
+    rather than exceptional: CHIRPS January over Sierra Leone averages 0.4 mm/d, with individual
+    cells at exactly zero. The division then yields ±inf, or NaN for 0/0, and published straight
+    into the store those read as real values — an infinite percentage on a map, or a number that
+    silently poisons any spatial mean taken over it.
+
+    Undefined is the honest answer, and NaN is how the rest of the store spells it. Stays lazy.
+    """
+    return result.where(np.isfinite(result))
 
 
 def _restore_scalar_coords(result: xr.DataArray, observed: xr.DataArray, ordinal: str) -> xr.DataArray:

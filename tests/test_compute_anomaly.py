@@ -355,3 +355,70 @@ def test_anomaly_keeps_the_crs_coordinate_scalar() -> None:
     assert result["spatial_ref"].dims == (), f"spatial_ref gained dims {result['spatial_ref'].dims}"
     assert "month" not in result.coords, "the normal's ordinal coord leaked into the anomaly"
     assert result.dims == ("t", "y", "x")
+
+
+def test_relative_anomaly_masks_cells_with_a_zero_normal() -> None:
+    """A zero normal is ordinary in a dry cell, and dividing by it has no answer.
+
+    Unmasked, `100 * (observed - 0) / 0` published ±inf into the store as if it were a real
+    percentage — and one inf poisons any spatial mean taken over the field.
+    """
+    times = pd.date_range("2026-01-01", periods=2, freq="MS")
+    observed = xr.DataArray(
+        np.array([[[2.0, 2.0]], [[2.0, 2.0]]], dtype="float32"),
+        dims=("t", "y", "x"),
+        coords={"t": times, "y": [0.0], "x": [0.0, 1.0]},
+        attrs={"units": "mm/d"},
+    )
+    # Second cell is dry in every month: a legitimate zero normal.
+    normal = xr.DataArray(
+        np.tile(np.array([[1.0, 0.0]], dtype="float32"), (12, 1, 1)),
+        dims=("month", "y", "x"),
+        coords={"month": range(1, 13), "y": [0.0], "x": [0.0, 1.0]},
+        attrs={"units": "mm/d"},
+    )
+
+    result = compute_anomaly(observed, normal, method="relative").compute()
+
+    assert np.isfinite(result.isel(x=0)).all(), "the wet cell must keep its percentage"
+    assert np.isnan(result.isel(x=1)).all(), "the zero-normal cell must be NaN, not inf"
+
+
+def test_month_normal_refuses_a_quarterly_observed_cube() -> None:
+    """`>= 20 days` alone accepted bimonthly, quarterly and yearly series as monthly."""
+    times = pd.date_range("2026-01-01", periods=4, freq="QS")
+    observed = xr.DataArray(
+        np.ones((4, 1, 1), dtype="float32"),
+        dims=("t", "y", "x"),
+        coords={"t": times, "y": [0.0], "x": [0.0]},
+        attrs={"units": "mm/d"},
+    )
+    normal = xr.DataArray(
+        np.zeros((12, 1, 1), dtype="float32"),
+        dims=("month", "y", "x"),
+        coords={"month": range(1, 13), "y": [0.0], "x": [0.0]},
+        attrs={"units": "mm/d"},
+    )
+
+    with pytest.raises(ValueError, match="expects a monthly observed dataset"):
+        compute_anomaly(observed, normal, method="absolute")
+
+
+def test_broadcasting_is_refused_even_when_the_observed_axes_are_unrecognised() -> None:
+    """The guard used to sit behind the unknown-axes early return, so this broadcast to 5-D."""
+    times = pd.date_range("2026-01-01", periods=2, freq="D")
+    observed = xr.DataArray(
+        np.ones((2, 2, 2), dtype="float32"),
+        dims=("t", "northing", "easting"),
+        coords={"t": times, "northing": [1.0, 0.0], "easting": [0.0, 1.0]},
+        attrs={"units": "degC"},
+    )
+    normal = xr.DataArray(
+        np.zeros((366, 2, 2), dtype="float32"),
+        dims=("dayofyear", "y", "x"),
+        coords={"dayofyear": range(1, 367), "y": [1.0, 0.0], "x": [0.0, 1.0]},
+        attrs={"units": "degC"},
+    )
+
+    with pytest.raises(ValueError):
+        compute_anomaly(observed, normal, method="absolute")
