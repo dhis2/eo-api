@@ -182,12 +182,12 @@ All datasets are stored as GeoZarr. Key properties:
 - Chunk shape tuned per dataset to balance three access patterns: time series queries, polygon aggregation, and browser tile rendering.
 - Blosc/Zstd compression.
 
-The storage backend is abstracted via fsspec, enabling the following backends with environment-variable configuration only:
+Managed datasets are written through Icechunk, which opens every store on the local filesystem — the only backend implemented today. Icechunk uses Apache Arrow's `object_store` rather than fsspec, so an alternative backend is a constructor change (`s3_storage`, `gcs_storage`) rather than a path rewrite. Making the backend a per-deployment configuration choice is tracked in CLIM-555, targeting:
 
 | Backend                  | Notes                                                                                                                                                                      |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Local filesystem         | Default for development. `STORAGE_BACKEND=file`                                                                                                                            |
-| European S3-compatible   | Hetzner, Scaleway, IONOS, OVHcloud. GDPR-native. `STORAGE_BACKEND=s3` + `endpoint_url`.                                                                                    |
+| Local filesystem         | The only backend implemented today.                                                                                                                                        |
+| European S3-compatible   | Hetzner, Scaleway, IONOS, OVHcloud. GDPR-native.                                                                                                                           |
 | AWS S3 (af-south-1)      | Cape Town region — lowest latency for Southern/Eastern Africa deployments.                                                                                                 |
 | AWS S3 (ap-southeast-1)  | Singapore — lowest latency for Laos, Sri Lanka, and Southeast Asia deployments.                                                                                            |
 | Ceph / RGW (self-hosted) | S3-compatible. For sovereign deployments requiring data to remain within national borders. Runs on university and research network infrastructure (AfricaConnect / GÉANT). |
@@ -220,7 +220,6 @@ Long-running jobs (ingestion, sync, aggregation) are executed asynchronously. Th
 | icechunk                                          | Transactional, versioned storage engine for the managed Zarr datasets.                                                                                                                        |
 | xclim                                             | Climate-index library (179 CF-compliant indicators) exposed automatically as openEO processes.                                                                                                |
 | xstac                                             | Derives STAC and datacube metadata from the published Zarr datasets.                                                                                                                          |
-| fsspec                                            | Unified filesystem abstraction for storage backends (local, S3-compatible, Azure Blob, GCS, Ceph/RGW). Backend is environment-variable configuration only.                                    |
 | zarr-layer (MapLibre)                             | TypeScript library for rendering Zarr directly as a native MapLibre Custom Layer in the browser. GPU reprojection from the stored CRS to Spherical Mercator; uses multiscale levels per zoom. |
 | Docker                                            | Containerised deployment. Supports local, cloud-hosted, and country sovereign deployments.                                                                                                    |
 | dhis2-python-client                               | Planned DHIS2 Web API integration library for future data value push and related DHIS2 write workflows.                                                                                       |
