@@ -17,28 +17,9 @@ import xarray as xr
 from earthkit.transforms import climatology as ek_climatology
 
 from open_climate_service.process import process
+from open_climate_service.transforms.climatology import circular_rolling_mean
 
 _FREQUENCIES = ("dayofyear", "month")
-
-
-def _circular_rolling_mean(da: xr.DataArray, window: int, dim: str) -> xr.DataArray:
-    """Circular rolling mean over ``dim`` (wraps end→start), preserving laziness.
-
-    Pads ``half = window // 2`` steps from each end of the (circular) axis and applies
-    xarray's rolling mean, which is dask-aware — so the ``(dim, y, x, …)`` array is never
-    fully materialised and chunking survives until the final write. Requires an odd
-    ``window`` no larger than the axis length (validated by the caller).
-    """
-    n = da.sizes[dim]
-    half = window // 2
-    if half == 0:  # window == 1 → identity
-        return da
-    head = da.isel({dim: slice(0, half)})
-    tail = da.isel({dim: slice(n - half, n)})
-    padded = xr.concat([tail, da, head], dim=dim)
-    smoothed = padded.rolling({dim: window}, center=True).mean()
-    # Drop the wrap padding and restore the original ordinal coordinate.
-    return smoothed.isel({dim: slice(half, half + n)}).assign_coords({dim: da[dim]})
 
 
 @process(
@@ -81,19 +62,20 @@ def climatological_normal(data: xr.DataArray, frequency: str = "dayofyear", smoo
 
     # earthkit reduces the temporal axis to the day-of-year (1..366) or month (1..12) mean,
     # handling the calendar binning and preserving dask laziness; the output ordinal dim is
-    # named exactly 'dayofyear'/'month'. (Circular WMO smoothing below stays a post-step —
-    # earthkit has no rolling-window option yet, ecmwf/earthkit-transforms#103.)
+    # named exactly 'dayofyear'/'month'.
     reducer = ek_climatology.daily_mean if frequency == "dayofyear" else ek_climatology.monthly_mean
     clim = cast(xr.DataArray, reducer(data, time_dim=t_dim))
     clim = clim.transpose(frequency, ...)  # ensure the ordinal axis leads (for smoothing)
     # Circular smoothing is only meaningful for the dense day-of-year axis, not 12 months.
+    # The window checks are repeated here rather than left to the helper so the error names
+    # `smoothing_window` — the process parameter the caller actually passed.
     if frequency == "dayofyear" and window > 0:
         n = clim.sizes["dayofyear"]
         if window % 2 == 0:
             raise ValueError(f"smoothing_window must be odd (a centred window), got {window}")
         if window > n:
             raise ValueError(f"smoothing_window ({window}) must be <= the number of days ({n})")
-        clim = _circular_rolling_mean(clim, window, "dayofyear")
+        clim = circular_rolling_mean(clim, window, "dayofyear")
     # The groupby/smoothing leaves uneven dask chunks along the ordinal axis whose final
     # chunk can exceed the first (e.g. 30,30,…,36), which Zarr rejects on write. Re-chunk to
     # one ordinal step per chunk: zarr-safe (uniform), and — mirroring the observed daily
