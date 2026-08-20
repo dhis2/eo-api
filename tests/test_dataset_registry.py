@@ -299,6 +299,54 @@ def test_plugins_dir_overrides_entry_point_plugin(monkeypatch: pytest.MonkeyPatc
     assert result["x"]["name"] == "plugins_dir"
 
 
+def test_builtin_templates_are_parsed_once_per_process() -> None:
+    """The YAML parse is 13.5 ms; it used to run on every call, twice for some requests."""
+    datasets.reset_template_caches()
+    first = datasets._load_builtin_datasets()
+    second = datasets._load_builtin_datasets()
+
+    info = datasets._parse_builtin_datasets.cache_info()
+    assert (info.misses, info.hits) == (1, 1)
+    assert [d["id"] for d in first] == [d["id"] for d in second]
+
+
+def test_returned_templates_are_isolated_from_the_cache() -> None:
+    """A caller mutating a template must not poison every later request."""
+    datasets.reset_template_caches()
+    mutated = datasets._load_builtin_datasets()
+    mutated[0]["name"] = "clobbered"
+    mutated[0].setdefault("display", {})["colormap"] = "clobbered"
+
+    fresh = datasets._load_builtin_datasets()
+    assert fresh[0]["name"] != "clobbered"
+    assert fresh[0].get("display", {}).get("colormap") != "clobbered"
+
+
+def test_unrecognised_units_warn_once_per_template(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An instance's plugins_dir is re-read per request, so the warning must not repeat.
+
+    Counting calls on the module logger rather than using ``caplog``: validating units imports
+    xclim, which pulls in pint, and that import reshuffles root logging handlers so records
+    emitted afterwards can escape capture. The assertion here is the intent anyway — warn once.
+    """
+    datasets.reset_template_caches()
+    warnings: list[str] = []
+    monkeypatch.setattr(datasets.logger, "warning", lambda msg, *args: warnings.append(msg % args if args else msg))
+    template = {
+        "id": "counts",
+        "name": "Counts",
+        "variable": "n",
+        "sync": {"kind": "static"},
+        "units": "people",
+    }
+
+    for _ in range(3):
+        datasets._validate_dataset_template(template, source="counts.yaml")
+
+    assert len(warnings) == 1
+    assert "not a recognised CF/udunits unit" in warnings[0]
+
+
 def test_missing_plugins_dir_serves_built_ins_instead_of_raising(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -338,3 +386,57 @@ def test_plugins_dir_of_the_wrong_type_still_raises(
 
     with pytest.raises(ValueError, match="must be a path string"):
         datasets.list_datasets()
+
+
+def test_concurrent_cold_calls_parse_the_templates_once() -> None:
+    """FastAPI runs sync endpoints in worker threads, so a cold cache is hit concurrently.
+
+    ``lru_cache`` calls the wrapped function outside its own lock, so without serialising
+    population every thread arriving on a cold cache parses every template.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    datasets.reset_template_caches()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = [f.result() for f in [pool.submit(datasets._load_builtin_datasets) for _ in range(8)]]
+
+    assert datasets._parse_builtin_datasets.cache_info().misses == 1
+    assert all([d["id"] for d in r] == [d["id"] for d in results[0]] for r in results)
+
+
+def test_concurrent_validation_warns_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Concurrent validation of one template yields one warning.
+
+    A smoke test, not a race guard: it also passes without the lock in `_validate_dataset_template`,
+    because the check-then-add window is a few bytecodes and the GIL rarely interleaves there. The
+    lock is still worth having — it makes "once" true rather than merely probable — but this test
+    cannot demonstrate its absence, unlike the parse test above (8 misses instead of 1).
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    datasets.reset_template_caches()
+    warnings: list[str] = []
+    warn_lock = __import__("threading").Lock()
+
+    def record(msg: str, *args: object) -> None:
+        with warn_lock:  # the assertion is about datasets.py's locking, not this list's
+            warnings.append(msg % args if args else msg)
+
+    monkeypatch.setattr(datasets.logger, "warning", record)
+    template = {
+        "id": "counts",
+        "name": "Counts",
+        "variable": "n",
+        "sync": {"kind": "static"},
+        "units": "people",
+    }
+    # Warm xclim outside the threads so import timing does not shape the result.
+    datasets._validate_dataset_template(template, source="warmup.yaml")
+    datasets.reset_template_caches()
+    warnings.clear()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for f in [pool.submit(datasets._validate_dataset_template, template, source="counts.yaml") for _ in range(8)]:
+            f.result()
+
+    assert len(warnings) == 1
