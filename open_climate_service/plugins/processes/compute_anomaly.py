@@ -34,6 +34,7 @@ from earthkit.transforms import climatology as ek_climatology
 
 from open_climate_service.data_manager.services.utils import get_x_y_dims
 from open_climate_service.process import process
+from open_climate_service.shared.cf import is_temperature_like
 
 _ORDINALS = ("dayofyear", "month")
 _METHODS = ("absolute", "relative")
@@ -41,33 +42,6 @@ _METHODS = ("absolute", "relative")
 # Day count separating a sub-daily/daily observed cube from a monthly one: a day-of-year
 # normal expects the former, a month normal the latter.
 _MONTHLY_STEP_DAYS = 20
-
-# Units / standard names that mark an interval-scale temperature, for which a *relative*
-# (percent-of-normal) anomaly is meaningless: dividing by the normal flips sign for a
-# negative normal and diverges as the normal approaches 0.
-_TEMPERATURE_UNITS = {
-    "degc",
-    "°c",
-    "c",
-    "celsius",
-    "degree_celsius",
-    "degrees_celsius",
-    "k",
-    "kelvin",
-    "degree_kelvin",
-    "degrees_kelvin",
-}
-
-
-def _is_temperature_like(*arrays: xr.DataArray) -> bool:
-    """True if any cube's units/standard_name marks it as a temperature (interval scale)."""
-    for da in arrays:
-        attrs: dict[str, Any] = getattr(da, "attrs", {}) or {}
-        units = str(attrs.get("units", "")).strip().lower()
-        standard_name = str(attrs.get("standard_name", "")).strip().lower()
-        if units in _TEMPERATURE_UNITS or "temperature" in standard_name:
-            return True
-    return False
 
 
 def _observed_step_days(observed: xr.DataArray, t_dim: str) -> float | None:
@@ -361,7 +335,7 @@ def compute_anomaly(observed: xr.DataArray, normal: xr.DataArray, method: str = 
     # OCS policy, not an earthkit gap: earthkit offers `relative` for any variable, which is
     # correct for a general library. Deciding it is invalid for our temperature datasets is
     # our call, so this guard stays regardless of what upstream does.
-    if method == "relative" and _is_temperature_like(observed, normal):
+    if method == "relative" and is_temperature_like(observed, normal):
         raise ValueError(
             "method 'relative' is not meaningful for temperature (an interval scale): dividing by the "
             "normal flips sign for a negative normal and diverges near 0 °C. Use 'absolute', or 'relative' "

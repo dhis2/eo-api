@@ -26,6 +26,7 @@ from open_climate_service.openeo.schemas import (
     OpenEOJobStatus,
     OpenEOJobUpdate,
 )
+from open_climate_service.shared.cf import is_temperature_like
 from open_climate_service.shared.time import utc_now
 from open_climate_service.stac.media_types import ZARR_V3_MEDIA_TYPE, zarr_media_type
 
@@ -864,7 +865,10 @@ def _derive_display_config(
 
     signed_output = output_kind in {"Change", "Anomaly", "Difference", "Delta"}
     if signed_output:
-        display.setdefault("colormap", "RdBu")
+        # Diverging either way, but the ends swap by variable: warm is red for temperature,
+        # while wet is blue for precipitation. `RdBu` runs low→red/high→blue; `rdbu_r` reverses it.
+        variable_da = ds[variable] if variable in getattr(ds, "data_vars", {}) else None
+        display.setdefault("colormap", "rdbu_r" if is_temperature_like(variable_da, ds) else "RdBu")
         if "range" not in display:
             data_min, data_max = _data_range(ds, variable)
             bound = max(abs(data_min), abs(data_max))

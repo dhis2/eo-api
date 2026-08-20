@@ -294,7 +294,7 @@
   units: "%"
   source: Derived (climate_anomaly workflow, method=relative)
   display:
-    colormap: rdbu_r
+    colormap: RdBu
     range: [-100.0, 100.0]
 
 - id: era5land_precipitation_daily_anomaly_1991_2020
@@ -307,7 +307,7 @@
   units: mm/d
   source: Derived (climate_anomaly workflow)
   display:
-    colormap: rdbu_r
+    colormap: RdBu
     range: [-20.0, 20.0]
 
 # ---------------------------------------------------------------------------
@@ -339,7 +339,7 @@
   units: mm/d
   source: Derived (climate_anomaly workflow)
   display:
-    colormap: rdbu_r
+    colormap: RdBu
     range: [-10.0, 10.0]
 
 - id: era5land_precipitation_monthly_relative_anomaly_1991_2020
@@ -352,5 +352,5 @@
   units: "%"
   source: Derived (climate_anomaly workflow, method=relative)
   display:
-    colormap: rdbu_r
+    colormap: RdBu
     range: [-100.0, 100.0]

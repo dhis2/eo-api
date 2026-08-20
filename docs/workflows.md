@@ -226,7 +226,7 @@ The `output_dataset_id` needs a **static dataset template** (`sync: {kind: stati
 | `temporal_extent` | Observed range `[start, end]` |
 | `method` | `absolute` (observed − normal, default) or `relative` (percent of normal — for ratio-scale variables like precipitation only, **not** temperature) |
 
-The `output_dataset_id` needs a static template like the normals above (auto-registered if missing; a diverging `rdbu_r` display centred on zero suits anomalies). Pair a **daily** observed dataset with a day-of-year normal, or a **monthly** observed dataset with a month normal — `compute_anomaly` aligns on the matching axis automatically.
+The `output_dataset_id` needs a static template like the normals above (auto-registered if missing). Use a diverging colormap centred on zero, running the way the variable is read: `RdBu` for precipitation, where wet is blue and dry is red, and `rdbu_r` for temperature, where warm is red. Pair a **daily** observed dataset with a day-of-year normal, or a **monthly** observed dataset with a month normal — `compute_anomaly` aligns on the matching axis automatically.
 
 The two methods publish **different units**, so a pre-registered template belongs to one of them:
 
