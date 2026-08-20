@@ -54,6 +54,30 @@ class JobError(BaseModel):
     message: str
 
 
+class JobEventDraft(BaseModel):
+    """Domain event returned by a job before completion metadata is assigned."""
+
+    type: str
+    source: str
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class JobExecutionResult(BaseModel):
+    """A callable result accompanied by domain events created on success."""
+
+    result: Any = None
+    events: list[JobEventDraft] = Field(default_factory=list)
+
+
+class JobEvent(JobEventDraft):
+    """Domain event persisted atomically with a successful native job."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    event_id: str = Field(validation_alias="eventID", serialization_alias="eventID")
+    time: datetime
+
+
 class JobRecord(BaseModel):
     """Persisted native job record."""
 
@@ -72,6 +96,7 @@ class JobRecord(BaseModel):
     request: dict[str, Any] = Field(default_factory=dict)
     progress: JobProgress = Field(default_factory=JobProgress)
     result: Any | None = None
+    events: list[JobEvent] = Field(default_factory=list)
     error: JobError | None = None
     cancel_requested: bool = Field(
         default=False,

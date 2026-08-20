@@ -1727,3 +1727,25 @@ def test_result_route_serves_netcdf_after_reduce_dimension(client: TestClient, m
 
     assert response.status_code == 200, response.text
     assert response.content
+
+
+@pytest.mark.parametrize(
+    ("units", "expected_colormap"),
+    [("degC", "rdbu_r"), ("K", "rdbu_r"), ("mm/d", "RdBu"), ("%", "RdBu")],
+)
+def test_derived_anomaly_colormap_runs_the_way_the_variable_is_read(units: str, expected_colormap: str) -> None:
+    """A diverging scale is not symmetric in meaning: warm is red, wet is blue.
+
+    Defaulting every signed output to one direction rendered a temperature anomaly with warm
+    in blue, or precipitation with wet in red — plausible-looking maps that invert the reading.
+    """
+    from open_climate_service.openeo.jobs import _derive_display_config
+
+    ds = xr.Dataset(
+        {"value": xr.DataArray(np.array([[-1.0, 1.0]], dtype=np.float32), dims=("y", "x"))},
+    )
+    ds["value"].attrs["units"] = units
+
+    display = _derive_display_config(ds, "value", "derived_anomaly", {}, None, "Anomaly")
+
+    assert display["colormap"] == expected_colormap
