@@ -96,6 +96,19 @@ def _collect() -> list[Any]:
                 continue
             seen.add(indicator_id)
 
+            # Every spec below declares a single datacube return, so an indicator producing
+            # several cubes cannot be honoured: a client composing a graph from GET /processes
+            # would feed a tuple into save_result or a reducer and get a confusing failure
+            # rather than "not supported". Three of xclim 0.61's registered indicators are
+            # multi-output — cffwis (6), rain_season (3), jetstream_metric_woollings (2) — and
+            # no OCS workflow uses them, so advertising 176 processes we honour beats 179 where
+            # three lie (CLIM-860). Registering one process per named output is the richer
+            # alternative, worth doing if someone asks for these specifically.
+            outputs = _declared_output_count(obj)
+            if outputs > 1:
+                logger.debug("Skipping multi-output xclim indicator '%s' (%d outputs)", indicator_id, outputs)
+                continue
+
             params: list[dict[str, Any]] = []
             for name, p in obj.parameters.items():
                 if p.kind in _SKIP_KINDS:
@@ -127,6 +140,20 @@ def _collect() -> list[Any]:
             funcs.append(_make_callable(obj, meta))
 
     return funcs
+
+
+def _declared_output_count(indicator: Any) -> int:
+    """How many cubes an xclim indicator returns, per its own CF metadata.
+
+    ``cf_attrs`` carries one entry per output, so its length is the indicator's arity.
+    Anything unreadable counts as one: a wrong guess here would silently drop a
+    single-output indicator, and losing a process is worse than the mismatch this guards.
+    """
+    try:
+        return len(indicator.cf_attrs)
+    except Exception:  # noqa: BLE001 — metadata shape is xclim's business, not ours
+        logger.debug("Could not read cf_attrs for %r; assuming single output", indicator, exc_info=True)
+        return 1
 
 
 def _make_callable(indicator: Any, meta: dict[str, Any]) -> Any:
