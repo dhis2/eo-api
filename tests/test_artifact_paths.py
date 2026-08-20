@@ -92,6 +92,15 @@ def test_to_absolute_keeps_an_existing_external_store(monkeypatch: pytest.Monkey
     assert to_absolute(str(external)) == str(external)
 
 
+def test_to_absolute_will_not_rebase_on_a_bare_basename(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A match must agree on the containing directory, not just the store name."""
+    data_dir = _use_data_dir(monkeypatch, tmp_path / "data")
+    (data_dir / "chirps3.icechunk").mkdir(parents=True)
+    archived = "/app/data/downloads/v1/chirps3.icechunk"
+
+    assert to_absolute(archived) == archived
+
+
 def test_to_absolute_keeps_an_unresolvable_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """With nothing to rebase onto, the recorded path survives so errors name it."""
     _use_data_dir(monkeypatch, tmp_path / "data")

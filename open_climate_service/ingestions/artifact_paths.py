@@ -60,7 +60,10 @@ def _rebase_legacy(candidate: Path, root: Path) -> Path:
 
     Only a suffix that actually exists is accepted, so a store intentionally held
     outside the data directory keeps its recorded path rather than being silently
-    redirected at a lookalike inside it.
+    redirected at a lookalike inside it. The suffix must keep at least two components,
+    so a match has to agree on the containing directory as well as the store name -
+    a bare basename would otherwise bind a record to any same-named store anywhere
+    under the root.
     """
     resolved_root = root.resolve(strict=False)
     try:
@@ -72,7 +75,7 @@ def _rebase_legacy(candidate: Path, root: Path) -> Path:
     if candidate.exists():
         return candidate
     parts = candidate.parts
-    for index in range(1, len(parts)):
+    for index in range(1, max(len(parts) - 1, 1)):
         rebased = resolved_root.joinpath(*parts[index:])
         if rebased.exists():
             return rebased
