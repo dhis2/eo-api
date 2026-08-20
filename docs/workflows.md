@@ -172,6 +172,98 @@ Zarr output cannot be produced synchronously, so submit it as a **batch job** (`
 
 When the job finishes, the new change dataset appears under `/datasets` and on the map viewer.
 
+## Climate normals
+
+`climate_normal` computes a **climatological normal** — a WMO-style multi-year average of a variable for each **day-of-year** (1–366) or **month** (1–12) over a reference period (e.g. 1991–2020) — and publishes it as a new managed dataset. Use it to derive a "what's typical" baseline from a collection you have already ingested for the reference period; the anomaly workflow below then compares observations against it.
+
+### Parameters
+
+| Name | Description |
+|---|---|
+| `dataset_id` | Published collection to load; must cover the reference period |
+| `output_dataset_id` | Id of the normal dataset to publish (needs a static template — see below) |
+| `variable` | Variable/band name carried through to the published dataset |
+| `temporal_extent` | Reference period `[start, end]`, e.g. `["1991-01-01", "2020-12-31"]` |
+| `frequency` | `dayofyear` (1–366, default) or `month` (1–12) |
+| `smoothing_window` | Circular day-of-year smoothing window in days (0 disables, default 31; ignored for `month`) |
+
+The `output_dataset_id` needs a **static dataset template** (`sync: {kind: static}`, `period_type: climatology`, a `display` block; no ingestion plugin) — auto-registered from the result and source metadata if none exists. Open Climate Service bundles the from-store monthly templates (`era5land_temperature_monthly_normal_1991_2020`, …) plus EDH-direct **day-of-year** ERA5-Land normals (`era5land_*_daily_normal_1991_2020`) that read the reference period straight from Earth Data Hub — no 30-year ingest needed.
+
+### Example
+
+```json
+{
+  "process": {
+    "process_graph": {
+      "normal": {
+        "process_id": "climate_normal",
+        "arguments": {
+          "dataset_id": "era5land_temperature_monthly",
+          "output_dataset_id": "era5land_temperature_monthly_normal_1991_2020",
+          "variable": "t2m",
+          "temporal_extent": ["1991-01-01", "2020-12-31"],
+          "frequency": "month"
+        },
+        "result": true
+      }
+    }
+  }
+}
+```
+
+## Climate anomalies
+
+`climate_anomaly` computes an **anomaly** — how far observations depart from a climatological normal — and publishes it as a new managed dataset that keeps the observed time axis. Positive values are above-normal and negative below-normal, so the result suits a diverging colormap centred on zero.
+
+### Parameters
+
+| Name | Description |
+|---|---|
+| `observed_dataset_id` | Published observed collection (datetime axis), e.g. `era5land_temperature_daily` |
+| `normal_dataset_id` | Published climatological normal (with a `dayofyear`/`month` axis) |
+| `output_dataset_id` | Id of the anomaly dataset to publish (needs a static template — see below) |
+| `variable` | Variable/band name carried through to the published dataset |
+| `temporal_extent` | Observed range `[start, end]` |
+| `method` | `absolute` (observed − normal, default) or `relative` (percent of normal — for ratio-scale variables like precipitation only, **not** temperature) |
+
+The `output_dataset_id` needs a static template like the normals above (auto-registered if missing). Use a diverging colormap centred on zero, running the way the variable is read: `RdBu` for precipitation, where wet is blue and dry is red, and `rdbu_r` for temperature, where warm is red. Pair a **daily** observed dataset with a day-of-year normal, or a **monthly** observed dataset with a month normal — `compute_anomaly` aligns on the matching axis automatically.
+
+The two methods publish **different units**, so a pre-registered template belongs to one of them:
+
+| `method` | Published units | Suitable range |
+|---|---|---|
+| `absolute` | the observed variable's unit (e.g. `mm/d`) | precipitation `[-20, 20]` daily, `[-10, 10]` monthly — a monthly mean rate averages the extremes away |
+| `relative` | `%` | `[-100, 100]` |
+
+An auto-registered template takes its units from the computed result, so it is correct either way. A pre-registered one is authoritative, and publishing a relative anomaly into a template declaring `mm/d` is **refused** rather than relabelled — otherwise 20 % of normal would be stored as 20 mm of rain per day, which is plausible enough that nothing downstream could catch it. The shipped templates come in both forms: `*_anomaly_1991_2020` declares the observed unit for `absolute`, and `*_relative_anomaly_1991_2020` declares `%` for `relative`. Target the one matching the `method` you pass — precipitation only, since a relative anomaly is refused for temperature.
+
+The observed and normal cubes must be on the **same grid** — same cell count, same spacing, same positions — otherwise the anomaly is refused.
+
+### Example
+
+```json
+{
+  "process": {
+    "process_graph": {
+      "anomaly": {
+        "process_id": "climate_anomaly",
+        "arguments": {
+          "observed_dataset_id": "era5land_temperature_daily",
+          "normal_dataset_id": "era5land_temperature_daily_normal_1991_2020",
+          "output_dataset_id": "era5land_temperature_daily_anomaly_1991_2020",
+          "variable": "t2m",
+          "temporal_extent": ["2026-01-01", "2026-06-24"],
+          "method": "absolute"
+        },
+        "result": true
+      }
+    }
+  }
+}
+```
+
+When the job finishes, the normal/anomaly dataset appears under `/datasets` and on the map viewer.
+
 ---
 
 ## Aggregating dekads to months or weeks

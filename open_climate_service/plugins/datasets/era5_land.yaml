@@ -262,3 +262,95 @@
   display:
     colormap: blues
     range: [0.0, 20.0]
+
+# ---------------------------------------------------------------------------
+# Anomaly output templates for the `climate_anomaly` openEO workflow
+# (observed − climatological normal, aligned by day-of-year). No ingestion plugin —
+# produced by the workflow and published via save_result. Run the workflow with the
+# observed daily dataset + the matching _normal_1991_2020 dataset; refresh by re-running.
+# Anomalies are diverging (above/below normal), so a centred rdbu_r colormap.
+# ---------------------------------------------------------------------------
+
+- id: era5land_temperature_daily_anomaly_1991_2020
+  name: 2m temperature daily anomaly (ERA5-Land, vs 1991–2020 normal)
+  short_name: Temperature anomaly
+  variable: t2m
+  period_type: daily
+  sync:
+    kind: static
+  units: degC
+  source: Derived (climate_anomaly workflow)
+  display:
+    colormap: rdbu_r
+    range: [-15.0, 15.0]
+
+- id: era5land_precipitation_daily_relative_anomaly_1991_2020
+  name: Precipitation daily relative anomaly (ERA5-Land, vs 1991–2020 normal)
+  short_name: Precipitation anomaly (%)
+  variable: tp
+  period_type: daily
+  sync:
+    kind: static
+  units: "%"
+  source: Derived (climate_anomaly workflow, method=relative)
+  display:
+    colormap: RdBu
+    range: [-100.0, 100.0]
+
+- id: era5land_precipitation_daily_anomaly_1991_2020
+  name: Precipitation daily anomaly (ERA5-Land, vs 1991–2020 normal)
+  short_name: Precipitation anomaly
+  variable: tp
+  period_type: daily
+  sync:
+    kind: static
+  units: mm/d
+  source: Derived (climate_anomaly workflow)
+  display:
+    colormap: RdBu
+    range: [-20.0, 20.0]
+
+# ---------------------------------------------------------------------------
+# Monthly anomaly output templates for the `climate_anomaly` workflow: pair a monthly
+# observed dataset (era5land_*_monthly) with its monthly normal (era5land_*_monthly_normal
+# _1991_2020). compute_anomaly aligns on `month` automatically. Diverging rdbu_r.
+# ---------------------------------------------------------------------------
+
+- id: era5land_temperature_monthly_anomaly_1991_2020
+  name: 2m temperature monthly anomaly (ERA5-Land, vs 1991–2020 normal)
+  short_name: Temperature monthly anomaly
+  variable: t2m
+  period_type: monthly
+  sync:
+    kind: static
+  units: degC
+  source: Derived (climate_anomaly workflow)
+  display:
+    colormap: rdbu_r
+    range: [-3.0, 3.0]
+
+- id: era5land_precipitation_monthly_anomaly_1991_2020
+  name: Precipitation monthly anomaly (ERA5-Land, vs 1991–2020 normal)
+  short_name: Precipitation monthly anomaly
+  variable: tp
+  period_type: monthly
+  sync:
+    kind: static
+  units: mm/d
+  source: Derived (climate_anomaly workflow)
+  display:
+    colormap: RdBu
+    range: [-10.0, 10.0]
+
+- id: era5land_precipitation_monthly_relative_anomaly_1991_2020
+  name: Precipitation monthly relative anomaly (ERA5-Land, vs 1991–2020 normal)
+  short_name: Precipitation anomaly (%)
+  variable: tp
+  period_type: monthly
+  sync:
+    kind: static
+  units: "%"
+  source: Derived (climate_anomaly workflow, method=relative)
+  display:
+    colormap: RdBu
+    range: [-100.0, 100.0]

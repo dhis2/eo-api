@@ -25,6 +25,7 @@ from open_climate_service.openeo.schemas import (
     OpenEOJobStatus,
     OpenEOJobUpdate,
 )
+from open_climate_service.shared.cf import is_temperature_like
 from open_climate_service.shared.time import utc_now
 from open_climate_service.stac.media_types import ZARR_V3_MEDIA_TYPE, zarr_media_type
 
@@ -524,6 +525,7 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
         )
 
     from open_climate_service.data_registry.services import datasets as _reg
+    from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
 
     # Rename the variable in the store to match the user-specified variable name,
     # so the on-disk name matches what is advertised in the STAC collection.
@@ -547,8 +549,13 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     source_template = _resolve_source_template(options)
     template = _reg.get_dataset(dataset_id)
     if template is None:
+        # Validate the candidate before it reaches disk. Persisting first left an incompatible
+        # template behind when publication then failed, and the corrected retry reloaded that
+        # template and failed again — the operator had to delete a YAML to get unstuck.
+        candidate = _derive_managed_dataset_template(ds, options, source_template, t_dim)
+        _reject_incompatible_template_units(ds, variable, cf_attrs_from_template(candidate))
         try:
-            _reg.write_dataset_template(_derive_managed_dataset_template(ds, options, source_template, t_dim))
+            _reg.write_dataset_template(candidate)
         except FileExistsError:
             pass
         template = _reg.get_dataset(dataset_id)
@@ -571,9 +578,9 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     # Stamp CF attributes (units / standard_name / cell_methods) from the template so the
     # published store is CF-compliant on disk (#280). The template is authoritative for the
     # fields it declares, so overwrite any placeholder/generic value left on the variable.
-    from open_climate_service.shared.cf import apply_cf_metadata, cf_attrs_from_template
-
-    apply_cf_metadata(ds, cf_attrs_from_template(template), overwrite=True)
+    cf_attrs = cf_attrs_from_template(template)
+    _reject_incompatible_template_units(ds, variable, cf_attrs)
+    apply_cf_metadata(ds, cf_attrs, overwrite=True)
 
     coverage = _derive_coverage(ds, x_dim, y_dim, t_dim)
     period_type: str | None = _derive_period_type(ds, options, source_template, t_dim)
@@ -702,11 +709,110 @@ def _derive_managed_dataset_template(
         if isinstance(explicit, str) and explicit:
             template[field] = explicit
             continue
+        # Units the process actually produced beat units inherited from the source dataset.
+        # A source template's units describe its *own* variable, so inheriting them is a
+        # guess that only holds while the process preserves units — and processes that change
+        # them say so on the result. `compute_anomaly(method="relative")` returns percent of
+        # normal with `units: "%"`; inheriting `mm/d` from the observed precipitation dataset
+        # published percentages as a precipitation depth, and 20 "mm/d" looks entirely
+        # plausible, so nothing downstream could catch it.
+        if field == "units":
+            produced = _variable_units(ds, variable)
+            if produced is not None:
+                template[field] = produced
+                continue
         inherited = source_template.get(field) if isinstance(source_template, dict) else None
         if isinstance(inherited, str) and inherited:
             template[field] = inherited
 
     return template
+
+
+_UNKNOWN_UNITS = frozenset({"-", "none", "unknown", "n/a", "na"})
+"""Unit strings that assert nothing, so inheriting the source's units over them is an improvement.
+
+`""`, `"1"` and `"unitless"` are deliberately *not* here: they declare a dimensionless quantity,
+which is a claim, not a gap. Treating them as gaps let a dimensionless result — an SPI value, a
+ratio — inherit `mm/d` from its precipitation source, which is the silent relabelling the unit
+checks exist to prevent. `shared/cf.py` already treats `""` as a declared dimensionless unit.
+"""
+
+
+def _variable_units(ds: Any, variable: str) -> str | None:
+    """The units the result variable declares, or None when it declares nothing meaningful."""
+    try:
+        units = ds[variable].attrs.get("units")
+    except Exception:
+        return None
+    if not isinstance(units, str):
+        return None
+    text = units.strip()
+    # A declared dimensionless unit ("" / "1" / "unitless") is returned as-is: it is an assertion
+    # about the data, and the caller must not paper over it with the source's units.
+    return None if text.lower() in _UNKNOWN_UNITS else text
+
+
+def _reject_incompatible_template_units(ds: Any, variable: str, cf_attrs: dict[str, str]) -> None:
+    """Refuse to relabel a result with template units of a different physical dimension.
+
+    A pre-registered template's units are authoritative over a *placeholder* left on the
+    variable — that is what the overwrite at the call site is for. They are not a licence to
+    relabel a quantity as something it is not: publishing `compute_anomaly(method="relative")`
+    against the shipped `..._anomaly_1991_2020` templates would stamp `mm/d` over the `%`
+    earthkit produced, turning 20 percent-of-normal into 20 mm of rain per day. Both values
+    are plausible and the template's diverging range covers both, so no later check could
+    notice.
+
+    The comparison is on the *parsed unit*, so a tidier spelling of the same unit passes
+    (`mm/d` and `mm/day` are one unit to pint) while anything that would change the meaning of
+    the numbers does not. Dimensionality alone is too weak a test: `K` and `degC` share a
+    dimensionality but differ by 273.15, as do `m` and `mm` by a factor of 1000, so a
+    dimensional check would wave through exactly the relabelling this exists to stop.
+
+    An absent or uninformative *declaration* on the template side asserts nothing and so is not
+    checked. A `""` on the *produced* side is different: it is a claim of dimensionlessness, so
+    publishing it into a template declaring `mm/d` is refused like any other mismatch.
+
+    Overwriting a *placeholder* unit remains the point of the call site — a placeholder is not
+    a parseable unit, so `_variable_units` reports it as absent and this never fires. What is
+    refused is overwriting a unit the result genuinely carries; `units` in the save_result
+    options is the way to say the relabel is intended.
+    """
+    declared = cf_attrs.get("units")
+    produced = _variable_units(ds, variable)
+    if not isinstance(declared, str) or not declared.strip() or produced is None:
+        return
+    declared = declared.strip()
+    if declared == produced:
+        return
+    try:
+        from xclim.core.units import units2pint
+    except ImportError:
+        return  # client-only install; validate_units() makes the same allowance
+    try:
+        declared_unit = units2pint(declared)
+        produced_unit = units2pint(produced)
+    except Exception:  # noqa: BLE001 — an unparseable unit is validate_units()' problem, not ours
+        return
+    if declared_unit == produced_unit:
+        return
+    if declared_unit.dimensionality != produced_unit.dimensionality:
+        raise ValueError(
+            f"dataset template declares units '{declared or 'dimensionless'}' but the result carries "
+            f"'{produced}', which measures a different quantity "
+            f"({declared_unit.dimensionality or 'dimensionless'} vs "
+            f"{produced_unit.dimensionality or 'dimensionless'}). Publishing would relabel the values "
+            "rather than convert them. Use a template whose units match the process output (a relative "
+            "anomaly is a percentage, not the observed variable's unit), or pass an explicit "
+            "'units' in the save_result options."
+        )
+    raise ValueError(
+        f"dataset template declares units '{declared or 'dimensionless'}' but the result carries "
+        f"'{produced}'. They measure the same quantity on different scales, so publishing would "
+        "relabel the values without converting them. Convert the result in the process graph, use a "
+        "template declaring the units the process produces, or pass an explicit 'units' in the "
+        "save_result options."
+    )
 
 
 def _derive_template_name(
@@ -761,7 +867,10 @@ def _derive_display_config(
 
     signed_output = output_kind in {"Change", "Anomaly", "Difference", "Delta"}
     if signed_output:
-        display.setdefault("colormap", "RdBu")
+        # Diverging either way, but the ends swap by variable: warm is red for temperature,
+        # while wet is blue for precipitation. `RdBu` runs low→red/high→blue; `rdbu_r` reverses it.
+        variable_da = ds[variable] if variable in getattr(ds, "data_vars", {}) else None
+        display.setdefault("colormap", "rdbu_r" if is_temperature_like(variable_da, ds) else "RdBu")
         if "range" not in display:
             data_min, data_max = _data_range(ds, variable)
             bound = max(abs(data_min), abs(data_max))
