@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import threading
 from collections.abc import Callable
@@ -40,11 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_openeo_jobs_dir() -> Path:
-    data_dir = api_config.get_data_dir()
-    if data_dir is not None:
-        return data_dir / "openeo_jobs"
-    xdg_data = Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    return xdg_data / "climate-service" / "openeo_jobs"
+    return api_config.get_data_root() / "openeo_jobs"
 
 
 _JOBS_DIR = _resolve_openeo_jobs_dir()

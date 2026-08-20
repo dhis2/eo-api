@@ -145,6 +145,20 @@ def get_data_dir() -> Path | None:
     return (config_path.parent / raw).resolve()
 
 
+def get_data_root() -> Path:
+    """Return the effective root for instance data, falling back to XDG when unconfigured.
+
+    ``get_data_dir`` returns None when no config file is present. Every consumer that
+    needs a concrete directory then repeats the same XDG fallback, so it lives here
+    instead. Subdirectories (``downloads``, ``artifacts``, ``jobs``) hang off this root.
+    """
+    data_dir = get_data_dir()
+    if data_dir is not None:
+        return data_dir
+    xdg_data = Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return xdg_data / "climate-service"
+
+
 def get_utc_offset_hours() -> float:
     """Return the UTC offset in hours for daily period boundaries, defaulting to 0 (UTC).
 
