@@ -620,6 +620,67 @@ def test_result_route_rejects_synchronous_zarr_datacube(client: TestClient, monk
     assert "do not support ZARR output" in response.json()["detail"]
 
 
+@pytest.mark.parametrize(
+    ("fmt", "expected_fragment"),
+    [
+        ("GEOJSON", "describes vector features"),
+        ("PARQUET", "describes vector features"),
+        ("JSON", "Unsupported output format"),
+    ],
+)
+def test_result_route_rejects_formats_a_raster_cube_cannot_produce(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    fmt: str,
+    expected_fragment: str,
+) -> None:
+    """A raster cube asked for a vector or unknown format must 4xx, not 500.
+
+    These used to fall through to the Zarr default, writing a `result.zarr` directory that the
+    route then tried to read as a file: `IsADirectoryError`, surfaced as 500 (CLIM-909).
+    """
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        lambda process, request=None: SaveResultEnvelope(
+            xr.Dataset({"temperature": xr.DataArray(np.ones((2, 2), dtype=np.float32), dims=["y", "x"])}),
+            fmt,
+        ),
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 400
+    assert expected_fragment in response.json()["detail"]
+
+
+@pytest.mark.parametrize("fmt", ["NETCDF", "GTIFF", "CSV"])
+def test_result_route_still_serves_raster_formats(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    fmt: str,
+) -> None:
+    """The refusal above must not catch formats a raster cube genuinely produces."""
+    ds = xr.Dataset(
+        {"temperature": xr.DataArray(np.ones((2, 2), dtype=np.float32), dims=["y", "x"])},
+        coords={"y": [1.0, 0.0], "x": [0.0, 1.0]},
+    )
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        lambda process, request=None: SaveResultEnvelope(ds, fmt),
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.content
+
+
 def test_result_route_returns_geojson_payload_for_synchronous_vector_result(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1599,6 +1660,169 @@ def test_derive_coverage_returns_spatial_and_temporal_from_dataset() -> None:
     assert coverage.spatial.ymax == pytest.approx(30.0)
     assert coverage.temporal.start == "2025-01-01"
     assert coverage.temporal.end == "2025-01-03"
+
+
+def _reduced_dataset() -> Any:
+    """A dataset shaped like `reduce_dimension` output: dict-valued bookkeeping attrs."""
+    ds = xr.Dataset(
+        {"precip": xr.DataArray(np.ones((2, 2), dtype=np.float32), dims=["y", "x"])},
+        coords={"y": [1.0, 0.0], "x": [0.0, 1.0]},
+    )
+    ds.attrs["reduced_dimensions_min_values"] = {"t": np.datetime64("2025-01-01")}
+    ds.attrs["units"] = "mm/d"
+    ds["precip"].attrs["reduced_dimensions_max_values"] = {"t": np.datetime64("2025-02-01")}
+    return ds
+
+
+@pytest.mark.parametrize("fmt", ["NETCDF", "ZARR"])
+def test_write_raster_scrubs_attrs_no_writer_can_encode(tmp_path: Path, fmt: str) -> None:
+    """netCDF rejects a dict attr outright; Zarr rejects it as non-JSON (CLIM-825)."""
+    from open_climate_service.openeo.jobs import _write_raster
+
+    output = _write_raster(_reduced_dataset(), tmp_path, fmt)
+
+    assert output is not None
+    assert Path(output).exists()
+
+
+# JSON-serializability is Zarr's contract, not netCDF's, and they disagree both ways. Each case
+# below records what `to_netcdf` actually does, so the filter is measured rather than assumed.
+_NETCDF_ATTR_CASES = [
+    ("dict_of_datetime64", {"t": np.datetime64("2025-01-01")}, False),
+    ("dict_of_str", {"t": "2025-01-01"}, False),
+    ("list_of_dict", [{"a": 1}], False),
+    ("none", None, False),
+    ("bool", True, False),
+    ("ndarray", np.array([1.0, 2.0], dtype="float32"), True),
+    ("numpy_scalar", np.float32(0.5), True),
+    ("str", "mm/d", True),
+    ("int", 3, True),
+    ("list_of_str", ["a", "b"], True),
+]
+
+
+@pytest.mark.parametrize(("label", "value", "netcdf_can_encode"), _NETCDF_ATTR_CASES)
+def test_netcdf_attr_filter_matches_what_the_writer_accepts(
+    tmp_path: Path, label: str, value: object, netcdf_can_encode: bool
+) -> None:
+    """The filter must keep exactly what netCDF can write — no more, no less."""
+    from open_climate_service.openeo.jobs import _netcdf_safe_attrs
+
+    ds = xr.Dataset({"v": xr.DataArray(np.ones((2, 2), dtype=np.float32), dims=["y", "x"])})
+    ds.attrs["probe"] = value
+
+    kept = "probe" in _netcdf_safe_attrs(ds).attrs
+    assert kept == netcdf_can_encode, f"{label}: filter kept={kept}, writer accepts={netcdf_can_encode}"
+
+    # And the writer agrees, so this table cannot drift from reality unnoticed.
+    if netcdf_can_encode:
+        _netcdf_safe_attrs(ds).to_netcdf(tmp_path / f"{label}.nc")
+    else:
+        with pytest.raises(TypeError):
+            ds.to_netcdf(tmp_path / f"{label}-raw.nc")
+
+
+def test_write_raster_netcdf_drops_a_json_safe_dict_attr(tmp_path: Path) -> None:
+    """A dict of plain strings survives a JSON scrub but still breaks to_netcdf."""
+    from open_climate_service.openeo.jobs import _write_raster
+
+    ds = _reduced_dataset()
+    ds.attrs["json_safe_dict"] = {"t": "2025-01-01"}
+
+    output = _write_raster(ds, tmp_path, "NETCDF")
+
+    assert output is not None
+    reopened = xr.open_dataset(output)
+    try:
+        assert "json_safe_dict" not in reopened.attrs
+    finally:
+        reopened.close()
+
+
+def test_write_raster_netcdf_keeps_array_attrs_a_json_scrub_would_drop(tmp_path: Path) -> None:
+    """netCDF writes arrays and numpy scalars happily; the JSON scrub would discard them."""
+    from open_climate_service.openeo.jobs import _write_raster
+
+    ds = _reduced_dataset()
+    ds.attrs["valid_range"] = np.array([0.0, 100.0], dtype="float32")
+    ds.attrs["scale_factor"] = np.float32(0.1)
+
+    output = _write_raster(ds, tmp_path, "NETCDF")
+
+    assert output is not None
+    reopened = xr.open_dataset(output)
+    try:
+        assert list(reopened.attrs["valid_range"]) == [0.0, 100.0]
+        assert reopened.attrs["scale_factor"] == pytest.approx(0.1)
+    finally:
+        reopened.close()
+
+
+def test_write_raster_keeps_attrs_the_writer_can_encode(tmp_path: Path) -> None:
+    """The scrub must drop only what cannot be written, not all metadata."""
+    from open_climate_service.openeo.jobs import _write_raster
+
+    output = _write_raster(_reduced_dataset(), tmp_path, "NETCDF")
+    assert output is not None
+
+    reopened = xr.open_dataset(output)
+    try:
+        assert reopened.attrs["units"] == "mm/d"
+        assert "reduced_dimensions_min_values" not in reopened.attrs
+        assert "reduced_dimensions_max_values" not in reopened["precip"].attrs
+    finally:
+        reopened.close()
+
+
+def test_result_route_serves_netcdf_after_reduce_dimension(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The reported symptom: a graph ending in reduce_dimension, exported as NETCDF, 500d."""
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        lambda process, request=None: SaveResultEnvelope(_reduced_dataset(), "NETCDF"),
+    )
+
+    response = client.post(
+        "/result",
+        json={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.content
+
+
+def test_batch_job_with_unwritable_format_errors_without_a_result_asset(
+    job_service: OpenEOJobService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The batch half of CLIM-909: the job must fail, not finish with mislabelled output.
+
+    Before the fix `_write_raster` fell back to Zarr, so the job wrote `result.zarr`, was marked
+    FINISHED, and advertised it as the requested format — quieter than the synchronous 500 and
+    harder to notice.
+    """
+    ds = xr.Dataset(
+        {"temperature": xr.DataArray(np.ones((2, 2), dtype=np.float32), dims=["y", "x"])},
+        coords={"y": [1.0, 0.0], "x": [0.0, 1.0]},
+    )
+    monkeypatch.setattr(
+        "open_climate_service.openeo.execution.run_process_graph",
+        lambda process: SaveResultEnvelope(ds, "GEOJSON"),
+    )
+
+    record = job_service.create_job(
+        OpenEOJobCreate(
+            process={"process_graph": {"result": {"process_id": "save_result", "result": True}}},
+        )
+    )
+    job_service._execute(record.id)
+
+    failed = job_service.get_job_or_404(record.id)
+    assert failed.status == OpenEOJobStatus.ERROR
+    assert "describes vector features" in (failed.error_message or "")
+    assert not (failed.usage or {}).get("output_path")
+
+    with pytest.raises(HTTPException) as exc_info:
+        job_service.get_results(record.id)
+    assert exc_info.value.status_code == 424
 
 
 @pytest.mark.parametrize(
