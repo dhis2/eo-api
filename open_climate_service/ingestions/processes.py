@@ -10,7 +10,8 @@ from fastapi import HTTPException
 from open_climate_service.data_registry.services import datasets as registry_datasets
 from open_climate_service.extents.services import get_extent_or_404
 from open_climate_service.ingestions import services
-from open_climate_service.ingestions.schemas import IngestionResponse, SyncResponse
+from open_climate_service.ingestions.schemas import IngestionResponse, SyncAction
+from open_climate_service.jobs.models import JobEventDraft, JobExecutionResult
 
 
 def execute_ingestion(
@@ -50,10 +51,35 @@ def execute_sync(
     dataset_id: str,
     end: str | None = None,
     publish: bool = True,
-) -> SyncResponse:
-    """Execute one managed-dataset sync from existing artifact state."""
-    return services.sync_dataset(
+) -> JobExecutionResult:
+    """Execute one sync and describe any resulting dataset update."""
+    response = services.sync_dataset(
         dataset_id=dataset_id,
         end=end,
         publish=publish,
     )
+    events: list[JobEventDraft] = []
+    detail = response.sync_detail
+    if (
+        response.status == "completed"
+        and detail is not None
+        and detail.action
+        in {
+            SyncAction.APPEND,
+            SyncAction.REMATERIALIZE,
+        }
+    ):
+        events.append(
+            JobEventDraft(
+                type="dataset.updated",
+                source=f"/datasets/{dataset_id}",
+                data={
+                    "dataset_id": dataset_id,
+                    "artifact_id": response.sync_id,
+                    "action": detail.action.value,
+                    "previous_end": detail.current_end,
+                    "current_end": detail.target_end,
+                },
+            )
+        )
+    return JobExecutionResult(result=response, events=events)

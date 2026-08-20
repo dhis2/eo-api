@@ -361,3 +361,59 @@ def test_era5land_monthly_product_type_uses_workaround_for_affected_period() -> 
     assert _era5land_monthly_product_type(2022, 8, "tp") == "monthly_averaged_reanalysis"
     assert _era5land_monthly_product_type(2024, 3, "tp") == "monthly_averaged_reanalysis"
     assert _era5land_monthly_product_type(2026, 1, "tp") == "monthly_averaged_reanalysis"
+
+
+# --- auxiliary-variable cleanup ------------------------------------------------------------
+
+
+def _era5_cube_with_extras() -> xr.Dataset:
+    """An ERA5-shaped cube carrying the scalar coords the source attaches, plus a CRS."""
+    import rioxarray  # noqa: F401  # pyright: ignore[reportUnusedImport]  # activates .rio
+
+    ds = xr.Dataset(
+        {"t2m": (("t", "y", "x"), np.ones((1, 2, 2), dtype="float32"))},
+        coords={"t": [np.datetime64("2026-01-01")], "y": [1.0, 2.0], "x": [1.0, 2.0]},
+    )
+    return ds.assign_coords(number=0, expver="0001").rio.write_crs(4326)
+
+
+def test_auxiliary_cleanup_drops_the_phantom_ensemble_coords() -> None:
+    """`number`/`expver` otherwise surface as a stray `bands` dimension in an anomaly."""
+    from open_climate_service.plugins.datasets.era5_land import _drop_auxiliary_variables
+
+    out = _drop_auxiliary_variables(_era5_cube_with_extras(), "t2m")
+
+    assert "number" not in out.variables
+    assert "expver" not in out.variables
+    assert set(out.data_vars) == {"t2m"}
+
+
+def test_auxiliary_cleanup_keeps_the_crs() -> None:
+    """The CRS lives in a non-dimension coordinate, so a blanket drop would take it.
+
+    Grid inference falls back to EPSG:4326 for a cube that carries none, so ERA5-Land would
+    still be recorded correctly — by luck. A projected source cleaned the same way would be
+    silently mislabelled, which is what this pins.
+    """
+    from open_climate_service.plugins.datasets.era5_land import _drop_auxiliary_variables
+
+    before = _era5_cube_with_extras()
+
+    out = _drop_auxiliary_variables(before, "t2m")
+
+    assert "spatial_ref" in out.variables
+    # Compared against the input rather than via to_epsg(), which needs a working PROJ database
+    # and is what makes the tests in test_openeo_execution.py fail on a broken local install.
+    assert out.rio.crs is not None and out.rio.crs == before.rio.crs
+
+
+def test_auxiliary_cleanup_honours_a_declared_grid_mapping() -> None:
+    """A source naming its grid mapping something other than `spatial_ref` must survive too."""
+    from open_climate_service.plugins.datasets.era5_land import _drop_auxiliary_variables
+
+    ds = _era5_cube_with_extras().rename({"spatial_ref": "my_crs"})
+    ds["t2m"].attrs["grid_mapping"] = "my_crs"
+
+    out = _drop_auxiliary_variables(ds, "t2m")
+
+    assert "my_crs" in out.variables
