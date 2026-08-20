@@ -180,3 +180,145 @@ def test_triggered_job_start_is_an_atomic_one_time_claim(monkeypatch: pytest.Mon
         enqueue.assert_called_once_with(job.id)
     finally:
         service.shutdown()
+
+
+def _record_with(event: JobEvent) -> MagicMock:
+    record = MagicMock()
+    record.events = [event]
+    return record
+
+
+def test_new_trigger_does_not_backfill_events_before_activation(monkeypatch: pytest.MonkeyPatch) -> None:
+    openeo = MagicMock()
+    openeo.create_triggered_job.return_value = (_openeo_record(), True)
+    service = WorkflowAutomationService(config_loader=_config, openeo_service=openeo)
+
+    activation = datetime(2026, 8, 19, tzinfo=UTC)
+    old_event = _event().model_copy(update={"time": datetime(2026, 8, 18, tzinfo=UTC)})
+    monkeypatch.setattr(
+        "open_climate_service.automation.service.job_store.list_job_records", lambda: [_record_with(old_event)]
+    )
+    monkeypatch.setattr(
+        "open_climate_service.automation.service._load_activations",
+        lambda: {"chap-after-chirps": activation.isoformat()},
+    )
+    monkeypatch.setattr("open_climate_service.automation.service._save_activations", lambda _: None)
+
+    service.replay()
+
+    openeo.create_triggered_job.assert_not_called()
+
+
+def test_replay_existing_replays_events_before_activation(monkeypatch: pytest.MonkeyPatch) -> None:
+    openeo = MagicMock()
+    openeo.create_triggered_job.return_value = (_openeo_record(), True)
+    trigger = WorkflowTrigger(
+        id="chap-after-chirps",
+        on_update_of="chirps",
+        workflow_id="aggregate_to_chap_csv",
+        arguments={"dataset_id": "$event.dataset_id"},
+        replay_existing=True,
+    )
+    service = WorkflowAutomationService(
+        config_loader=lambda: AutomationConfig(workflow_triggers=[trigger]), openeo_service=openeo
+    )
+
+    activation = datetime(2026, 8, 19, tzinfo=UTC)
+    old_event = _event().model_copy(update={"time": datetime(2026, 8, 18, tzinfo=UTC)})
+    monkeypatch.setattr(
+        "open_climate_service.automation.service.job_store.list_job_records", lambda: [_record_with(old_event)]
+    )
+    monkeypatch.setattr(
+        "open_climate_service.automation.service._load_activations",
+        lambda: {"chap-after-chirps": activation.isoformat()},
+    )
+    monkeypatch.setattr("open_climate_service.automation.service._save_activations", lambda _: None)
+
+    service.replay()
+
+    openeo.create_triggered_job.assert_called_once()
+
+
+def test_start_records_activation_for_new_triggers(monkeypatch: pytest.MonkeyPatch) -> None:
+    saved: dict[str, str] = {}
+    monkeypatch.setattr(
+        "open_climate_service.automation.service.workflows.get_workflow",
+        lambda _: {"id": "aggregate_to_chap_csv"},
+    )
+    monkeypatch.setattr("open_climate_service.automation.service._load_activations", lambda: {})
+    monkeypatch.setattr("open_climate_service.automation.service._save_activations", saved.update)
+    service = WorkflowAutomationService(config_loader=_config, openeo_service=MagicMock())
+
+    service.start()
+
+    assert "chap-after-chirps" in saved
+
+
+def _workflow(*parameter_names: str) -> MagicMock:
+    workflow = MagicMock()
+    workflow.parameters = [{"name": name} for name in parameter_names]
+    return workflow
+
+
+def _service_for_output_check(
+    monkeypatch: pytest.MonkeyPatch, workflow: MagicMock, *triggers: WorkflowTrigger
+) -> WorkflowAutomationService:
+    monkeypatch.setattr("open_climate_service.automation.service.workflows.get_workflow", lambda _: workflow)
+    monkeypatch.setattr("open_climate_service.automation.service._load_activations", lambda: {})
+    monkeypatch.setattr("open_climate_service.automation.service._save_activations", lambda _: None)
+    return WorkflowAutomationService(
+        config_loader=lambda: AutomationConfig(workflow_triggers=list(triggers)), openeo_service=MagicMock()
+    )
+
+
+def test_duplicate_managed_output_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    workflow = _workflow("dataset_id", "output_dataset_id")
+    service = _service_for_output_check(
+        monkeypatch,
+        workflow,
+        WorkflowTrigger(id="a", on_update_of="chirps", workflow_id="wf", arguments={"output_dataset_id": "out"}),
+        WorkflowTrigger(id="b", on_update_of="chirps", workflow_id="wf", arguments={"output_dataset_id": "out"}),
+    )
+
+    with pytest.raises(ValueError, match="same managed output"):
+        service.start()
+
+
+def test_distinct_managed_outputs_are_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    workflow = _workflow("dataset_id", "output_dataset_id")
+    service = _service_for_output_check(
+        monkeypatch,
+        workflow,
+        WorkflowTrigger(id="a", on_update_of="chirps", workflow_id="wf", arguments={"output_dataset_id": "out-a"}),
+        WorkflowTrigger(id="b", on_update_of="chirps", workflow_id="wf", arguments={"output_dataset_id": "out-b"}),
+    )
+
+    service.start()  # must not raise
+
+
+def test_file_producing_workflow_is_not_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    workflow = _workflow("dataset_id")  # no output_dataset_id -> file-producing
+    service = _service_for_output_check(
+        monkeypatch,
+        workflow,
+        WorkflowTrigger(id="a", on_update_of="chirps", workflow_id="wf", arguments={"dataset_id": "$event.dataset_id"}),
+        WorkflowTrigger(id="b", on_update_of="chirps", workflow_id="wf", arguments={"dataset_id": "$event.dataset_id"}),
+    )
+
+    service.start()  # must not raise
+
+
+def test_unresolvable_output_reference_is_not_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    workflow = _workflow("dataset_id", "output_dataset_id")
+    service = _service_for_output_check(
+        monkeypatch,
+        workflow,
+        WorkflowTrigger(
+            id="a", on_update_of="chirps", workflow_id="wf", arguments={"output_dataset_id": "$event.dataset_id"}
+        ),
+        WorkflowTrigger(
+            id="b", on_update_of="chirps", workflow_id="wf", arguments={"output_dataset_id": "$event.dataset_id"}
+        ),
+    )
+
+    service.start()  # must not raise; a runtime $event reference is left to the store lock

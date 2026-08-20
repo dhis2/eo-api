@@ -18,6 +18,7 @@ class WorkflowTrigger(BaseModel):
     on_update_of: str = Field(min_length=1)
     workflow_id: str = Field(min_length=1)
     arguments: dict[str, Any] = Field(default_factory=dict)
+    replay_existing: bool = False
 
 
 class AutomationConfig(BaseModel):
