@@ -49,8 +49,20 @@ Each event and trigger pair produces a deterministic openEO job ID. OCS replays 
 at startup, but an already created, queued, running, or completed job is not duplicated. If OCS
 stopped after creating a job but before queueing it, startup queues that existing job.
 
+A trigger is activated the first time OCS starts with it configured. By default
+(`replay_existing: false`), startup replay ignores events that predate the trigger's activation, so
+adding a new trigger does not backfill the workflow over every historical update. Set
+`replay_existing: true` to opt into replaying all persisted events for that trigger. Newly
+persisted events are always dispatched immediately, regardless of this flag.
+
 Workflow execution and status remain owned by the openEO batch-job service and are visible under
 `GET /jobs`. Workflows may also be submitted directly without a preceding dataset sync.
+
+Triggered jobs share the existing openEO job pool with manually submitted jobs — there is no
+separate automation queue or concurrency limit. A fan-out of several triggers therefore runs
+independently in that pool. Bounding total workflow concurrency is a general resource-policy
+concern deferred to CLIM-845; until then the per-store lock remains the write-safety boundary for
+workflows that publish managed datasets.
 
 ## Current boundary
 
