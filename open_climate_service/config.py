@@ -175,9 +175,10 @@ def is_read_only() -> bool:
     be browsed but not modified — no ingestion, no batch jobs, no stored process graphs,
     no admin UI. Defaults to False so local and single-user deployments are unaffected.
 
-    Read-only applies to HTTP only. Ingestion on a read-only instance is an operator
-    task performed on the host, which is what lets this switch be absolute: there is no
-    exemption, token or trusted header that could be misconfigured into a bypass.
+    Read-only applies to HTTP and in-process background triggers. Ingestion on a read-only
+    instance is an operator task performed on the host, which is what lets this switch be
+    absolute: there is no exemption, token or trusted header that could be misconfigured
+    into a bypass.
     """
     raw = get_config().get("read_only", False)
     if not isinstance(raw, bool):

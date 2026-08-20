@@ -16,6 +16,8 @@ from open_climate_service.jobs import store
 from open_climate_service.jobs.models import (
     JobCancelledError,
     JobError,
+    JobEvent,
+    JobExecutionResult,
     JobLink,
     JobListResponse,
     JobProgress,
@@ -343,14 +345,29 @@ class JobService:
             )
 
             try:
-                result = self._invoke_process(started)
+                execution_result = self._invoke_process(started)
+                completed_at = utc_now()
+                if isinstance(execution_result, JobExecutionResult):
+                    result = execution_result.result
+                    events = [
+                        JobEvent(
+                            event_id=f"{job_id}:{index}",
+                            time=completed_at,
+                            **event.model_dump(),
+                        )
+                        for index, event in enumerate(execution_result.events)
+                    ]
+                else:
+                    result = execution_result
+                    events = []
                 store.mutate_job_record(
                     job_id,
                     lambda current: current.model_copy(
                         update={
                             "status": JobStatus.SUCCESSFUL,
-                            "finished_at": utc_now(),
+                            "finished_at": completed_at,
                             "result": result,
+                            "events": events,
                             "progress": JobProgress(
                                 done=current.progress.done,
                                 total=current.progress.total,

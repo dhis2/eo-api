@@ -131,6 +131,13 @@ POST /sync/{dataset_id} + Prefer: respond-async → 202 + Location: /ingestions/
 
 A job is the operational state of one async execution. The same job runtime is shared between async ingestion, async sync, and openEO batch jobs (the latter tracked at `/jobs/{id}`; native ingestion/sync jobs tracked at `/ingestions/jobs/{id}`).
 
+Successful native jobs may also contain domain events in their `events` field. These events are
+persisted in the same update that marks the job successful, so consumers never observe an event
+for failed work. An async sync that actually appends or rematerializes data records one
+`dataset.updated` event with the dataset, artifact, executed action, and previous/current coverage.
+An up-to-date sync records no event. The event is a durable completion outcome; dispatching
+downstream workflows or external notifications is a separate concern.
+
 Jobs provide:
 
 - status tracking
