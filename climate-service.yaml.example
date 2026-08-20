@@ -15,3 +15,12 @@ data_dir: ./data   # required — directory for downloaded NetCDF files and Zarr
 # plugins_dir: ./plugins/   # optional — plugin root: YAML templates in plugins/datasets/, Python modules importable by dotted path
 # crs: EPSG:4326             # optional — CRS for stored GeoZarr files (default: EPSG:4326); use e.g. EPSG:25833 for UTM33
 # utc_offset_hours: 0        # optional — UTC offset in hours for local-day aggregation in daily_from_hourly datasets (default: 0 = UTC)
+
+# scheduler:                 # optional — operator-managed recurring dataset syncs
+#   enabled: true
+#   timezone: UTC
+#   dataset_sync:
+#     - dataset_id: chirps3_precipitation_daily
+#       cron: "0 6 * * *"
+#       publish: true
+#       max_attempts: 3

@@ -194,7 +194,10 @@ async def run_streaming_ingest(
         is_first_write = True
     else:
         raise RuntimeError(
-            f"Existing store at {store_path} is not empty, but committed periods could not be determined safely"
+            f"Existing store at {store_path} holds data whose committed periods could not be read, so it is "
+            "neither safe to append to nor safe to overwrite. Inspect the store, or remove it to re-ingest "
+            "from scratch. A store that was created but never written to is not this case and is handled as "
+            "a first write."
         )
 
     repo = open_or_create_repo(store_path)

@@ -148,6 +148,7 @@ server = [
     # which is also what keeps the tree resolvable there, unlike earthkit-data's unconditional
     # pin (ecmwf/earthkit-data#1105). The CI Windows resolution check enforces that.
     "eccodeslib>=2.42; sys_platform != 'win32'",
+    "apscheduler>=3.11,<4",
 ]
 
 [project.urls]
@@ -201,7 +202,7 @@ module = "tests.*"
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-module = ["rasterio.*", "pygeofilter.*", "requests.*", "geopandas.*", "earthkit.*", "metpy.*", "matplotlib.*", "yaml", "xproj", "topozarr.*", "geozarr_toolkit", "xstac", "openeo_pg_parser_networkx", "openeo_pg_parser_networkx.*", "openeo_processes_dask", "openeo_processes_dask.*", "dask_geopandas", "dask_geopandas.*", "xclim", "xclim.*"]
+module = ["apscheduler", "apscheduler.*", "rasterio.*", "pygeofilter.*", "requests.*", "geopandas.*", "earthkit.*", "metpy.*", "matplotlib.*", "yaml", "xproj", "topozarr.*", "geozarr_toolkit", "xstac", "openeo_pg_parser_networkx", "openeo_pg_parser_networkx.*", "openeo_processes_dask", "openeo_processes_dask.*", "dask_geopandas", "dask_geopandas.*", "xclim", "xclim.*"]
 ignore_missing_imports = true
 
 [tool.pyright]

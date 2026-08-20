@@ -168,3 +168,34 @@ def validate_units(units: str) -> str | None:
     except Exception as exc:  # noqa: BLE001 — any parse failure means invalid units
         return f"units '{units}' is not a recognised CF/udunits unit ({exc})"
     return None
+
+
+# Units and standard names that mark an interval-scale temperature. Two callers need the same
+# judgement: a *relative* (percent-of-normal) anomaly is meaningless for temperature, and a
+# diverging colour scale runs the opposite way — warm is red, whereas for precipitation wet is
+# blue.
+_TEMPERATURE_UNITS = frozenset(
+    {
+        "degc",
+        "°c",
+        "c",
+        "celsius",
+        "degree_celsius",
+        "degrees_celsius",
+        "k",
+        "kelvin",
+        "degree_kelvin",
+        "degrees_kelvin",
+    }
+)
+
+
+def is_temperature_like(*objects: Any) -> bool:
+    """Whether any object's ``units``/``standard_name`` attrs mark it as a temperature."""
+    for obj in objects:
+        attrs: dict[str, Any] = getattr(obj, "attrs", None) or {}
+        units = str(attrs.get("units", "")).strip().lower()
+        standard_name = str(attrs.get("standard_name", "")).strip().lower()
+        if units in _TEMPERATURE_UNITS or "temperature" in standard_name:
+            return True
+    return False

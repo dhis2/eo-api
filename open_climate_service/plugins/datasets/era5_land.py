@@ -23,6 +23,7 @@ from open_climate_service.shared.time import (
     parse_period_string_to_datetime,
 )
 from open_climate_service.streaming import BaseDatasetPlugin, cell_pad, monthly_period_ids
+from open_climate_service.transforms.climatology import circular_rolling_mean
 from open_climate_service.transforms.unit_conversion import kelvin_to_celsius, metres_to_mm
 
 # CDS API long-name variables for reanalysis-era5-land-monthly-means
@@ -446,6 +447,32 @@ class _ERA5LandEDHBase(BaseDatasetPlugin):
             ds.close()
 
 
+_GRID_MAPPING_NAMES = ("spatial_ref", "crs")
+"""Scalar coordinates that carry the CRS rather than data, so they must survive the cleanup."""
+
+
+def _drop_auxiliary_variables(ds: xr.Dataset, variable: str) -> xr.Dataset:
+    """Keep ``variable``, the dimension coordinates and the CRS, dropping everything else.
+
+    ERA5 sources attach scalar ensemble-member coordinates (``number``, value 0 for
+    ERA5-Land reanalysis; sometimes ``expver``) that otherwise persist as phantom data
+    variables — which then load as a spurious ``bands`` dimension downstream (e.g. anomalies
+    came out with a stray ``number`` band). Shared by the daily ERA5-Land fetch paths.
+
+    The grid mapping is exempt. "Everything that is not a dimension coordinate" would also
+    take rioxarray's ``spatial_ref``, which is where the CRS lives — and since grid inference
+    falls back to EPSG:4326 when a cube carries none, ERA5-Land would still be recorded
+    correctly, by luck rather than because the data said so. A projected source cleaned the
+    same way would be silently mislabelled.
+    """
+    keep = {variable, *ds.dims, *_GRID_MAPPING_NAMES}
+    declared = ds[variable].attrs.get("grid_mapping") if variable in ds else None
+    if isinstance(declared, str) and declared:
+        keep.add(declared)
+    extras = [v for v in ds.variables if v not in keep]
+    return ds.drop_vars(extras, errors="ignore")
+
+
 class ERA5LandEDHDailyPlugin(_ERA5LandEDHBase):
     """Streaming plugin for daily ERA5-Land from the Earth Data Hub Zarr store.
 
@@ -475,7 +502,7 @@ class ERA5LandEDHDailyPlugin(_ERA5LandEDHBase):
         if self._edh_lon_360:
             ds = _normalize_lon(ds)
         ds = ds.rename({"longitude": "x", "latitude": "y", "valid_time": "t"})
-        return self._apply_transforms(ds)
+        return _drop_auxiliary_variables(self._apply_transforms(ds), self.variable)
 
 
 class ERA5LandTempDailyPlugin(ERA5LandEDHDailyPlugin):
@@ -501,8 +528,11 @@ class ERA5LandTempDailyPlugin(ERA5LandEDHDailyPlugin):
     def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
         edh_latest = self._latest_available()
         if self._cds_plugin is None or period_id <= edh_latest:
-            return super().fetch_period(period_id, bbox)
-        return self._cds_plugin.fetch_period(period_id, bbox)
+            ds = super().fetch_period(period_id, bbox)
+        else:
+            ds = self._cds_plugin.fetch_period(period_id, bbox)
+        # The EDH path is already cleaned by the base; this also covers the CDS-tail source.
+        return _drop_auxiliary_variables(ds, self.variable)
 
 
 class ERA5LandEDHPrecipitationDailyPlugin(_ERA5LandEDHBase):
@@ -534,7 +564,7 @@ class ERA5LandEDHPrecipitationDailyPlugin(_ERA5LandEDHBase):
         return daily_period_ids(start, end, cutoff=latest_str)
 
     def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
-        return self._fetch_daily_sync(period_id, bbox)
+        return _drop_auxiliary_variables(self._fetch_daily_sync(period_id, bbox), self.variable)
 
     def _fetch_daily_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
         from open_climate_service import config as api_config
@@ -731,18 +761,6 @@ _NORMALS_DEFAULT_PERIOD = (1991, 2020)
 _NORMALS_DEFAULT_SMOOTHING = 31
 
 
-def _circular_rolling_mean(da: xr.DataArray, window: int) -> xr.DataArray:
-    """Circular rolling mean over the dayofyear axis (wraps Dec→Jan)."""
-    vals = np.concatenate([da.values, da.values, da.values], axis=0)
-    result = np.empty_like(da.values)
-    half = window // 2
-    n = da.sizes["dayofyear"]
-    for i in range(n):
-        centre = n + i
-        result[i] = vals[centre - half : centre + half + 1].mean(axis=0)
-    return da.copy(data=result)
-
-
 class ERA5LandNormalsPlugin(BaseDatasetPlugin):
     """Streaming plugin that computes WMO day-of-year climate normals from ERA5-Land.
 
@@ -792,7 +810,7 @@ class ERA5LandNormalsPlugin(BaseDatasetPlugin):
         self.edh_variable = edh_variable
         self.period = (start_year, end_year)
         self.smoothing_window = int(smoothing_window)
-        # _circular_rolling_mean assumes a centred, odd window; 0 disables smoothing.
+        # circular_rolling_mean assumes a centred, odd window; 0 disables smoothing.
         if self.smoothing_window < 0:
             raise ValueError(f"smoothing_window must be >= 0, got {self.smoothing_window}")
         if self.smoothing_window % 2 == 0 and self.smoothing_window != 0:
@@ -829,11 +847,14 @@ class ERA5LandNormalsPlugin(BaseDatasetPlugin):
     def _compute_climatology(self, bbox: list[float]) -> xr.Dataset:
         region = self._load_reference(bbox)
         # earthkit computes the day-of-year mean (1..366), handling the calendar/leap-year
-        # binning and preserving dask laziness. It has no rolling-window option yet
-        # (ecmwf/earthkit-transforms#103), so the WMO circular smoothing stays a post-step.
+        # binning and preserving dask laziness. WMO circular smoothing stays a post-step:
+        # earthkit's rolling reduction lives in `temporal` and does not wrap the year
+        # boundary (ecmwf/earthkit-transforms#103), which is the only part we supply.
         normals = cast(xr.Dataset, ek_climatology.daily_mean(region, time_dim="valid_time"))
         if self.smoothing_window > 0:
-            normals[self.variable] = _circular_rolling_mean(normals[self.variable], self.smoothing_window)
+            normals[self.variable] = circular_rolling_mean(
+                normals[self.variable], self.smoothing_window, _NORMALS_DAYOFYEAR_DIM
+            )
         normals = self._apply_unit_transform(normals)
         return normals.load()
 

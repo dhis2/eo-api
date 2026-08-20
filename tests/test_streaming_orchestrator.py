@@ -380,7 +380,7 @@ def test_orchestrator_refuses_destructive_first_write_when_existing_store_is_not
     )
     monkeypatch.setattr(streaming_orchestrator, "is_store_empty", lambda path: False)
 
-    with pytest.raises(RuntimeError, match="committed periods could not be determined safely"):
+    with pytest.raises(RuntimeError, match="committed periods could not be read"):
         run_streaming_ingest_sync(
             plugin=_FakePlugin(),
             params={},
