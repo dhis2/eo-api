@@ -212,7 +212,8 @@ def _match_spatial_grid(normal: xr.DataArray, observed: xr.DataArray, t_dim: str
 
     Upstream gap, not a preference: earthkit could either accept a tolerance or — cheaper and
     arguably better — detect the failed alignment and raise instead of returning a quietly
-    NaN cube. To be filed against ecmwf/earthkit-transforms; delete this helper once it lands.
+    NaN cube. Filed as `ecmwf/earthkit-transforms#126
+    <https://github.com/ecmwf/earthkit-transforms/issues/126>`_; delete this helper once it lands.
 
     A *regular* grid is assumed (true for the lat/lon and UTM grids this serves); the spacing
     check below is what makes that assumption explicit rather than silent.
