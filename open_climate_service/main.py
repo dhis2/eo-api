@@ -16,6 +16,8 @@ from open_climate_service.jobs.service import get_job_service
 from open_climate_service.openeo import routes as openeo_routes
 from open_climate_service.openeo.jobs import get_openeo_job_service
 from open_climate_service.read_only import read_only_middleware
+from open_climate_service.scheduler import routes as scheduler_routes
+from open_climate_service.scheduler.service import get_scheduler_service
 from open_climate_service.stac import routes as stac_routes
 from open_climate_service.system import routes as system_routes
 from open_climate_service.vectors import routes as vector_routes
@@ -73,9 +75,12 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     job_service.recover_pending_jobs()
     openeo_service = get_openeo_job_service()
     openeo_service.recover_pending_jobs()
+    scheduler_service = get_scheduler_service()
+    scheduler_service.start()
     try:
         yield
     finally:
+        scheduler_service.shutdown()
         job_service.shutdown()
         openeo_service.shutdown()
 
@@ -180,6 +185,7 @@ def create_app() -> FastAPI:
     _app.include_router(ingestion_routes.zarr_router, prefix="/zarr", tags=["Zarr"])
     _app.include_router(ingestion_routes.icechunk_router, prefix="/icechunk", tags=["Icechunk"])
     _app.include_router(ingestion_routes.sync_router, prefix="/sync", tags=["Sync"])
+    _app.include_router(scheduler_routes.router, prefix="/schedules", tags=["Schedules"])
     _app.include_router(openeo_routes.processes_router, prefix="/processes", tags=["openEO"])
 
     return _app

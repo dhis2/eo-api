@@ -139,6 +139,7 @@ plugins_dir: ./plugins/
 | `data_dir` | Yes | Directory for downloaded files and Zarr stores, resolved relative to the config file. A `vector/` subdirectory here holds the instance's [vector collections](openeo.md#vector-collections) |
 | `plugins_dir` | No | Directory containing `datasets/`, `processes/`, and `workflows/` plugin subdirectories |
 | `read_only` | No | Set `true` to refuse all state-changing requests — see [Read-only instances](#read-only-instances). Defaults to `false` |
+| `scheduler` | No | Instance-level scheduled dataset-sync configuration. See [Scheduled dataset synchronization](scheduled_sync.md) |
 
 To find the bounding box for a region, [bboxfinder.com](http://bboxfinder.com) is a useful tool.
 

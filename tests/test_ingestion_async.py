@@ -1,5 +1,6 @@
 """Tests for async ingestion and sync via Prefer: respond-async."""
 
+from collections.abc import Callable
 from typing import NoReturn
 from unittest.mock import MagicMock
 
@@ -7,7 +8,15 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from open_climate_service.jobs.models import JobProgress, JobRecord, JobStatus
+from open_climate_service.ingestions import processes
+from open_climate_service.ingestions.schemas import SyncAction, SyncDetail, SyncKind, SyncResponse
+from open_climate_service.jobs.models import (
+    JobEventDraft,
+    JobExecutionResult,
+    JobProgress,
+    JobRecord,
+    JobStatus,
+)
 from open_climate_service.jobs.service import JobService
 
 
@@ -28,6 +37,33 @@ def _make_job(job_id: str = "job-123") -> JobRecord:
 
 def _fake_job_callable() -> dict[str, object]:
     return {"ok": True}
+
+
+def _fake_event_job_callable() -> JobExecutionResult:
+    return JobExecutionResult(
+        result={"ok": True},
+        events=[JobEventDraft(type="dataset.updated", source="/datasets/example", data={"action": "append"})],
+    )
+
+
+def _sync_response(action: SyncAction, *, status: str = "completed") -> SyncResponse:
+    return SyncResponse(
+        sync_id="artifact-2" if status == "completed" else None,
+        status=status,
+        message="test",
+        dataset=None,
+        sync_detail=SyncDetail(
+            source_dataset_id="source",
+            sync_kind=SyncKind.TEMPORAL,
+            action=action,
+            reason="test",
+            message="test",
+            current_start="2026-01-01",
+            current_end="2026-01-02",
+            target_end="2026-01-03",
+            target_end_source="request",
+        ),
+    )
 
 
 def test_post_ingestion_respond_async_returns_202_with_location(
@@ -256,3 +292,66 @@ def test_submit_callable_job_normalizes_custom_jobs_base(monkeypatch: pytest.Mon
     )
 
     assert [link.href for link in record.links] == [f"/ingestions/jobs/{record.job_id}"]
+
+
+def test_successful_job_persists_result_and_events_atomically(monkeypatch: pytest.MonkeyPatch) -> None:
+    persisted: dict[str, JobRecord] = {}
+
+    monkeypatch.setattr("open_climate_service.jobs.service.JobService._enqueue_job", lambda self, job_id: None)
+    monkeypatch.setattr(
+        "open_climate_service.jobs.store.create_job_record",
+        lambda record: persisted.setdefault(record.job_id, record),
+    )
+    monkeypatch.setattr("open_climate_service.jobs.store.get_job_record", lambda job_id: persisted.get(job_id))
+
+    def mutate(job_id: str, mutation: Callable[[JobRecord], JobRecord]) -> JobRecord:
+        updated = mutation(persisted[job_id])
+        persisted[job_id] = updated
+        return updated
+
+    monkeypatch.setattr("open_climate_service.jobs.store.mutate_job_record", mutate)
+    service = JobService()
+    submitted = service.submit_callable_job(func=_fake_event_job_callable, label="sync", request={})
+
+    service._execute_job(submitted.job_id)
+
+    completed = persisted[submitted.job_id]
+    assert completed.status == JobStatus.SUCCESSFUL
+    assert completed.result == {"ok": True}
+    assert len(completed.events) == 1
+    assert completed.events[0].event_id == f"{submitted.job_id}:0"
+    assert completed.events[0].type == "dataset.updated"
+    assert completed.events[0].time == completed.finished_at
+
+
+@pytest.mark.parametrize("action", [SyncAction.APPEND, SyncAction.REMATERIALIZE])
+def test_execute_sync_returns_dataset_updated_after_completed_change(
+    action: SyncAction, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(processes.services, "sync_dataset", lambda **_: _sync_response(action))
+
+    outcome = processes.execute_sync(dataset_id="managed-dataset")
+
+    assert isinstance(outcome.result, SyncResponse)
+    assert len(outcome.events) == 1
+    assert outcome.events[0].type == "dataset.updated"
+    assert outcome.events[0].source == "/datasets/managed-dataset"
+    assert outcome.events[0].data == {
+        "dataset_id": "managed-dataset",
+        "artifact_id": "artifact-2",
+        "action": action.value,
+        "previous_end": "2026-01-02",
+        "current_end": "2026-01-03",
+    }
+
+
+def test_execute_sync_does_not_emit_dataset_updated_for_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        processes.services,
+        "sync_dataset",
+        lambda **_: _sync_response(SyncAction.NO_OP, status="up_to_date"),
+    )
+
+    outcome = processes.execute_sync(dataset_id="managed-dataset")
+
+    assert outcome.events == []
