@@ -48,6 +48,7 @@ class SchedulerService:
             return
 
         scheduler = AsyncIOScheduler(timezone=config.timezone_info)
+        registered = 0
         for schedule in config.dataset_sync:
             try:
                 self._validate_target(schedule)
@@ -70,13 +71,14 @@ class SchedulerService:
                 max_instances=1,
                 replace_existing=True,
             )
+            registered += 1
         scheduler.start()
         self._scheduler = scheduler
         logger.warning(
             "Dataset scheduler enabled in process %d with %d schedule(s); "
             "exactly one OCS process may enable scheduling",
             os.getpid(),
-            len(config.dataset_sync),
+            registered,
         )
 
     def _validate_target(self, schedule: DatasetSyncSchedule) -> None:

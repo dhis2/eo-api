@@ -6,11 +6,12 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from open_climate_service.jobs.models import JobRecord, JobStatus
 from open_climate_service.scheduler.config import DatasetSyncSchedule, SchedulerConfig
-from open_climate_service.scheduler.dispatcher import CheckOutcome, CheckResult, enqueue_sync
+from open_climate_service.scheduler.dispatcher import CheckOutcome, CheckResult, _dataset_is_materialized, enqueue_sync
 from open_climate_service.scheduler.service import SchedulerService
 
 
@@ -80,6 +81,7 @@ def test_due_schedule_enqueues_retryable_native_job(monkeypatch: pytest.MonkeyPa
     job_service.list_jobs.return_value.jobs = []
     monkeypatch.setattr("open_climate_service.scheduler.dispatcher.api_config.is_read_only", lambda: False)
     monkeypatch.setattr("open_climate_service.scheduler.dispatcher.get_job_service", lambda: job_service)
+    monkeypatch.setattr("open_climate_service.scheduler.dispatcher._dataset_is_materialized", lambda _: True)
     monkeypatch.setattr("open_climate_service.scheduler.dispatcher.submit_sync_job", submit)
 
     result = enqueue_sync(_schedule(max_attempts=4))
@@ -93,6 +95,48 @@ def test_due_schedule_enqueues_retryable_native_job(monkeypatch: pytest.MonkeyPa
         label="scheduled-sync",
         max_attempts=4,
     )
+
+
+def test_unmaterialized_dataset_skips_submission(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A registered-but-never-ingested dataset must not burn worker retries (CLIM-849)."""
+    submit = MagicMock()
+    monkeypatch.setattr("open_climate_service.scheduler.dispatcher.api_config.is_read_only", lambda: False)
+    monkeypatch.setattr("open_climate_service.scheduler.dispatcher._has_active_writer_job", lambda _: False)
+    monkeypatch.setattr("open_climate_service.scheduler.dispatcher._dataset_is_materialized", lambda _: False)
+    monkeypatch.setattr("open_climate_service.scheduler.dispatcher.submit_sync_job", submit)
+
+    result = enqueue_sync(_schedule())
+
+    assert result.outcome == CheckOutcome.NOT_MATERIALIZED
+    assert result.job_id is None
+    submit.assert_not_called()
+
+
+def test_materialization_check_translates_missing_artifact(monkeypatch: pytest.MonkeyPatch) -> None:
+    def missing_artifact(_: str) -> None:
+        raise HTTPException(status_code=404, detail="No artifact found")
+
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.services.get_latest_artifact_for_dataset_or_404",
+        missing_artifact,
+    )
+
+    assert _dataset_is_materialized("registered-but-never-ingested") is False
+
+
+def test_materialization_check_propagates_unexpected_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unavailable_artifact_index(_: str) -> None:
+        raise HTTPException(status_code=503, detail="Artifact index unavailable")
+
+    monkeypatch.setattr(
+        "open_climate_service.ingestions.services.get_latest_artifact_for_dataset_or_404",
+        unavailable_artifact_index,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        _dataset_is_materialized("chirps3_precipitation_daily")
+
+    assert exc_info.value.status_code == 503
 
 
 @pytest.mark.parametrize("process_id", ["ingestion", "sync", "scheduled-sync"])
@@ -200,9 +244,11 @@ def test_service_skips_static_schedule_without_failing_startup(monkeypatch: pyte
 
 def test_service_skips_missing_template_without_failing_startup(monkeypatch: pytest.MonkeyPatch) -> None:
     scheduler = MagicMock()
+    warning = MagicMock()
     scheduler.get_jobs.return_value = []
     monkeypatch.setattr("open_climate_service.scheduler.service.AsyncIOScheduler", lambda **_: scheduler)
     monkeypatch.setattr("open_climate_service.scheduler.service.api_config.is_read_only", lambda: False)
+    monkeypatch.setattr("open_climate_service.scheduler.service.logger.warning", warning)
     service = SchedulerService(
         config_loader=lambda: SchedulerConfig(enabled=True, dataset_sync=[_schedule()]),
         template_loader=lambda _: None,
@@ -214,6 +260,7 @@ def test_service_skips_missing_template_without_failing_startup(monkeypatch: pyt
     scheduler.add_job.assert_not_called()
     assert service.status().schedules[0].last_outcome == CheckOutcome.ERROR
     assert "no registered template" in (service.status().schedules[0].last_message or "")
+    assert warning.call_args.args[-1] == 0
 
 
 def test_service_does_not_start_on_read_only_instance(monkeypatch: pytest.MonkeyPatch) -> None:

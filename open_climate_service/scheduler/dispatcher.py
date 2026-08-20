@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
+from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from open_climate_service import config as api_config
@@ -24,6 +25,7 @@ class CheckOutcome(StrEnum):
     """Outcome of one scheduled dataset check."""
 
     SUBMITTED = "submitted"
+    NOT_MATERIALIZED = "not_materialized"
     ALREADY_RUNNING = "already_running"
     READ_ONLY = "read_only"
     ERROR = "error"
@@ -49,6 +51,25 @@ def _has_active_writer_job(dataset_id: str) -> bool:
     )
 
 
+def _dataset_is_materialized(dataset_id: str) -> bool:
+    """Return True when the managed dataset has at least one local artifact.
+
+    Uses the same local lookup the sync job performs before planning, so the
+    guard can never disagree with the job's 404. Reads the local artifacts index
+    only (no network), so this is safe in the clock callback and deliberately
+    distinct from planning, which still runs inside the submitted native job.
+    """
+    from open_climate_service.ingestions.services import get_latest_artifact_for_dataset_or_404
+
+    try:
+        get_latest_artifact_for_dataset_or_404(dataset_id)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return False
+        raise
+    return True
+
+
 def enqueue_sync(schedule: DatasetSyncSchedule) -> CheckResult:
     """Enqueue one due sync without doing upstream work in the clock callback."""
     if api_config.is_read_only():
@@ -65,6 +86,14 @@ def enqueue_sync(schedule: DatasetSyncSchedule) -> CheckResult:
             dataset_id=schedule.dataset_id,
             outcome=CheckOutcome.ALREADY_RUNNING,
             message="An active sync job already exists for this dataset",
+        )
+
+    if not _dataset_is_materialized(schedule.dataset_id):
+        return CheckResult(
+            schedule_id=schedule.schedule_id,
+            dataset_id=schedule.dataset_id,
+            outcome=CheckOutcome.NOT_MATERIALIZED,
+            message="Dataset has not been ingested yet; skipping scheduled sync",
         )
 
     job = submit_sync_job(
