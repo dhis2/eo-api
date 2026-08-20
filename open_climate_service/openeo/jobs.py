@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import numbers
 import os
 import re
 import threading
@@ -492,6 +493,51 @@ def _strip_non_serializable_attrs(ds: Any) -> Any:
             except (TypeError, ValueError):
                 pass
         return out
+
+    ds = ds.copy()
+    ds.attrs = _safe(ds.attrs)
+    for name in list(ds.data_vars) + list(ds.coords):
+        if ds[name].attrs:
+            ds[name].attrs = _safe(ds[name].attrs)
+    return ds
+
+
+def _netcdf_safe_attrs(ds: Any) -> Any:
+    """Return a copy of ds keeping only attrs netCDF can encode.
+
+    JSON-serializability is Zarr's contract, not netCDF's, and the two disagree in both
+    directions — measured against ``to_netcdf`` rather than inferred:
+
+    | attr value            | JSON | netCDF |
+    |-----------------------|------|--------|
+    | ``{'t': '2025-01-01'}`` | ok   | fails  |
+    | ``[{'a': 1}]``          | ok   | fails  |
+    | ``None``                | ok   | fails  |
+    | ``True``                | ok   | fails  |
+    | ``np.array([1., 2.])``  | fails| ok     |
+    | ``np.float32(0.5)``     | fails| ok     |
+
+    So a JSON scrub both misses dict attrs whose contents happen to be JSON-safe and throws
+    away arrays and numpy scalars that netCDF writes happily. This keeps str, bytes, numbers
+    (excluding bool, which netCDF has no type for), numpy arrays and scalars, and sequences of
+    those.
+    """
+
+    def _encodable(value: Any) -> bool:
+        if isinstance(value, bool):
+            return False
+        if isinstance(value, (str, bytes, numbers.Number)):
+            return True
+        import numpy as np
+
+        if isinstance(value, np.ndarray):
+            return True
+        if isinstance(value, (list, tuple)):
+            return all(not isinstance(item, bool) and isinstance(item, (str, numbers.Number)) for item in value)
+        return False
+
+    def _safe(attrs: dict[str, Any]) -> dict[str, Any]:
+        return {key: value for key, value in attrs.items() if _encodable(value)}
 
     ds = ds.copy()
     ds.attrs = _safe(ds.attrs)
@@ -1224,16 +1270,38 @@ def _write_raster(ds: Any, results_dir: Any, fmt: str) -> str | None:
         except Exception:
             logger.debug("geometry→GeoDataFrame conversion failed", exc_info=True)
 
-    ext, _ = _RASTER_FORMATS.get(fmt, (".zarr", "application/vnd+zarr"))
+    if fmt not in _RASTER_FORMATS:
+        # Defaulting an unwritable format to Zarr wrote a `result.zarr` directory and called it
+        # the requested format. Synchronously that surfaced as a 500 — `IsADirectoryError` when
+        # the route read the "file" back — and in a batch job as a job that succeeded while
+        # advertising output it had not produced (CLIM-909).
+        if fmt in _VECTOR_FORMATS:
+            raise ValueError(
+                f"Format '{fmt}' describes vector features, but this result is a raster datacube "
+                "with no geometry dimension. Aggregate to geometries first (e.g. aggregate_spatial), "
+                "or request a raster format: " + ", ".join(sorted(_RASTER_FORMATS))
+            )
+        raise ValueError(f"Unsupported output format '{fmt}'. Supported: " + ", ".join(sorted(_RASTER_FORMATS)))
 
+    ext, _ = _RASTER_FORMATS[fmt]
+
+    # `reduce_dimension` (openeo-processes-dask) stamps dict-valued bookkeeping attrs such as
+    # `reduced_dimensions_min_values={'t': numpy.datetime64(...)}`, which neither writer can
+    # encode. The managed-publish path already scrubbed these; the file export paths did not,
+    # so a graph ending in reduce_dimension failed at write time (CLIM-825). Temporal extent is
+    # recovered from these attrs earlier, so dropping them here loses nothing the output needed.
+    #
+    # Each format is filtered against its own contract: JSON for Zarr, netCDF's attr types for
+    # netCDF. They disagree in both directions, so using one rule for both would still fail on
+    # a JSON-safe dict and would discard arrays netCDF can write.
     if ext == ".zarr":
         path = str(results_dir / "result.zarr")
-        ds.to_zarr(path, mode="w")
+        _strip_non_serializable_attrs(ds).to_zarr(path, mode="w")
         return path
 
     if ext == ".nc":
         path = str(results_dir / "result.nc")
-        ds.to_netcdf(path)
+        _netcdf_safe_attrs(ds).to_netcdf(path)
         return path
 
     if ext == ".tif":
