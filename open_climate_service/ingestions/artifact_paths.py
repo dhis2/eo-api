@@ -58,12 +58,19 @@ def to_absolute(raw: str) -> str:
 def _rebase_legacy(candidate: Path, root: Path) -> Path:
     """Re-root a legacy absolute path onto root, preferring the longest matching suffix.
 
-    Only a suffix that actually exists is accepted, so a store intentionally held
-    outside the data directory keeps its recorded path rather than being silently
-    redirected at a lookalike inside it. The suffix must keep at least two components,
-    so a match has to agree on the containing directory as well as the store name -
-    a bare basename would otherwise bind a record to any same-named store anywhere
-    under the root.
+    A store under the current data root always wins over the recorded location, even
+    when the recorded one still exists. Deferring to an existing recorded path would
+    break a *copied* data directory: the copy carries the original's absolute paths,
+    both roots are present, and the copy would silently read the original's stores and
+    never heal. Only ``data_dir/downloads`` is a trusted root for managed stores
+    (see ``sync_engine._artifact_storage_roots``), so a path elsewhere is not a case
+    worth preserving over one here.
+
+    Only a suffix that actually exists is accepted, and it must keep at least two
+    components, so a match has to agree on the containing directory as well as the
+    store name - a bare basename would otherwise bind a record to any same-named
+    store anywhere under the root. When nothing matches, the recorded path is kept
+    so errors name what was originally written.
     """
     resolved_root = root.resolve(strict=False)
     try:
@@ -71,8 +78,6 @@ def _rebase_legacy(candidate: Path, root: Path) -> Path:
     except ValueError:
         pass
     else:
-        return candidate
-    if candidate.exists():
         return candidate
     parts = candidate.parts
     for index in range(1, max(len(parts) - 1, 1)):

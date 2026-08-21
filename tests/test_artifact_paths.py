@@ -1,6 +1,7 @@
 """Portability of the artifact index across data directories (CLIM-916)."""
 
 import json
+import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -82,14 +83,63 @@ def test_to_absolute_rebases_a_legacy_container_path(monkeypatch: pytest.MonkeyP
     assert to_absolute("/app/data/downloads/chirps3.icechunk") == str(store)
 
 
-def test_to_absolute_keeps_an_existing_external_store(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """A store deliberately held outside the data dir is not redirected at a lookalike."""
+def test_to_absolute_prefers_a_store_under_the_current_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The current root wins even when the recorded location still exists.
+
+    Only data_dir/downloads is a trusted root for managed stores, so a path elsewhere
+    is not worth preserving over one here - and deferring to it breaks copied data
+    directories (see test_copied_data_dir_does_not_read_the_original).
+    """
     data_dir = _use_data_dir(monkeypatch, tmp_path / "data")
-    (data_dir / "downloads" / "chirps3.icechunk").mkdir(parents=True)
+    local = data_dir / "downloads" / "chirps3.icechunk"
+    local.mkdir(parents=True)
     external = tmp_path / "mnt" / "downloads" / "chirps3.icechunk"
     external.mkdir(parents=True)
 
+    assert to_absolute(str(external)) == str(local)
+
+
+def test_to_absolute_keeps_an_external_store_with_no_counterpart(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With nothing matching under the root, the recorded path is left alone."""
+    _use_data_dir(monkeypatch, tmp_path / "data")
+    external = tmp_path / "mnt" / "downloads" / "era5.icechunk"
+    external.mkdir(parents=True)
+
     assert to_absolute(str(external)) == str(external)
+
+
+def test_copied_data_dir_does_not_read_the_original(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A copied data dir resolves against its own root while the original still exists."""
+    origin = _use_data_dir(monkeypatch, tmp_path / "instance-a" / "data")
+    (origin / "downloads" / "chirps3.icechunk").mkdir(parents=True)
+    index_path = origin / "artifacts" / "records.json"
+    monkeypatch.setattr(services, "ARTIFACTS_DIR", index_path.parent)
+    monkeypatch.setattr(services, "ARTIFACTS_INDEX_PATH", index_path)
+    services._save_records([_artifact(str(origin / "downloads" / "chirps3.icechunk"))])
+    # legacy state: the index carries absolute paths rather than the portable form
+    index_path.write_text(
+        index_path.read_text(encoding="utf-8").replace(
+            '"downloads/chirps3.icechunk"', f'"{origin / "downloads" / "chirps3.icechunk"}"'
+        ),
+        encoding="utf-8",
+    )
+
+    copy = tmp_path / "instance-b" / "data"
+    copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(origin, copy)
+    assert (origin / "downloads" / "chirps3.icechunk").exists()  # the original is still there
+    _use_data_dir(monkeypatch, copy)
+    monkeypatch.setattr(services, "ARTIFACTS_DIR", copy / "artifacts")
+    monkeypatch.setattr(services, "ARTIFACTS_INDEX_PATH", copy / "artifacts" / "records.json")
+
+    loaded = services._load_records()
+    assert loaded[0].path == str(copy / "downloads" / "chirps3.icechunk")
+
+    services._save_records(loaded)
+    on_disk = json.loads((copy / "artifacts" / "records.json").read_text(encoding="utf-8"))
+    assert on_disk[0]["path"] == "downloads/chirps3.icechunk"  # and it heals
 
 
 def test_to_absolute_will_not_rebase_on_a_bare_basename(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
