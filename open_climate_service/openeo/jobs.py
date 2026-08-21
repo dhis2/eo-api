@@ -50,18 +50,28 @@ def _resolve_openeo_jobs_dir() -> Path:
 
 
 _JOBS_DIR = _resolve_openeo_jobs_dir()
-_JOBS_INDEX = _JOBS_DIR / "jobs.json"
+
+
+def _jobs_index() -> Path:
+    """Return the openEO jobs index path, derived from ``_JOBS_DIR`` at call time.
+
+    Derived at call time rather than import time so a test that monkeypatches ``_JOBS_DIR``
+    isolates the whole store. The previous module-level constant froze ``jobs.json`` at import;
+    ``_ensure_store`` then mkdir'd the patched ``tmp_path`` while ``write_text`` still targeted
+    the real XDG path, whose parent does not exist on a fresh runner (CLIM-849 CI failure).
+    """
+    return _JOBS_DIR / "jobs.json"
 
 
 def _ensure_store() -> None:
     _JOBS_DIR.mkdir(parents=True, exist_ok=True)
-    if not _JOBS_INDEX.exists():
-        _JOBS_INDEX.write_text("[]\n", encoding="utf-8")
+    if not _jobs_index().exists():
+        _jobs_index().write_text("[]\n", encoding="utf-8")
 
 
 def _load_raw_records() -> list[dict[str, object]]:
     _ensure_store()
-    with open(_JOBS_INDEX, encoding="utf-8") as fh:
+    with open(_jobs_index(), encoding="utf-8") as fh:
         portalocker.lock(fh, portalocker.LOCK_SH)
         try:
             payload = json.load(fh)
@@ -74,7 +84,7 @@ def _load_raw_records() -> list[dict[str, object]]:
 
 def _mutate_store(mutation: Callable[[list[dict[str, object]]], _T]) -> _T:
     _ensure_store()
-    with open(_JOBS_INDEX, "r+", encoding="utf-8") as fh:
+    with open(_jobs_index(), "r+", encoding="utf-8") as fh:
         portalocker.lock(fh, portalocker.LOCK_EX)
         try:
             payload = json.load(fh)
@@ -244,18 +254,17 @@ class OpenEOJobService:
         if not isinstance(body.process.get("process_graph"), dict):
             raise ValueError("process.process_graph must be an object")
         job_id = str(uuid5(NAMESPACE_URL, f"ocs:{source_event_id}:{trigger_id}"))
-        existing = store_get_job(job_id)
-        if existing is not None:
-            return existing, False
         now = utc_now()
         candidate = OpenEOJobRecord(
             id=job_id,
-            title=body.title,
+            title=body.title if body.title is not None else _derive_job_title(body.process),
             description=body.description,
             process=body.process,
             status=OpenEOJobStatus.CREATED,
             created=now,
             updated=now,
+            plan=body.plan,
+            budget=body.budget,
             links=[
                 {"rel": "self", "href": f"/jobs/{job_id}", "type": "application/json"},
                 {"rel": "results", "href": f"/jobs/{job_id}/results", "type": "application/json"},
