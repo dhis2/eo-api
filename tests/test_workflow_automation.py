@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from open_climate_service.automation.config import AutomationConfig, WorkflowTrigger
 from open_climate_service.automation.service import WorkflowAutomationService, _resolve_event_values
-from open_climate_service.jobs.models import JobEvent
+from open_climate_service.jobs.models import DATASET_UPDATED_EVENT_TYPE, JobEvent
 from open_climate_service.openeo.jobs import OpenEOJobService
 from open_climate_service.openeo.schemas import OpenEOJobCreate, OpenEOJobRecord, OpenEOJobStatus
 
@@ -21,7 +21,7 @@ def _event(dataset_id: str = "chirps") -> JobEvent:
     return JobEvent(
         event_id="native-job:0",
         time=datetime(2026, 8, 19, tzinfo=UTC),
-        type="dataset.updated",
+        type=DATASET_UPDATED_EVENT_TYPE,
         source=f"/datasets/{dataset_id}",
         data={
             "dataset_id": dataset_id,
@@ -322,3 +322,63 @@ def test_unresolvable_output_reference_is_not_checked(monkeypatch: pytest.Monkey
     )
 
     service.start()  # must not raise; a runtime $event reference is left to the store lock
+
+
+def test_missing_activation_skips_replay_for_default_triggers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing activation file must not turn into a full history replay."""
+    openeo = MagicMock()
+    openeo.create_triggered_job.return_value = (_openeo_record(), True)
+    service = WorkflowAutomationService(config_loader=_config, openeo_service=openeo)
+    monkeypatch.setattr(
+        "open_climate_service.automation.service.job_store.list_job_records", lambda: [_record_with(_event())]
+    )
+    monkeypatch.setattr("open_climate_service.automation.service._load_activations", lambda: {})
+    monkeypatch.setattr("open_climate_service.automation.service._save_activations", lambda _: None)
+
+    service.replay()
+
+    openeo.create_triggered_job.assert_not_called()
+
+
+def test_one_failing_trigger_does_not_skip_siblings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failure in one trigger's submission must not skip the remaining triggers."""
+    openeo = MagicMock()
+    openeo.create_triggered_job.side_effect = [RuntimeError("boom"), (_openeo_record(), True)]
+    triggers = [
+        WorkflowTrigger(id="a", on_update_of="chirps", workflow_id="wf", arguments={"x": 1}),
+        WorkflowTrigger(id="b", on_update_of="chirps", workflow_id="wf", arguments={"x": 1}),
+    ]
+    service = WorkflowAutomationService(
+        config_loader=lambda: AutomationConfig(workflow_triggers=triggers), openeo_service=openeo
+    )
+
+    service.consume([_event()])
+
+    assert openeo.create_triggered_job.call_count == 2
+    openeo.start_triggered_job.assert_called_once_with("triggered-job")
+
+
+def test_unknown_event_reference_is_rejected_at_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A typo like $event.datasetid must fail at startup, not submit as a literal."""
+    workflow = _workflow("dataset_id")
+    service = _service_for_output_check(
+        monkeypatch,
+        workflow,
+        WorkflowTrigger(id="t", on_update_of="chirps", workflow_id="wf", arguments={"dataset_id": "$event.datasetid"}),
+    )
+
+    with pytest.raises(ValueError, match="looks like an event reference"):
+        service.start()
+
+
+def test_start_validates_triggers_on_a_read_only_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read-only must skip running, not skip validating configuration."""
+    monkeypatch.setattr("open_climate_service.automation.service.api_config.is_read_only", lambda: True)
+    monkeypatch.setattr("open_climate_service.automation.service.workflows.get_workflow", lambda _: None)
+    trigger = WorkflowTrigger(id="t", on_update_of="chirps", workflow_id="missing", arguments={})
+    service = WorkflowAutomationService(
+        config_loader=lambda: AutomationConfig(workflow_triggers=[trigger]), openeo_service=MagicMock()
+    )
+
+    with pytest.raises(ValueError, match="references unknown workflow"):
+        service.start()

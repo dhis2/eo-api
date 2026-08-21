@@ -60,25 +60,37 @@ def _load_activations() -> dict[str, str]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        logger.warning("Could not read automation activation file %s; triggers will not replay history", path)
         return {}
-    return payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        logger.warning("Automation activation file %s is not a mapping; triggers will not replay history", path)
+        return {}
+    return {key: value for key, value in payload.items() if isinstance(key, str) and isinstance(value, str)}
 
 
 def _save_activations(activations: dict[str, str]) -> None:
-    """Persist trigger activation times."""
+    """Persist trigger activation times atomically so a crash cannot leave a truncated file."""
     path = _activation_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(activations, indent=2) + "\n", encoding="utf-8")
+    temp = path.with_suffix(".tmp")
+    temp.write_text(json.dumps(activations, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp, path)
 
 
 def _is_before_activation(event: JobEvent, activation_iso: str | None) -> bool:
-    """True when an event predates a trigger's activation boundary (backfill)."""
-    if activation_iso is None:
-        return False
+    """True when an event predates a trigger's activation boundary.
+
+    A missing or unreadable activation counts as *before* activation: ``start()`` always stamps
+    one, so its absence is an anomaly, and skipping is the safe reading of the
+    ``replay_existing: false`` guarantee — replaying all history is the failure mode this guard
+    exists to prevent.
+    """
+    if not isinstance(activation_iso, str) or not activation_iso:
+        return True
     try:
         activation = datetime.fromisoformat(activation_iso)
     except ValueError:
-        return False
+        return True
     event_time = event.time
     if event_time.tzinfo is None:
         event_time = event_time.replace(tzinfo=timezone.utc)
@@ -129,6 +141,33 @@ def _validate_output_ownership(config: AutomationConfig) -> None:
         )
 
 
+def _iter_strings(value: Any) -> Any:
+    """Yield every string in a nested mapping/list, for event-reference validation."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_strings(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_strings(item)
+
+
+def _validate_event_references(config: AutomationConfig) -> None:
+    """Refuse arguments that look like event references but are not the known tokens.
+
+    ``_resolve_event_values`` substitutes only exact whole-string matches, so a typo such as
+    ``$event.datasetid`` would otherwise be submitted as a literal and fail only at run time.
+    """
+    for trigger in config.workflow_triggers:
+        for value in _iter_strings(trigger.arguments):
+            if "$event" in value and value not in _EVENT_VALUES:
+                raise ValueError(
+                    f"Workflow trigger {trigger.id!r} argument {value!r} looks like an event reference "
+                    f"but is not one of {sorted(_EVENT_VALUES)}"
+                )
+
+
 class WorkflowAutomationService:
     """Dispatch configured workflows once for each matching durable event."""
 
@@ -143,14 +182,21 @@ class WorkflowAutomationService:
         self._config: AutomationConfig | None = None
 
     def start(self) -> None:
-        """Load configuration, validate workflow targets, and record activation boundaries."""
+        """Load configuration, validate triggers, and record activation boundaries.
+
+        Validation runs even on a read-only instance so a configuration error surfaces at startup
+        rather than only once the instance is made writable.
+        """
         self._config = self._config_loader()
-        if not self._config.workflow_triggers or api_config.is_read_only():
+        if not self._config.workflow_triggers:
             return
         for trigger in self._config.workflow_triggers:
             if workflows.get_workflow(trigger.workflow_id) is None:
                 raise ValueError(f"Workflow trigger {trigger.id!r} references unknown workflow {trigger.workflow_id!r}")
         _validate_output_ownership(self._config)
+        _validate_event_references(self._config)
+        if api_config.is_read_only():
+            return
         activations = _load_activations()
         now = utc_now().isoformat()
         changed = False
@@ -177,7 +223,7 @@ class WorkflowAutomationService:
                         continue
                     if not trigger.replay_existing and _is_before_activation(event, activations.get(trigger.id)):
                         continue
-                    self._submit(trigger, event, service)
+                    self._submit_safely(trigger, event, service)
 
     def consume(self, events: list[JobEvent]) -> None:
         """Submit workflows for newly persisted successful-job events."""
@@ -191,7 +237,19 @@ class WorkflowAutomationService:
             for trigger in config.workflow_triggers:
                 if trigger.on_update_of != event.data.get("dataset_id"):
                     continue
-                self._submit(trigger, event, service)
+                self._submit_safely(trigger, event, service)
+
+    def _submit_safely(self, trigger: WorkflowTrigger, event: JobEvent, service: OpenEOJobService) -> None:
+        """Submit one trigger/event pair without letting a failure skip its siblings."""
+        try:
+            self._submit(trigger, event, service)
+        except Exception:
+            logger.exception(
+                "Workflow trigger %s failed for event %s (dataset %s)",
+                trigger.id,
+                event.event_id,
+                event.data.get("dataset_id"),
+            )
 
     def _submit(self, trigger: WorkflowTrigger, event: JobEvent, service: OpenEOJobService) -> None:
         """Create and start the deterministic job for one trigger/event pair."""
