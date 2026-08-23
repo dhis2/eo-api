@@ -82,7 +82,7 @@ class ERA5LandCDSHourlyPlugin(BaseDatasetPlugin):
             monthly_ds = self._cached_ds
         assert monthly_ds is not None
         timestamp = np.datetime64(dt.replace(tzinfo=None), "h").astype("datetime64[ns]")
-        return _drop_auxiliary_variables(monthly_ds.sel(t=timestamp), self.variable)
+        return monthly_ds.sel(t=timestamp)
 
     def _fetch_month(self, year: int, month: int, bbox: tuple[float, float, float, float]) -> xr.Dataset:
         xmin, ymin, xmax, ymax = bbox
@@ -111,7 +111,9 @@ class ERA5LandCDSHourlyPlugin(BaseDatasetPlugin):
         ds = ds.rename({"longitude": "x", "latitude": "y", time_dim: "t"})
         if self.variable == "t2m":
             ds = kelvin_to_celsius(ds, {"variable": self.variable})
-        return ds
+        # Cleaned on the cached monthly cube, while `t` is still a dimension. Doing it after
+        # `fetch_period`'s scalar `sel(t=...)` would take the demoted `t` coordinate with it.
+        return _drop_auxiliary_variables(ds, self.variable)
 
 
 class ERA5LandPrecipitationPlugin(ERA5LandCDSHourlyPlugin):

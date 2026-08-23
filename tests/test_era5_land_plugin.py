@@ -528,3 +528,33 @@ def test_precip_daily_edh_branch_delegates_so_the_parent_cleaning_applies(
 
     assert "number" not in ds.variables
     assert list(ds.data_vars) == ["tp"]
+
+
+def test_hourly_fetch_keeps_its_time_coordinate_after_cleaning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hourly plugin selects a scalar timestamp, which demotes `t` to a coordinate.
+
+    Cleaning after that selection would drop `t` along with the auxiliary coordinates, since
+    it is no longer a dimension — losing the period's own timestamp. The cleaning therefore
+    runs on the cached monthly cube instead.
+    """
+    plugin = ERA5LandCDSHourlyPlugin(variable="t2m")
+
+    def fake_fetch_month(self: object, year: int, month: int, bbox: tuple[float, float, float, float]) -> xr.Dataset:
+        from open_climate_service.plugins.datasets.era5_land import _drop_auxiliary_variables
+
+        ds = xr.Dataset(
+            {"t2m": (("t", "y", "x"), np.array([[[20.0]]], dtype=np.float32))},
+            coords={
+                "t": np.array(["2026-01-01T00"], dtype="datetime64[h]").astype("datetime64[ns]"),
+                "y": [9.0],
+                "x": [30.0],
+                "number": 0,
+            },
+        )
+        return _drop_auxiliary_variables(ds, "t2m")
+
+    monkeypatch.setattr(ERA5LandCDSHourlyPlugin, "_fetch_month", fake_fetch_month)
+    ds = plugin.fetch_period("2026-01-01T00", [-1.0, 8.0, 31.0, 10.0])
+
+    assert "t" in ds.coords
+    assert "number" not in ds.variables
