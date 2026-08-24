@@ -26,6 +26,7 @@ from open_climate_service.data_accessor.services.accessor import get_data_covera
 from open_climate_service.data_manager.services import downloader
 from open_climate_service.data_registry.services import datasets as registry_datasets
 from open_climate_service.extents.services import get_extent
+from open_climate_service.ingestions.artifact_paths import decode_record_paths, encode_record_paths
 from open_climate_service.ingestions.schemas import (
     ArtifactCoverage,
     ArtifactFormat,
@@ -112,12 +113,7 @@ class _IcechunkSession:
 
 
 def _resolve_artifacts_dir() -> Path:
-
-    data_dir = api_config.get_data_dir()
-    if data_dir is not None:
-        return data_dir / "artifacts"
-    xdg_data = Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    return xdg_data / "climate-service" / "artifacts"
+    return api_config.get_data_root() / "artifacts"
 
 
 ARTIFACTS_DIR = _resolve_artifacts_dir()
@@ -967,16 +963,26 @@ def _get_icechunk_store_path_or_404(
     raise HTTPException(status_code=404, detail=f"Zarr path '{relative_path}' not found")
 
 
+def _decode_record(item: dict[str, object]) -> ArtifactRecord:
+    """Rebuild a record from its stored form, applying schema and path migrations."""
+    return ArtifactRecord.model_validate(decode_record_paths(_upgrade_legacy_record(item)))
+
+
+def _encode_records(records: list[ArtifactRecord]) -> str:
+    """Serialize records for disk, with store paths in their data-root-relative form."""
+    payload = [encode_record_paths(record.model_dump(mode="json")) for record in records]
+    return f"{json.dumps(payload, indent=2)}\n"
+
+
 def _load_records() -> list[ArtifactRecord]:
     ensure_store()
     raw = json.loads(ARTIFACTS_INDEX_PATH.read_text(encoding="utf-8"))
-    return [ArtifactRecord.model_validate(_upgrade_legacy_record(item)) for item in raw]
+    return [_decode_record(item) for item in raw]
 
 
 def _save_records(records: list[ArtifactRecord]) -> None:
     ensure_store()
-    payload = [record.model_dump(mode="json") for record in records]
-    ARTIFACTS_INDEX_PATH.write_text(f"{json.dumps(payload, indent=2)}\n", encoding="utf-8")
+    ARTIFACTS_INDEX_PATH.write_text(_encode_records(records), encoding="utf-8")
 
 
 def _store_artifact_record(
@@ -1046,12 +1052,11 @@ def _mutate_records(mutation: Callable[[list[ArtifactRecord]], ArtifactRecord]) 
         portalocker.lock(handle, portalocker.LOCK_EX)
         handle.seek(0)
         raw = handle.read()
-        records = [ArtifactRecord.model_validate(_upgrade_legacy_record(item)) for item in json.loads(raw or "[]")]
+        records = [_decode_record(item) for item in json.loads(raw or "[]")]
         result = mutation(records)
-        payload = [record.model_dump(mode="json") for record in records]
         handle.seek(0)
         handle.truncate()
-        handle.write(f"{json.dumps(payload, indent=2)}\n")
+        handle.write(_encode_records(records))
         handle.flush()
         os.fsync(handle.fileno())
         portalocker.unlock(handle)
