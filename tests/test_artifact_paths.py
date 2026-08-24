@@ -1,6 +1,7 @@
 """Portability of the artifact index across data directories (CLIM-916)."""
 
 import json
+import logging
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -140,6 +141,23 @@ def test_copied_data_dir_does_not_read_the_original(monkeypatch: pytest.MonkeyPa
     services._save_records(loaded)
     on_disk = json.loads((copy / "artifacts" / "records.json").read_text(encoding="utf-8"))
     assert on_disk[0]["path"] == "downloads/chirps3.icechunk"  # and it heals
+
+
+def test_shadowing_an_existing_recorded_store_is_logged(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Preferring the current root over a store that still exists is not silent."""
+    data_dir = _use_data_dir(monkeypatch, tmp_path / "data")
+    (data_dir / "downloads" / "chirps3.icechunk").mkdir(parents=True)
+    external = tmp_path / "mnt" / "downloads" / "chirps3.icechunk"
+    external.mkdir(parents=True)
+    # startup.py detaches the package logger from the root handler caplog installs
+    monkeypatch.setattr(logging.getLogger("open_climate_service"), "propagate", True)
+
+    with caplog.at_level("WARNING"):
+        to_absolute(str(external))
+
+    assert str(external) in caplog.text
 
 
 def test_to_absolute_ignores_a_lookalike_outside_downloads(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

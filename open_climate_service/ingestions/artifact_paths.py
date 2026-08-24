@@ -11,14 +11,16 @@ when loaded, so everything downstream of :func:`decode_record_paths` keeps seein
 absolute paths it always did.
 """
 
+import logging
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from open_climate_service import config as api_config
 
+logger = logging.getLogger(__name__)
+
 _PATH_FIELD = "path"
 _PATH_LIST_FIELD = "asset_paths"
-_STORE_DIR = "downloads"
 
 
 def to_portable(raw: str) -> str:
@@ -80,10 +82,17 @@ def _rebase_legacy(candidate: Path, root: Path) -> Path:
         return candidate
     parts = candidate.parts
     for index in range(1, len(parts) - 1):
-        if parts[index] != _STORE_DIR:
+        if parts[index] != api_config.DOWNLOAD_SUBDIR:
             continue
         rebased = resolved_root.joinpath(*parts[index:])
         if rebased.exists():
+            if candidate.exists():
+                logger.warning(
+                    "Artifact store recorded at %s also exists at %s under the current data root; using %s",
+                    candidate,
+                    rebased,
+                    rebased,
+                )
             return rebased
     return candidate
 

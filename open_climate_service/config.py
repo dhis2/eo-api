@@ -62,6 +62,7 @@ def _load_config() -> dict[str, Any]:
 DEFAULT_CRS = "EPSG:4326"
 DEFAULT_NAME = "Open Climate Service"
 DEFAULT_ID = "open-climate-service"  # operators should always set id: in climate-service.yaml
+DOWNLOAD_SUBDIR = "downloads"
 
 
 def get_id() -> str:
@@ -157,6 +158,11 @@ def get_data_root() -> Path:
         return data_dir
     xdg_data = Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local" / "share"))
     return xdg_data / "climate-service"
+
+
+def get_download_root() -> Path:
+    """Return the directory holding managed artifact stores."""
+    return get_data_root() / DOWNLOAD_SUBDIR
 
 
 def get_utc_offset_hours() -> float:

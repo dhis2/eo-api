@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_download_dir() -> Path:
-    return api_config.get_data_root() / "downloads"
+    return api_config.get_download_root()
 
 
 DOWNLOAD_DIR = _resolve_download_dir()

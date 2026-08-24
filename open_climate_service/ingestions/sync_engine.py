@@ -450,7 +450,7 @@ def _is_plugin_backed(source_dataset: dict[str, Any]) -> bool:
 
 def _artifact_storage_roots() -> tuple[Path, ...]:
     """Return the trusted local roots that may contain managed artifact stores."""
-    return ((api_config.get_data_root() / "downloads").resolve(),)
+    return (api_config.get_download_root().resolve(),)
 
 
 def _resolve_local_artifact_path(raw_path: str | None) -> tuple[Path | None, str | None]:
