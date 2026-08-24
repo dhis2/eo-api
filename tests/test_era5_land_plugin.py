@@ -12,7 +12,9 @@ from open_climate_service.plugins.datasets.era5_land import (
     ERA5LandEDHDailyPlugin,
     ERA5LandMonthlyPlugin,
     ERA5LandMonthlyPrecipitationPlugin,
+    ERA5LandPrecipDailyPlugin,
     ERA5LandPrecipitationPlugin,
+    _collapse_expver,
     _daily_availability_cutoff,
     _edh_open_zarr,
     _era5land_monthly_product_type,
@@ -417,3 +419,142 @@ def test_auxiliary_cleanup_honours_a_declared_grid_mapping() -> None:
     out = _drop_auxiliary_variables(ds, "t2m")
 
     assert "my_crs" in out.variables
+
+
+def _expver_nc(variable: str) -> xr.Dataset:
+    """A CDS download straddling the ERA5/ERA5T boundary.
+
+    Each ``expver`` slice is NaN where the other supplies data, which is how CDS returns a
+    request spanning the boundary: 1 is final, 5 is preliminary ERA5T.
+    """
+    final = np.array([[[1.0]], [[np.nan]]], dtype=np.float32)
+    preliminary = np.array([[[np.nan]], [[5.0]]], dtype=np.float32)
+    return xr.Dataset(
+        {variable: (("valid_time", "expver", "latitude", "longitude"), np.stack([final, preliminary], axis=1))},
+        coords={
+            "valid_time": np.array(["2026-05-01", "2026-06-01"], dtype="datetime64[ns]"),
+            "expver": [1, 5],
+            "latitude": [9.0],
+            "longitude": [30.0],
+        },
+    )
+
+
+def test_collapse_expver_prefers_final_and_fills_from_preliminary() -> None:
+    """Final ERA5 wins where it has data; ERA5T fills the recent months it does not cover."""
+    collapsed = _collapse_expver(_expver_nc("t2m"))
+
+    assert "expver" not in collapsed.dims
+    assert "expver" not in collapsed.coords
+    np.testing.assert_allclose(collapsed["t2m"].values.ravel(), [1.0, 5.0])
+    assert collapsed["t2m"].dtype == np.float32
+
+
+def test_collapse_expver_passes_through_a_cube_without_expver() -> None:
+    plain = _expver_nc("t2m").sel(expver=1, drop=True)
+
+    assert _collapse_expver(plain).identical(plain)
+
+
+def test_collapse_expver_drops_a_scalar_expver_coordinate() -> None:
+    """A single-version download carries expver as a coordinate, not a dimension."""
+    scalar = _expver_nc("t2m").sel(expver=5)
+    assert "expver" in scalar.coords
+
+    assert "expver" not in _collapse_expver(scalar).coords
+
+
+def test_monthly_fetch_collapses_expver_so_the_cube_stays_three_dimensional(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A synced month straddling the ERA5T boundary must not double the array (CLIM-923).
+
+    Left in place, the extra dimension reached the store and broke aggregation with a mask
+    half the size of the data. ``_drop_auxiliary_variables`` does not catch it: that keeps
+    every dimension by design.
+    """
+    plugin = ERA5LandMonthlyPlugin(variable="t2m")
+    raw_ds = _expver_nc("t2m")
+    raw_ds["t2m"] = raw_ds["t2m"] + 273.15  # kelvin, as CDS delivers it
+
+    monkeypatch.setattr("open_climate_service.plugins.datasets.era5_land._CdsClient", lambda: MagicMock())
+    monkeypatch.setattr("open_climate_service.plugins.datasets.era5_land.xr.open_dataset", lambda *a, **k: raw_ds)
+    ds = plugin.fetch_period("2026-06", [-1.0, 8.0, 31.0, 10.0])
+
+    assert set(ds.dims) == {"t", "y", "x"}
+    assert list(ds.data_vars) == ["t2m"]
+    np.testing.assert_allclose(ds["t2m"].values.ravel(), [1.0, 5.0], atol=1e-3)
+
+
+def test_monthly_fetch_drops_auxiliary_coordinates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``number`` is a scalar ensemble coordinate that otherwise persists as a phantom band."""
+    plugin = ERA5LandMonthlyPlugin(variable="t2m")
+    raw_ds = xr.Dataset(
+        {"t2m": (("valid_time", "latitude", "longitude"), np.array([[[300.0]]], dtype=np.float32))},
+        coords={
+            "valid_time": np.array(["2026-06-01"], dtype="datetime64[ns]"),
+            "latitude": [9.0],
+            "longitude": [30.0],
+            "number": 0,
+        },
+    )
+
+    monkeypatch.setattr("open_climate_service.plugins.datasets.era5_land._CdsClient", lambda: MagicMock())
+    monkeypatch.setattr("open_climate_service.plugins.datasets.era5_land.xr.open_dataset", lambda *a, **k: raw_ds)
+    ds = plugin.fetch_period("2026-06", [-1.0, 8.0, 31.0, 10.0])
+
+    assert "number" not in ds.coords
+    assert "number" not in ds.variables
+
+
+def test_precip_daily_edh_branch_delegates_so_the_parent_cleaning_applies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The override used to skip its parent's cleaning entirely (CLIM-923)."""
+    plugin = ERA5LandPrecipDailyPlugin()
+    dirty = xr.Dataset(
+        {"tp": (("t", "y", "x"), np.array([[[2.0]]], dtype=np.float32))},
+        coords={
+            "t": np.array(["2026-06-01"], dtype="datetime64[ns]"),
+            "y": [9.0],
+            "x": [30.0],
+            "number": 0,
+        },
+    )
+
+    monkeypatch.setattr(type(plugin), "_latest_available", lambda self: "2026-12-31")
+    monkeypatch.setattr(type(plugin), "_fetch_daily_sync", lambda self, period_id, bbox: dirty)
+    ds = plugin.fetch_period("2026-06-01", [-1.0, 8.0, 31.0, 10.0])
+
+    assert "number" not in ds.variables
+    assert list(ds.data_vars) == ["tp"]
+
+
+def test_hourly_fetch_keeps_its_time_coordinate_after_cleaning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The hourly plugin selects a scalar timestamp, which demotes `t` to a coordinate.
+
+    Cleaning after that selection would drop `t` along with the auxiliary coordinates, since
+    it is no longer a dimension — losing the period's own timestamp. The cleaning therefore
+    runs on the cached monthly cube instead.
+    """
+    plugin = ERA5LandCDSHourlyPlugin(variable="t2m")
+
+    def fake_fetch_month(self: object, year: int, month: int, bbox: tuple[float, float, float, float]) -> xr.Dataset:
+        from open_climate_service.plugins.datasets.era5_land import _drop_auxiliary_variables
+
+        ds = xr.Dataset(
+            {"t2m": (("t", "y", "x"), np.array([[[20.0]]], dtype=np.float32))},
+            coords={
+                "t": np.array(["2026-01-01T00"], dtype="datetime64[h]").astype("datetime64[ns]"),
+                "y": [9.0],
+                "x": [30.0],
+                "number": 0,
+            },
+        )
+        return _drop_auxiliary_variables(ds, "t2m")
+
+    monkeypatch.setattr(ERA5LandCDSHourlyPlugin, "_fetch_month", fake_fetch_month)
+    ds = plugin.fetch_period("2026-01-01T00", [-1.0, 8.0, 31.0, 10.0])
+
+    assert "t" in ds.coords
+    assert "number" not in ds.variables

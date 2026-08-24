@@ -106,12 +106,14 @@ class ERA5LandCDSHourlyPlugin(BaseDatasetPlugin):
             remote = _CdsClient().submit("reanalysis-era5-land", params)
             remote.download(str(target))
             ds = xr.open_dataset(target, engine="netcdf4").load()
-        ds = ds[[self.variable]]
+        ds = _collapse_expver(ds[[self.variable]])
         time_dim = "valid_time" if "valid_time" in ds.dims else "time"
         ds = ds.rename({"longitude": "x", "latitude": "y", time_dim: "t"})
         if self.variable == "t2m":
             ds = kelvin_to_celsius(ds, {"variable": self.variable})
-        return ds
+        # Cleaned on the cached monthly cube, while `t` is still a dimension. Doing it after
+        # `fetch_period`'s scalar `sel(t=...)` would take the demoted `t` coordinate with it.
+        return _drop_auxiliary_variables(ds, self.variable)
 
 
 class ERA5LandPrecipitationPlugin(ERA5LandCDSHourlyPlugin):
@@ -162,7 +164,7 @@ class ERA5LandDailyTemperaturePlugin(BaseDatasetPlugin):
 
         assert monthly_ds is not None
         timestamp = np.datetime64(period_id, "D").astype("datetime64[ns]")
-        return monthly_ds.sel(t=slice(timestamp, timestamp))
+        return _drop_auxiliary_variables(monthly_ds.sel(t=slice(timestamp, timestamp)), "t2m")
 
     def _fetch_month(self, year: int, month: int, bbox: tuple[float, float, float, float]) -> xr.Dataset:
         xmin, ymin, xmax, ymax = bbox
@@ -188,7 +190,7 @@ class ERA5LandDailyTemperaturePlugin(BaseDatasetPlugin):
             remote.download(str(target))
             ds = xr.open_dataset(target, engine="netcdf4").load()
 
-        ds = ds[["t2m"]]
+        ds = _collapse_expver(ds[["t2m"]])
         time_dim = "valid_time" if "valid_time" in ds.dims else "time"
         ds = ds.rename({"longitude": "x", "latitude": "y", time_dim: "t"})
         return kelvin_to_celsius(ds, {"variable": "t2m"})
@@ -237,14 +239,14 @@ class ERA5LandMonthlyPlugin(BaseDatasetPlugin):
             remote.download(str(target))
             ds = xr.open_dataset(target, engine="netcdf4").load()
 
-        ds = ds[[self.variable]]
+        ds = _collapse_expver(ds[[self.variable]])
         time_dim = "valid_time" if "valid_time" in ds.dims else "time"
         rename_map = {"longitude": "x", "latitude": "y", time_dim: "t"}
         ds = ds.rename({k: v for k, v in rename_map.items() if k in ds})
 
         if self.variable == "t2m":
             ds = kelvin_to_celsius(ds, {"variable": self.variable})
-        return ds
+        return _drop_auxiliary_variables(ds, self.variable)
 
 
 class ERA5LandMonthlyPrecipitationPlugin(ERA5LandMonthlyPlugin):
@@ -448,6 +450,38 @@ _GRID_MAPPING_NAMES = ("spatial_ref", "crs")
 """Scalar coordinates that carry the CRS rather than data, so they must survive the cleanup."""
 
 
+_EXPVER_DIM = "expver"
+
+
+def _collapse_expver(ds: xr.Dataset) -> xr.Dataset:
+    """Merge ERA5's ``expver`` dimension into one series, preferring final over preliminary.
+
+    A CDS request spanning the boundary between final ERA5 (``expver=1``) and preliminary
+    ERA5T (``expver=5``) returns both along an ``expver`` dimension, each slice NaN wherever
+    the other supplies data. Left in place it doubles the array along a dimension the rest of
+    OCS does not model: aggregation then failed with ``boolean index did not match indexed
+    array`` on a mask half the size of the data (CLIM-923).
+
+    ``_drop_auxiliary_variables`` does not remove it — that keeps every dimension by design and
+    only strips scalar coordinates that became phantom variables. Both guards are needed.
+
+    Collapsed at the download boundary rather than on the way out, because a reduction applied
+    first corrupts the result: ``sum("t")`` over the all-NaN slice yields 0.0 rather than
+    propagating the gap.
+
+    Ascending ``expver`` order gives final data precedence without hard-coding 5 as the
+    preliminary value.
+    """
+    if _EXPVER_DIM not in ds.dims:
+        # Also covers the scalar case, where it is a coordinate rather than a dimension.
+        return ds.drop_vars(_EXPVER_DIM, errors="ignore")
+    versions = sorted(ds[_EXPVER_DIM].values.tolist())
+    merged = ds.sel({_EXPVER_DIM: versions[0]}, drop=True)
+    for version in versions[1:]:
+        merged = merged.combine_first(ds.sel({_EXPVER_DIM: version}, drop=True))
+    return merged.astype({name: ds[name].dtype for name in ds.data_vars})
+
+
 def _drop_auxiliary_variables(ds: xr.Dataset, variable: str) -> xr.Dataset:
     """Keep ``variable``, the dimension coordinates and the CRS, dropping everything else.
 
@@ -630,8 +664,10 @@ class ERA5LandPrecipDailyPlugin(ERA5LandEDHPrecipitationDailyPlugin):
     def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
         edh_latest = self._latest_available()
         if period_id <= edh_latest[:10]:
-            return self._fetch_daily_sync(period_id, bbox)
-        return self._fetch_cds_daily_sync(period_id, bbox)
+            # Delegate rather than repeat the parent's cleaning, so a future override of this
+            # method cannot silently shed it the way this one did (CLIM-923).
+            return super().fetch_period(period_id, bbox)
+        return _drop_auxiliary_variables(self._fetch_cds_daily_sync(period_id, bbox), self.variable)
 
     def _fetch_cds_daily_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
         from open_climate_service import config as api_config
@@ -699,8 +735,10 @@ class ERA5LandTempDailyFromHourlyPlugin(_ERA5LandEDHBase):
     def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
         edh_latest = self._latest_available()
         if period_id <= edh_latest[:10]:
-            return self._fetch_daily_sync(period_id, bbox)
-        return self._fetch_cds_daily_sync(period_id, bbox)
+            cube = self._fetch_daily_sync(period_id, bbox)
+        else:
+            cube = self._fetch_cds_daily_sync(period_id, bbox)
+        return _drop_auxiliary_variables(cube, self.variable)
 
     def _fetch_daily_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
         from open_climate_service import config as api_config
@@ -833,7 +871,8 @@ class ERA5LandNormalsPlugin(BaseDatasetPlugin):
 
     def _fetch_sync(self, period_id: str, bbox: list[float]) -> xr.Dataset:
         clim = self._ensure_climatology(bbox)
-        return clim.sel({_NORMALS_DAYOFYEAR_DIM: [int(period_id)]})
+        selected = clim.sel({_NORMALS_DAYOFYEAR_DIM: [int(period_id)]})
+        return _drop_auxiliary_variables(selected, self.variable)
 
     def _ensure_climatology(self, bbox: list[float]) -> xr.Dataset:
         with self._lock:
