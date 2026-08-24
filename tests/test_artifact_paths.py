@@ -142,6 +142,27 @@ def test_copied_data_dir_does_not_read_the_original(monkeypatch: pytest.MonkeyPa
     assert on_disk[0]["path"] == "downloads/chirps3.icechunk"  # and it heals
 
 
+def test_to_absolute_ignores_a_lookalike_outside_downloads(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A deeper suffix match loses to the managed store at data_dir/downloads."""
+    data_dir = _use_data_dir(monkeypatch, tmp_path / "data")
+    managed = data_dir / "downloads" / "chirps3.icechunk"
+    managed.mkdir(parents=True)
+    lookalike = data_dir / "data" / "downloads" / "chirps3.icechunk"
+    lookalike.mkdir(parents=True)
+
+    assert to_absolute("/old/data/downloads/chirps3.icechunk") == str(managed)
+    assert to_portable(to_absolute("/old/data/downloads/chirps3.icechunk")) == "downloads/chirps3.icechunk"
+
+
+def test_to_absolute_will_not_rebase_onto_a_lookalike_alone(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """With only a match outside downloads, the recorded path is kept rather than bound to it."""
+    data_dir = _use_data_dir(monkeypatch, tmp_path / "data")
+    (data_dir / "data" / "downloads" / "chirps3.icechunk").mkdir(parents=True)
+    legacy = "/old/data/downloads/chirps3.icechunk"
+
+    assert to_absolute(legacy) == legacy
+
+
 def test_to_absolute_will_not_rebase_on_a_bare_basename(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """A match must agree on the containing directory, not just the store name."""
     data_dir = _use_data_dir(monkeypatch, tmp_path / "data")
