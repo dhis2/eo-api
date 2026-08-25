@@ -296,6 +296,33 @@ def test_plan_sync_for_plugin_backed_icechunk_uses_committed_store_state(
     assert result.current_end == "2026-01-31"
 
 
+def test_plan_sync_uses_cumulative_coverage_start_not_latest_request_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    latest = _artifact(
+        artifact_id="a1",
+        managed_dataset_id="chirps3_precipitation_daily_sle",
+        end="2026-01-03",
+    )
+    latest.request_scope.start = "2026-01-03"
+    latest.coverage.temporal.start = "2026-01-01"
+    monkeypatch.setattr(sync_engine, "_query_available_periods", lambda *args, **kwargs: ["2026-01-04"])
+
+    result = sync_engine.plan_sync(
+        source_dataset={
+            "id": "chirps3_precipitation_daily",
+            "period_type": "daily",
+            "sync": {"kind": "temporal", "execution": "append"},
+            "ingestion": {"plugin": "example.Plugin"},
+        },
+        latest_artifact=latest,
+        requested_end="2026-01-04",
+    )
+
+    assert result.action == SyncAction.APPEND
+    assert result.current_start == "2026-01-01"
+
+
 def test_plan_sync_marks_static_non_temporal_dataset_not_syncable() -> None:
     # A static, non-temporal dataset (e.g. a day-of-year climatology) has no temporal
     # end. Planning must return NOT_SYNCABLE, not raise/400 by trying to compute one.
@@ -1348,6 +1375,11 @@ def test_an_interrupted_swap_is_healed_before_ingest_reads_the_store(
 
     seen: dict[str, object] = {}
 
+    class FakePlugin:
+        async def periods(self, start: str, end: str) -> list[str]:
+            assert (start, end) == ("2026-01-01", "2026-01-03")
+            return ["2026-01-01", "2026-01-02", "2026-01-03"]
+
     def fake_ingest(**kwargs: object) -> object:
         store_path = kwargs["store_path"]
         assert isinstance(store_path, Path)
@@ -1364,7 +1396,7 @@ def test_an_interrupted_swap_is_healed_before_ingest_reads_the_store(
 
     monkeypatch.setattr(downloader, "get_icechunk_path", lambda _dataset: target)
     monkeypatch.setattr(ingestion_services, "run_streaming_ingest_sync", fake_ingest)
-    monkeypatch.setattr(ingestion_services, "_load_streaming_plugin", lambda *a, **k: object())
+    monkeypatch.setattr(ingestion_services, "_load_streaming_plugin", lambda *a, **k: FakePlugin())
     monkeypatch.setattr(ingestion_services, "_maybe_build_pyramid", lambda *a, **k: None)
     monkeypatch.setattr(
         ingestion_services,

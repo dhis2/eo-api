@@ -22,6 +22,39 @@ from open_climate_service.plugins.datasets.chirps3 import CHIRPS3DailyPlugin
 from open_climate_service.publications.services import managed_dataset_id_for
 
 
+class _PeriodsPlugin:
+    def __init__(self, periods: list[str]) -> None:
+        self.available_periods = periods
+        self.calls: list[tuple[str, str]] = []
+
+    async def periods(self, start: str, end: str) -> list[str]:
+        self.calls.append((start, end))
+        return list(self.available_periods)
+
+    def fetch_period(self, period_id: str, bbox: list[float], **params: object) -> xr.Dataset:
+        raise AssertionError("planner tests must not fetch data")
+
+
+class _TransactionRepo:
+    def __init__(self) -> None:
+        self.created: list[tuple[str, str]] = []
+        self.reset: list[tuple[str, str]] = []
+        self.deleted: list[str] = []
+
+    def lookup_branch(self, branch: str) -> str:
+        assert branch == "main"
+        return "before-ingest"
+
+    def create_branch(self, branch: str, snapshot: str) -> None:
+        self.created.append((branch, snapshot))
+
+    def reset_branch(self, branch: str, snapshot: str) -> None:
+        self.reset.append((branch, snapshot))
+
+    def delete_branch(self, branch: str) -> None:
+        self.deleted.append(branch)
+
+
 @pytest.fixture(autouse=True)
 def materialized_artifacts(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(services, "_artifact_storage_exists", lambda _: True)
@@ -285,6 +318,25 @@ def test_mutate_records_persists_mutation(monkeypatch: pytest.MonkeyPatch, tmp_p
     assert [record.artifact_id for record in records] == ["mutated"]
 
 
+def test_store_artifact_records_new_coverage_for_repeated_open_ended_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    artifacts_dir = tmp_path / "artifacts"
+    monkeypatch.setattr(services, "ARTIFACTS_DIR", artifacts_dir)
+    monkeypatch.setattr(services, "ARTIFACTS_INDEX_PATH", artifacts_dir / "records.json")
+    first = _artifact(artifact_id="first", end="2026-01-31")
+    first.request_scope.end = None
+    updated = _artifact(artifact_id="updated", end="2026-02-28")
+    updated.request_scope.end = None
+    services._save_records([first])
+
+    stored = services._store_artifact_record(updated, publish=False)
+
+    assert stored.artifact_id == "updated"
+    assert [record.artifact_id for record in services._load_records()] == ["first", "updated"]
+
+
 def test_find_existing_artifact_ignores_record_with_overwide_coverage() -> None:
     request_scope = ArtifactRequestScope(
         start="2026-01-01",
@@ -410,6 +462,84 @@ def test_temporal_coverage_matches_streaming_request_scope_requires_exact_start(
     )
 
 
+def test_plan_streaming_materialization_fills_non_adjacent_periods(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plugin = _PeriodsPlugin(["2026-01-01", "2026-01-02", "2026-01-03"])
+    monkeypatch.setattr(
+        services,
+        "read_committed_period_ids_ordered",
+        lambda *_args, **_kwargs: ["2026-01-01"],
+    )
+
+    plan = services._plan_streaming_materialization(
+        plugin=plugin,
+        store_path=tmp_path / "dataset.icechunk",
+        start="2026-01-03",
+        end="2026-01-03",
+        period_type="daily",
+        overwrite=False,
+        periods=None,
+    )
+
+    assert plan.action == services.SyncAction.APPEND
+    assert (plan.start, plan.end) == ("2026-01-01", "2026-01-03")
+    assert plan.periods == ["2026-01-01", "2026-01-02", "2026-01-03"]
+    assert plugin.calls == [("2026-01-01", "2026-01-03")]
+
+
+def test_plan_streaming_materialization_rematerializes_a_preceding_range(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plugin = _PeriodsPlugin(["2026-01-01", "2026-01-02", "2026-01-03"])
+    monkeypatch.setattr(
+        services,
+        "read_committed_period_ids_ordered",
+        lambda *_args, **_kwargs: ["2026-01-03"],
+    )
+
+    plan = services._plan_streaming_materialization(
+        plugin=plugin,
+        store_path=tmp_path / "dataset.icechunk",
+        start="2026-01-01",
+        end="2026-01-01",
+        period_type="daily",
+        overwrite=False,
+        periods=None,
+    )
+
+    assert plan.action == services.SyncAction.REMATERIALIZE
+    assert (plan.start, plan.end) == ("2026-01-01", "2026-01-03")
+    assert plan.periods == ["2026-01-01", "2026-01-02", "2026-01-03"]
+
+
+def test_plan_streaming_materialization_rematerializes_a_gapped_store(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plugin = _PeriodsPlugin(["2026-01-01", "2026-01-02", "2026-01-03"])
+    monkeypatch.setattr(
+        services,
+        "read_committed_period_ids_ordered",
+        lambda *_args, **_kwargs: ["2026-01-01", "2026-01-03"],
+    )
+
+    plan = services._plan_streaming_materialization(
+        plugin=plugin,
+        store_path=tmp_path / "dataset.icechunk",
+        start="2026-01-03",
+        end="2026-01-03",
+        period_type="daily",
+        overwrite=False,
+        periods=None,
+    )
+
+    assert plan.action == services.SyncAction.REMATERIALIZE
+    assert plan.periods == ["2026-01-01", "2026-01-02", "2026-01-03"]
+
+
 def test_create_artifact_uses_streaming_plugin_for_direct_ingest(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -427,7 +557,7 @@ def test_create_artifact_uses_streaming_plugin_for_direct_ingest(
     store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
     store_path.mkdir()
 
-    plugin = object()
+    plugin = _PeriodsPlugin(["2026-01-01", "2026-01-02", "2026-01-03"])
     captured: dict[str, object] = {}
 
     def fake_load_streaming_plugin(plugin_path: str, *, params: dict[str, object]) -> object:
@@ -494,7 +624,7 @@ def test_create_artifact_uses_streaming_plugin_for_direct_ingest(
         "on_progress": None,
         "is_cancel_requested": None,
         "save_cursor": None,
-        "periods": None,
+        "periods": ["2026-01-01", "2026-01-02", "2026-01-03"],
     }
     assert artifact.format == ArtifactFormat.ICECHUNK
     assert artifact.path == str(store_path.resolve())
@@ -518,7 +648,7 @@ def test_create_artifact_uses_streaming_plugin_for_store_based_sync(
     store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
     store_path.mkdir()
 
-    plugin = object()
+    plugin = _PeriodsPlugin(["2026-01-01", "2026-02-01", "2026-02-10"])
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(services, "_load_streaming_plugin", lambda *args, **kwargs: plugin)
@@ -568,6 +698,139 @@ def test_create_artifact_uses_streaming_plugin_for_store_based_sync(
     assert artifact.coverage.temporal.end == "2026-02-10"
 
 
+def test_create_artifact_appends_a_contiguous_union_and_preserves_request_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    dataset: dict[str, object] = {
+        "id": "chirps3_precipitation_daily",
+        "name": "Total precipitation (CHIRPS3)",
+        "variable": "precip",
+        "period_type": "daily",
+        "ingestion": {"plugin": "example.Plugin"},
+    }
+    store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
+    store_path.mkdir()
+    plugin = _PeriodsPlugin(["2026-01-01", "2026-01-02", "2026-01-03"])
+    transaction_repo = _TransactionRepo()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(services, "_load_streaming_plugin", lambda *args, **kwargs: plugin)
+    monkeypatch.setattr(services.downloader, "get_icechunk_path", lambda _: store_path)
+    monkeypatch.setattr(
+        services,
+        "read_committed_period_ids_ordered",
+        lambda *_args, **_kwargs: ["2026-01-01"],
+    )
+    monkeypatch.setattr(services, "open_or_create_repo", lambda _: transaction_repo)
+    monkeypatch.setattr(services, "_maybe_build_pyramid", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(services, "_upsert_artifact_record", lambda record, **_: record)
+
+    def fake_ingest(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return type("Result", (), {"periods_written": 2})()
+
+    monkeypatch.setattr(services, "run_streaming_ingest_sync", fake_ingest)
+    monkeypatch.setattr(
+        services,
+        "get_data_coverage_for_paths",
+        lambda *args, **kwargs: {
+            "coverage": {
+                "temporal": {"start": "2026-01-01", "end": "2026-01-03"},
+                "spatial": {"xmin": 1.0, "ymin": 2.0, "xmax": 3.0, "ymax": 4.0},
+            }
+        },
+    )
+
+    artifact = services.create_artifact(
+        dataset=dataset,
+        start="2026-01-03",
+        end="2026-01-03",
+        bbox=[1.0, 2.0, 3.0, 4.0],
+        country_code=None,
+        overwrite=False,
+        publish=False,
+    )
+
+    assert captured["start"] == "2026-01-01"
+    assert captured["end"] == "2026-01-03"
+    assert captured["periods"] == ["2026-01-01", "2026-01-02", "2026-01-03"]
+    assert captured["store_path"] == store_path
+    assert artifact.coverage.temporal == CoverageTemporal(start="2026-01-01", end="2026-01-03")
+    assert artifact.request_scope.start == "2026-01-03"
+    assert artifact.request_scope.end == "2026-01-03"
+    assert transaction_repo.reset == []
+    assert transaction_repo.deleted == [transaction_repo.created[0][0]]
+
+
+def test_create_artifact_rolls_back_append_when_pyramid_rebuild_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    dataset: dict[str, object] = {
+        "id": "chirps3_precipitation_daily",
+        "name": "Total precipitation (CHIRPS3)",
+        "variable": "precip",
+        "period_type": "daily",
+        "ingestion": {"plugin": "example.Plugin"},
+    }
+    store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
+    store_path.mkdir()
+    transaction_repo = _TransactionRepo()
+    stored_records: list[ArtifactRecord] = []
+
+    monkeypatch.setattr(services, "_load_streaming_plugin", lambda *args, **kwargs: object())
+    monkeypatch.setattr(services.downloader, "get_icechunk_path", lambda _: store_path)
+    monkeypatch.setattr(
+        services,
+        "_plan_streaming_materialization",
+        lambda **_: services._StreamingMaterializationPlan(
+            action=services.SyncAction.APPEND,
+            start="2026-01-01",
+            end="2026-01-02",
+            periods=["2026-01-01", "2026-01-02"],
+            has_committed_periods=True,
+        ),
+    )
+    monkeypatch.setattr(services, "open_or_create_repo", lambda _: transaction_repo)
+    monkeypatch.setattr(
+        services,
+        "run_streaming_ingest_sync",
+        lambda **_: type("Result", (), {"periods_written": 1})(),
+    )
+    monkeypatch.setattr(
+        services,
+        "get_data_coverage_for_paths",
+        lambda *args, **kwargs: {
+            "coverage": {
+                "temporal": {"start": "2026-01-01", "end": "2026-01-02"},
+                "spatial": {"xmin": 1.0, "ymin": 2.0, "xmax": 3.0, "ymax": 4.0},
+            }
+        },
+    )
+    monkeypatch.setattr(services, "_maybe_build_pyramid", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        services,
+        "_upsert_artifact_record",
+        lambda record, **_: stored_records.append(record) or record,
+    )
+
+    with pytest.raises(RuntimeError, match="dataset update was rolled back"):
+        services.create_artifact(
+            dataset=dataset,
+            start="2026-01-02",
+            end="2026-01-02",
+            bbox=[1.0, 2.0, 3.0, 4.0],
+            country_code=None,
+            overwrite=False,
+            publish=False,
+        )
+
+    assert transaction_repo.reset == [("main", "before-ingest")]
+    assert transaction_repo.deleted == [transaction_repo.created[0][0]]
+    assert stored_records == []
+
+
 def test_create_artifact_forwards_country_code_to_streaming_plugin(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -582,7 +845,7 @@ def test_create_artifact_forwards_country_code_to_streaming_plugin(
             "params": {"version": "global2"},
         },
     }
-    plugin = object()
+    plugin = _PeriodsPlugin(["2020", "2021", "2022"])
     store_path = tmp_path / "worldpop_population_yearly.icechunk"
     captured: dict[str, object] = {}
 
@@ -684,7 +947,11 @@ def test_create_artifact_allows_streaming_coverage_clamped_to_source_availabilit
     store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
     store_path.mkdir()
 
-    monkeypatch.setattr(services, "_load_streaming_plugin", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        services,
+        "_load_streaming_plugin",
+        lambda *args, **kwargs: _PeriodsPlugin(["2026-01-01", "2026-01-31"]),
+    )
     monkeypatch.setattr(services.downloader, "get_icechunk_path", lambda _: store_path)
     monkeypatch.setattr(
         services,
@@ -727,7 +994,8 @@ def test_create_artifact_allows_streaming_coverage_clamped_to_source_availabilit
     assert artifact.coverage.temporal.start == "2026-01-01"
     assert artifact.coverage.temporal.end == "2026-01-31"
     assert artifact.request_scope.start == "2026-01-01"
-    assert artifact.request_scope.end == "2026-01-31"
+    # Request scope is provenance; realized, source-clamped coverage is recorded separately.
+    assert artifact.request_scope.end == "2026-02-03"
 
 
 def test_create_artifact_rejects_streaming_coverage_with_late_start(
@@ -746,7 +1014,11 @@ def test_create_artifact_rejects_streaming_coverage_with_late_start(
     store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
     store_path.mkdir()
 
-    monkeypatch.setattr(services, "_load_streaming_plugin", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        services,
+        "_load_streaming_plugin",
+        lambda *args, **kwargs: _PeriodsPlugin(["2026-01-01", "2026-01-31"]),
+    )
     monkeypatch.setattr(services.downloader, "get_icechunk_path", lambda _: store_path)
     monkeypatch.setattr(
         services,
@@ -766,7 +1038,7 @@ def test_create_artifact_rejects_streaming_coverage_with_late_start(
         },
     )
 
-    with pytest.raises(services.HTTPException, match="coverage does not match the requested scope"):
+    with pytest.raises(services.HTTPException, match="coverage does not match the planned contiguous scope"):
         services.create_artifact(
             dataset=dataset,
             start="2026-01-01",
@@ -793,7 +1065,7 @@ def test_create_artifact_returns_409_when_streaming_plugin_has_no_periods(
     }
     store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
 
-    monkeypatch.setattr(services, "_load_streaming_plugin", lambda *args, **kwargs: object())
+    monkeypatch.setattr(services, "_load_streaming_plugin", lambda *args, **kwargs: _PeriodsPlugin([]))
     monkeypatch.setattr(services.downloader, "get_icechunk_path", lambda _: store_path)
     monkeypatch.setattr(
         services,
@@ -856,10 +1128,11 @@ def test_create_artifact_overwrite_replaces_existing_icechunk_store_on_success(
             }
         }
 
-    def fake_build_pyramid(path: Path, dataset: dict[str, object]) -> None:
+    def fake_build_pyramid(path: Path, dataset: dict[str, object], **kwargs: object) -> bool:
         assert path == replacement_path
         assert (store_path / "stale").read_text(encoding="utf-8") == "old"
         (path / "normalized").write_text("complete", encoding="utf-8")
+        return True
 
     monkeypatch.setattr(services, "run_streaming_ingest_sync", fake_run_streaming_ingest_sync)
     monkeypatch.setattr(services, "get_data_coverage_for_paths", fake_coverage)
@@ -881,6 +1154,71 @@ def test_create_artifact_overwrite_replaces_existing_icechunk_store_on_success(
     assert (store_path / "normalized").read_text(encoding="utf-8") == "complete"
     assert not replacement_path.exists()
     assert not store_path.with_name(f"{store_path.name}.retired").exists()
+
+
+def test_create_artifact_overwrite_restores_store_when_record_write_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    dataset: dict[str, object] = {
+        "id": "chirps3_precipitation_daily",
+        "name": "Total precipitation (CHIRPS3)",
+        "variable": "precip",
+        "period_type": "daily",
+        "ingestion": {
+            "plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin",
+        },
+    }
+    store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
+    replacement_path = store_path.with_name(f"{store_path.name}.replacement")
+    store_path.mkdir()
+    (store_path / "committed").write_text("old", encoding="utf-8")
+
+    monkeypatch.setattr(services, "_load_streaming_plugin", lambda *args, **kwargs: object())
+    monkeypatch.setattr(services.downloader, "get_icechunk_path", lambda _: store_path)
+
+    def fake_run_streaming_ingest_sync(**kwargs: object) -> object:
+        replacement = kwargs["store_path"]
+        assert replacement == replacement_path
+        assert isinstance(replacement, Path)
+        replacement.mkdir()
+        (replacement / "fresh").write_text("new", encoding="utf-8")
+        return type("Result", (), {"periods_written": 1})()
+
+    monkeypatch.setattr(services, "run_streaming_ingest_sync", fake_run_streaming_ingest_sync)
+    monkeypatch.setattr(
+        services,
+        "get_data_coverage_for_paths",
+        lambda *args, **kwargs: {
+            "coverage": {
+                "temporal": {"start": "2026-01-01", "end": "2026-01-03"},
+                "spatial": {"xmin": 1.0, "ymin": 2.0, "xmax": 3.0, "ymax": 4.0},
+            }
+        },
+    )
+    monkeypatch.setattr(services, "_maybe_build_pyramid", lambda *_args, **_kwargs: True)
+
+    def fail_record_write(*args: object, **kwargs: object) -> object:
+        raise OSError("artifact index unavailable")
+
+    monkeypatch.setattr(services, "_upsert_artifact_record", fail_record_write)
+
+    with pytest.raises(OSError, match="artifact index unavailable"):
+        services.create_artifact(
+            dataset=dataset,
+            start="2026-01-01",
+            end="2026-01-03",
+            bbox=[1.0, 2.0, 3.0, 4.0],
+            country_code=None,
+            overwrite=True,
+            publish=False,
+        )
+
+    assert (store_path / "committed").read_text(encoding="utf-8") == "old"
+    assert not (store_path / "fresh").exists()
+    assert not replacement_path.exists()
+    assert not store_path.with_name(f"{store_path.name}.retired").exists()
+    assert not store_path.with_name(f"{store_path.name}.failed").exists()
 
 
 def test_create_artifact_overwrite_keeps_existing_store_when_fetch_fails(

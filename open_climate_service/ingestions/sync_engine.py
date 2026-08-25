@@ -71,7 +71,10 @@ def plan_sync(
     if not isinstance(sync_kind_value, str) or not sync_kind_value:
         raise ValueError("source_dataset must define sync.kind for sync planning")
     sync_kind = SyncKind(sync_kind_value)
-    current_start = latest_artifact.request_scope.start
+    # Request scope is operation provenance and may describe only the latest
+    # incremental ingest. Sync planning must use the cumulative realized store
+    # coverage as its artifact scope.
+    current_start = latest_artifact.coverage.temporal.start
 
     if sync_kind == SyncKind.STATIC:
         # Static datasets are never synced. Report NOT_SYNCABLE directly, reading the

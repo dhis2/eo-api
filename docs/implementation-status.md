@@ -198,8 +198,8 @@ Implemented sync behavior:
 - plugin `periods()` clamps target end to actually available data before execution
 - append V1 downloads only the missing range, then rebuilds the canonical artifact from local cache
 - Zarr materialization clips cached upstream data to the requested artifact scope
-- artifact reuse ignores records whose stored coverage does not match the requested scope
-- newly materialized artifacts are rejected when realized temporal coverage does not match the requested scope
+- artifact records keep caller request scope as provenance and cumulative realized store coverage separately
+- existing stores are updated from a planned contiguous union; earlier or gapped ranges rematerialize in ascending order
 
 ## How The Current Flow Works
 
