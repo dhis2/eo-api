@@ -438,11 +438,19 @@ def _create_streaming_artifact(
             return publish_artifact_record(stored_record.artifact_id)
         return stored_record
     finally:
-        if replacement_path is not None:
-            # Failed fetches and validations leave only a disposable partial replacement. A
-            # successful swap has already moved this path away, making cleanup a no-op.
-            _remove_store_path(replacement_path)
-        lock.release()
+        try:
+            if replacement_path is not None:
+                # Failed fetches and validations leave only a disposable partial replacement. A
+                # successful swap has already moved this path away, making cleanup a no-op.
+                try:
+                    _remove_store_path(replacement_path)
+                except Exception:
+                    # Cleanup is best-effort: the published store is still intact and the next
+                    # overwrite removes this path before reuse. Do not mask the ingest failure.
+                    logger.warning("Could not remove replacement store '%s'", replacement_path, exc_info=True)
+        finally:
+            # Releasing the in-process writer lock must not depend on filesystem cleanup.
+            lock.release()
 
 
 def _retired_path(target: Path) -> Path:

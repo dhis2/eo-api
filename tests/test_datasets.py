@@ -930,6 +930,67 @@ def test_create_artifact_overwrite_keeps_existing_store_when_fetch_fails(
     assert not store_path.with_name(f"{store_path.name}.retired").exists()
 
 
+def test_create_artifact_overwrite_releases_lock_when_replacement_cleanup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    dataset: dict[str, object] = {
+        "id": "chirps3_precipitation_daily",
+        "name": "Total precipitation (CHIRPS3)",
+        "variable": "precip",
+        "period_type": "daily",
+        "ingestion": {
+            "plugin": "open_climate_service.plugins.datasets.chirps3.CHIRPS3DailyPlugin",
+        },
+    }
+    store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
+    store_path.mkdir()
+
+    class TrackingLock:
+        released = False
+
+        def acquire(self, *, blocking: bool) -> bool:
+            assert blocking is False
+            return True
+
+        def release(self) -> None:
+            self.released = True
+
+    lock = TrackingLock()
+    cleanup_calls = 0
+
+    def fail_final_cleanup(path: Path) -> None:
+        nonlocal cleanup_calls
+        cleanup_calls += 1
+        if cleanup_calls == 2:
+            raise PermissionError(f"cannot remove {path}")
+
+    monkeypatch.setattr(services, "_load_streaming_plugin", lambda *args, **kwargs: object())
+    monkeypatch.setattr(services.downloader, "get_icechunk_path", lambda _: store_path)
+    monkeypatch.setattr(services, "_find_existing_artifact", lambda **_: None)
+    monkeypatch.setattr(services, "_acquire_store_lock", lambda _: lock)
+    monkeypatch.setattr(services, "_remove_store_path", fail_final_cleanup)
+    monkeypatch.setattr(
+        services,
+        "run_streaming_ingest_sync",
+        lambda **_: (_ for _ in ()).throw(RuntimeError("upstream fetch failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="upstream fetch failed"):
+        services.create_artifact(
+            dataset=dataset,
+            start="2026-01-01",
+            end="2026-01-03",
+            bbox=[1.0, 2.0, 3.0, 4.0],
+            country_code=None,
+            overwrite=True,
+            publish=False,
+        )
+
+    assert cleanup_calls == 2
+    assert lock.released is True
+
+
 def test_create_artifact_overwrite_keeps_existing_store_when_replacement_is_invalid(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
