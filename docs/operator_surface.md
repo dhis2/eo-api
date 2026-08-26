@@ -75,7 +75,7 @@ operator actions onto the public page.
 | Host CLI ingestion for read-only deployments | [CLIM-862](https://dhis2.atlassian.net/browse/CLIM-862) |
 | `/manage` job-history and scheduler-status views | New implementation ticket required |
 | Broader lifecycle and inspection CLI commands | New implementation ticket required |
-| Navigable, scalable OCS landing page | Separate landing-page improvement ticket |
+| Navigable, scalable OCS landing page | [CLIM-940](https://dhis2.atlassian.net/browse/CLIM-940) |
 
 The recommended implementation order is:
 
