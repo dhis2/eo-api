@@ -1093,6 +1093,50 @@ def test_run_sync_raises_clear_error_when_append_invariants_are_missing(monkeypa
         )
 
 
+def test_run_sync_preserves_rematerialize_action_as_overwrite(monkeypatch: pytest.MonkeyPatch) -> None:
+    latest = _artifact(
+        artifact_id="a1",
+        source_dataset_id="worldpop_population_yearly",
+        managed_dataset_id="worldpop_population_yearly_sle",
+        end="2024",
+    )
+    plan = SyncDetail(
+        source_dataset_id="worldpop_population_yearly",
+        sync_kind=SyncKind.RELEASE,
+        action=SyncAction.REMATERIALIZE,
+        reason="new_release_available",
+        message="new release",
+        current_start="2020",
+        current_end="2024",
+        target_end="2025",
+        target_end_source="request",
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(sync_engine, "plan_sync", lambda **kwargs: plan)
+
+    def fake_create_artifact(**kwargs: object) -> ArtifactRecord:
+        captured.update(kwargs)
+        return _artifact(
+            artifact_id="a2",
+            source_dataset_id="worldpop_population_yearly",
+            managed_dataset_id="worldpop_population_yearly_sle",
+            end="2025",
+        )
+
+    sync_engine.run_sync(
+        latest_artifact=latest,
+        source_dataset={"id": "worldpop_population_yearly", "period_type": "yearly", "sync": {"kind": "release"}},
+        requested_end="2025",
+        country_code="SLE",
+        publish=False,
+        create_artifact_fn=fake_create_artifact,
+        get_dataset_fn=lambda dataset_id: _dataset_detail(dataset_id),
+    )
+
+    assert captured["overwrite"] is True
+    assert captured["periods"] is None
+
+
 def test_sync_dataset_forwards_country_code_from_extent(monkeypatch: pytest.MonkeyPatch) -> None:
     dataset_id = "worldpop_population_yearly_sle"
     latest = _artifact(
@@ -1170,7 +1214,7 @@ def test_maybe_build_pyramid_calls_write_to_icechunk_store(tmp_path: Path, monke
 
     monkeypatch.setattr(downloader, "write_to_icechunk_store", fake_write)
 
-    _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "precip"})
+    result = _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "precip"})
 
     assert len(written) == 1
     # The rewrite cannot target the store it is reading from, so it goes to a sibling and is
@@ -1179,6 +1223,8 @@ def test_maybe_build_pyramid_calls_write_to_icechunk_store(tmp_path: Path, monke
     assert icechunk_path.is_dir()
     assert not written[0][1].exists()
     assert not icechunk_path.with_name(f"{icechunk_path.name}.retired").exists()
+    assert result.completed is True
+    assert result.swapped is True
 
 
 def test_maybe_build_pyramid_skips_rewrite_for_normalized_flat_store(
@@ -1213,9 +1259,11 @@ def test_maybe_build_pyramid_skips_rewrite_for_normalized_flat_store(
     written: list[tuple] = []
     monkeypatch.setattr(downloader, "write_to_icechunk_store", lambda *a, **kw: written.append(a))
 
-    _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "precip"})
+    result = _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "precip"})
 
     assert written == []  # already GeoZarr-normalized and flat → no rewrite
+    assert result.completed is True
+    assert result.swapped is False
 
 
 def test_maybe_build_pyramid_falls_back_on_build_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1239,7 +1287,10 @@ def test_maybe_build_pyramid_falls_back_on_build_error(tmp_path: Path, monkeypat
     monkeypatch.setattr(downloader, "write_to_icechunk_store", fake_write_fail)
 
     # Must not raise — errors are swallowed so the flat artifact is still registered.
-    _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "v"})
+    result = _maybe_build_pyramid(icechunk_path, {"id": "ds1", "variable": "v"})
+
+    assert result.completed is False
+    assert result.swapped is False
 
 
 def test_plan_sync_append_for_icechunk_artifact(
@@ -1397,7 +1448,11 @@ def test_an_interrupted_swap_is_healed_before_ingest_reads_the_store(
     monkeypatch.setattr(downloader, "get_icechunk_path", lambda _dataset: target)
     monkeypatch.setattr(ingestion_services, "run_streaming_ingest_sync", fake_ingest)
     monkeypatch.setattr(ingestion_services, "_load_streaming_plugin", lambda *a, **k: FakePlugin())
-    monkeypatch.setattr(ingestion_services, "_maybe_build_pyramid", lambda *a, **k: None)
+    monkeypatch.setattr(
+        ingestion_services,
+        "_maybe_build_pyramid",
+        lambda *a, **k: ingestion_services._StoreNormalizationResult(completed=True),
+    )
     monkeypatch.setattr(
         ingestion_services,
         "get_data_coverage_for_paths",

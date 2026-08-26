@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -31,10 +30,9 @@ from open_climate_service.ingestions.schemas import (
 from open_climate_service.publications.services import managed_dataset_id_for
 from open_climate_service.shared.time import (
     datetime_to_period_string,
-    dekad_bounds,
     dekad_start,
+    next_period_string,
     normalize_period_string,
-    parse_hourly_period_string,
     parse_period_string_to_datetime,
     utc_now,
     utc_today,
@@ -302,7 +300,7 @@ def run_sync(
         download_end=sync_detail.delta_end if download_start is not None else None,
         bbox=list(latest_artifact.request_scope.bbox) if latest_artifact.request_scope.bbox is not None else None,
         country_code=country_code,
-        overwrite=False,
+        overwrite=sync_detail.action == SyncAction.REMATERIALIZE,
         publish=publish,
         on_progress=on_progress,
         periods=sync_detail.periods,
@@ -378,30 +376,10 @@ def _next_period_start(latest_period_end: str, *, period_type: str) -> str:
     This helper is part of sync planning because temporal datasets need to know
     whether another period could exist beyond the current materialized coverage.
     """
-    if period_type == "hourly":
-        timestamp = parse_hourly_period_string(latest_period_end)
-        return datetime_to_period_string(timestamp + timedelta(hours=1), period_type)
-    if period_type == "daily":
-        current = date.fromisoformat(latest_period_end)
-        return (current + timedelta(days=1)).isoformat()
-    if period_type == "dekadal":
-        # Step by the covered dekad's own length rather than a fixed 10 days, since the
-        # third dekad of a month runs 8-11 days.
-        _, dekad_end = dekad_bounds(latest_period_end)
-        return (dekad_end + timedelta(days=1)).isoformat()
-    if period_type == "weekly":
-        current = parse_period_string_to_datetime(latest_period_end).date()
-        next_week = datetime.combine(current + timedelta(days=7), time(0))
-        return datetime_to_period_string(next_week, period_type)
-    if period_type == "monthly":
-        current = date.fromisoformat(f"{latest_period_end}-01")
-        month = current.month + 1
-        year = current.year + (1 if month == 13 else 0)
-        month = 1 if month == 13 else month
-        return f"{year:04d}-{month:02d}"
-    if period_type == "yearly":
-        return str(int(latest_period_end) + 1)
-    raise ValueError(f"Unsupported period_type '{period_type}' for sync")
+    try:
+        return next_period_string(latest_period_end, period_type)
+    except ValueError as exc:
+        raise ValueError(f"Unsupported period_type '{period_type}' for sync") from exc
 
 
 def _default_target_end(*, period_type: str) -> str:

@@ -269,4 +269,4 @@ Ingest and sync enumerate the complete source-valid union before writing. A forw
 
 ### The append execution mode avoids re-downloading history
 
-`append` downloads only the missing range and rebuilds the full zarr from all cached files. This means the local cache (NetCDF files in `data/downloads/`) is the source of truth for the full time series; the zarr is a derived view. If the cache is deleted, a rematerialize is required to recover.
+`append` writes only the source-available periods missing from the committed Icechunk store. The committed store is authoritative for existing history, while a temporary Icechunk branch preserves the pre-ingest snapshot until normalization and artifact registration succeed. Earlier requests, gaps, and release-style updates instead build a complete sibling replacement.

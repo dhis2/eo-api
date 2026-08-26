@@ -379,8 +379,8 @@ Implemented behavior:
 - `static` datasets return `not_syncable`
 - preserve stable managed dataset identity
 - use template-level `sync_execution`
-- `append` execution downloads only the missing period range, then rebuilds the canonical artifact from the local cache
-- `rematerialize` execution downloads the full original request range through the requested end period
+- `append` execution reuses the sync planner's source-available delta and writes only periods missing from the committed store
+- `rematerialize` execution downloads the complete planned contiguous union into a sibling store and publishes it only after validation
 - return the updated dataset view plus structured `sync_detail`
 - validate realized temporal coverage against the planned contiguous artifact scope; retain the caller's request scope separately as provenance
 
@@ -466,8 +466,9 @@ Expected planning response:
 - `delta_start` is `2024-02-01`
 - `delta_end` is `2024-02-10`
 
-`append` here means Open Climate Service downloads only the missing period range and then
-rebuilds the canonical artifact from local cache. It is not in-place Zarr mutation.
+`append` here means Open Climate Service reuses the planner's source-available delta and
+writes only missing periods to the existing Icechunk store. A rollback snapshot protects
+the previously committed store until normalization and artifact registration succeed.
 
 Where these timestamps come from:
 
