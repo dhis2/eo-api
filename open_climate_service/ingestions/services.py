@@ -441,20 +441,45 @@ def _plan_streaming_materialization(
     current_end = max(committed, key=lambda value: _period_order_key(value, period_type))
     materialization_start = min((current_start, start), key=lambda value: _period_order_key(value, period_type))
     materialization_end = max((current_end, end), key=lambda value: _period_order_key(value, period_type))
+    committed_is_contiguous = _periods_are_contiguous(committed, period_type)
 
-    # The sync planner already queried the source for the forward delta. Reuse that
-    # exact result when the committed store is itself a safe contiguous prefix. This
-    # avoids a second network call and also supports rolling sources that no longer
-    # enumerate historical periods which are already committed locally.
-    if (
-        periods is not None
-        and materialization_start == current_start
-        and _periods_are_contiguous(committed, period_type)
-    ):
-        delta = _normalize_ordered_periods(periods, period_type=period_type, source="Ingestion plugin")
-        if not delta:
-            raise HTTPException(status_code=409, detail="Source has no new data for the requested temporal scope")
+    # A request wholly contained by an already contiguous store cannot add data.
+    # Reuse the current artifact without asking a rolling source to enumerate
+    # historical periods that it may no longer expose.
+    if materialization_start == current_start and materialization_end == current_end and committed_is_contiguous:
+        return _StreamingMaterializationPlan(
+            action=SyncAction.NO_OP,
+            start=current_start,
+            end=current_end,
+            periods=committed,
+            has_committed_periods=True,
+        )
+
+    # A contiguous store that only needs a forward extension requires the source
+    # to enumerate the missing delta, not reproduce committed history. Reuse a
+    # sync planner's prefetched delta when present; direct ingestion queries it here.
+    if materialization_start == current_start and committed_is_contiguous:
         expected_start = next_period_string(current_end, period_type)
+        source_periods = _normalize_ordered_periods(
+            periods if periods is not None else asyncio.run(plugin.periods(expected_start, materialization_end)),
+            period_type=period_type,
+            source="Ingestion plugin",
+        )
+        # Plugins should honor the requested bounds, but accepting an already
+        # committed leading prefix keeps broader source enumerators compatible.
+        delta = [
+            period
+            for period in source_periods
+            if _period_order_key(period, period_type) >= _period_order_key(expected_start, period_type)
+        ]
+        if not delta:
+            return _StreamingMaterializationPlan(
+                action=SyncAction.NO_OP,
+                start=current_start,
+                end=current_end,
+                periods=committed,
+                has_committed_periods=True,
+            )
         if delta[0] != expected_start or not _periods_are_contiguous(delta, period_type):
             raise HTTPException(
                 status_code=409,
@@ -579,6 +604,11 @@ def _create_streaming_artifact(
             overwrite=overwrite,
             periods=periods,
         )
+        if plan.action == SyncAction.NO_OP:
+            existing = get_latest_artifact_for_dataset_or_404(str(dataset["id"]))
+            if publish and existing.publication.status != PublicationStatus.PUBLISHED:
+                return publish_artifact_record(existing.artifact_id)
+            return existing
         materialization_scope = request_scope.model_copy(update={"start": plan.start, "end": plan.end})
 
         ingest_path = store_path

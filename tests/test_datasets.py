@@ -511,7 +511,7 @@ def test_plan_streaming_materialization_fills_non_adjacent_periods(
     assert plan.action == services.SyncAction.APPEND
     assert (plan.start, plan.end) == ("2026-01-01", "2026-01-03")
     assert plan.periods == ["2026-01-01", "2026-01-02", "2026-01-03"]
-    assert plugin.calls == [("2026-01-01", "2026-01-03")]
+    assert plugin.calls == [("2026-01-02", "2026-01-03")]
 
 
 def test_plan_streaming_materialization_rematerializes_a_preceding_range(
@@ -663,6 +663,128 @@ def test_plan_streaming_materialization_reuses_prefetched_append_delta(
     assert plugin.calls == []
     assert plan.action == services.SyncAction.APPEND
     assert plan.periods == ["2026-01-01", "2026-01-02", "2026-01-03"]
+
+
+def test_plan_streaming_materialization_reuses_contained_coverage_without_querying_source(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plugin = _PeriodsPlugin([])
+    monkeypatch.setattr(
+        services,
+        "read_committed_period_ids_ordered",
+        lambda *args, **kwargs: ["2026-01-01", "2026-01-02", "2026-01-03"],
+    )
+
+    plan = services._plan_streaming_materialization(
+        plugin=plugin,
+        store_path=tmp_path / "dataset.icechunk",
+        start="2026-01-02",
+        end="2026-01-03",
+        period_type="daily",
+        overwrite=False,
+        periods=None,
+    )
+
+    assert plugin.calls == []
+    assert plan.action == services.SyncAction.NO_OP
+    assert (plan.start, plan.end) == ("2026-01-01", "2026-01-03")
+
+
+def test_plan_streaming_materialization_queries_only_forward_delta(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plugin = _PeriodsPlugin(["2026-01-03", "2026-01-04"])
+    monkeypatch.setattr(
+        services,
+        "read_committed_period_ids_ordered",
+        lambda *args, **kwargs: ["2026-01-01", "2026-01-02"],
+    )
+
+    plan = services._plan_streaming_materialization(
+        plugin=plugin,
+        store_path=tmp_path / "dataset.icechunk",
+        start="2026-01-01",
+        end="2026-01-04",
+        period_type="daily",
+        overwrite=False,
+        periods=None,
+    )
+
+    assert plugin.calls == [("2026-01-03", "2026-01-04")]
+    assert plan.action == services.SyncAction.APPEND
+    assert plan.periods == ["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"]
+
+
+def test_plan_streaming_materialization_treats_empty_forward_delta_as_no_op(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    plugin = _PeriodsPlugin([])
+    monkeypatch.setattr(
+        services,
+        "read_committed_period_ids_ordered",
+        lambda *args, **kwargs: ["2026-01-01", "2026-01-02"],
+    )
+
+    plan = services._plan_streaming_materialization(
+        plugin=plugin,
+        store_path=tmp_path / "dataset.icechunk",
+        start="2026-01-01",
+        end="2026-01-04",
+        period_type="daily",
+        overwrite=False,
+        periods=None,
+    )
+
+    assert plugin.calls == [("2026-01-03", "2026-01-04")]
+    assert plan.action == services.SyncAction.NO_OP
+    assert (plan.start, plan.end) == ("2026-01-01", "2026-01-02")
+
+
+def test_create_artifact_reuses_existing_artifact_for_no_op_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    dataset: dict[str, object] = {
+        "id": "chirps3_precipitation_daily",
+        "name": "Total precipitation (CHIRPS3)",
+        "variable": "precip",
+        "period_type": "daily",
+        "ingestion": {"plugin": "example.Plugin"},
+    }
+    store_path = tmp_path / "chirps3_precipitation_daily.icechunk"
+    store_path.mkdir()
+    plugin = _PeriodsPlugin([])
+    existing = _artifact(artifact_id="existing", end="2026-01-03")
+
+    monkeypatch.setattr(services, "_load_streaming_plugin", lambda *args, **kwargs: plugin)
+    monkeypatch.setattr(services.downloader, "get_icechunk_path", lambda _: store_path)
+    monkeypatch.setattr(
+        services,
+        "read_committed_period_ids_ordered",
+        lambda *args, **kwargs: ["2026-01-01", "2026-01-02", "2026-01-03"],
+    )
+    monkeypatch.setattr(services, "get_latest_artifact_for_dataset_or_404", lambda _: existing)
+    monkeypatch.setattr(
+        services,
+        "run_streaming_ingest_sync",
+        lambda **kwargs: pytest.fail("a no-op request must not run ingestion"),
+    )
+
+    result = services.create_artifact(
+        dataset=dataset,
+        start="2026-01-02",
+        end="2026-01-03",
+        bbox=[1.0, 2.0, 3.0, 4.0],
+        country_code=None,
+        overwrite=False,
+        publish=False,
+    )
+
+    assert result is existing
+    assert plugin.calls == []
 
 
 def test_create_artifact_uses_streaming_plugin_for_direct_ingest(
