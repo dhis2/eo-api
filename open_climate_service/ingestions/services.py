@@ -394,17 +394,25 @@ def _create_streaming_artifact(
         # and clamp the request end to the realized (possibly source-limited) end. A
         # non-temporal (ordinal) dataset — e.g. a day-of-year climatology — has no
         # temporal coverage, so there is nothing to match or clamp.
-        if coverage.temporal.start is not None:
-            if not _temporal_coverage_matches_streaming_request_scope(coverage.temporal, request_scope):
+        # A forecast is checked on its issue times, not its coverage. The request selects runs;
+        # coverage describes the dates those runs speak to, which reach past the requested
+        # window by design — a run issued today covering ten days is not an overshoot.
+        scope_temporal = coverage.temporal
+        forecast_reference = coverage_data.get("forecast_reference")
+        if forecast_reference:
+            scope_temporal = CoverageTemporal(**forecast_reference)
+        if scope_temporal.start is not None:
+            if not _temporal_coverage_matches_streaming_request_scope(scope_temporal, request_scope):
                 raise HTTPException(
                     status_code=409,
                     detail=(
                         "Materialized artifact coverage does not match the requested scope: "
-                        f"coverage={coverage.temporal.start}..{coverage.temporal.end}, "
+                        f"{'issue times' if forecast_reference else 'coverage'}="
+                        f"{scope_temporal.start}..{scope_temporal.end}, "
                         f"request={request_scope.start}..{request_scope.end}"
                     ),
                 )
-            request_scope = request_scope.model_copy(update={"end": coverage.temporal.end})
+            request_scope = request_scope.model_copy(update={"end": scope_temporal.end})
 
         _maybe_build_pyramid(ingest_path, dataset)
         if replacement_path is not None:
