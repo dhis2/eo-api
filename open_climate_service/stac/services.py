@@ -789,12 +789,69 @@ def _open_published_store(artifact: ArtifactRecord) -> xr.Dataset:
     return open_zarr_dataset(_artifact_store_path(artifact))
 
 
+def _rescale_pairs(value_range: Any, count: int) -> list[list[float]] | None:
+    """Normalise a template ``display.range`` into one ``[min, max]`` pair per band.
+
+    Two forms are accepted: a single pair applied to every band, or one pair per band. A
+    true-colour composite needs the per-band form whenever the bands have different dynamic
+    ranges; an 8-bit true-colour asset is happy with the shared form.
+    """
+    if not isinstance(value_range, list) or not value_range:
+        return None
+    if all(isinstance(v, (int, float)) for v in value_range) and len(value_range) == 2:
+        return [[float(value_range[0]), float(value_range[1])]] * count
+    if len(value_range) == count and all(
+        isinstance(pair, list) and len(pair) == 2 and all(isinstance(v, (int, float)) for v in pair)
+        for pair in value_range
+    ):
+        return [[float(pair[0]), float(pair[1])] for pair in value_range]
+    return None
+
+
 def _build_renders(artifact: ArtifactRecord, source_dataset: dict[str, Any]) -> dict[str, Any] | None:
     display = source_dataset.get("display")
     if not isinstance(display, dict):
         return None
-    colormap_name = display.get("colormap")
     value_range = display.get("range")
+
+    bands = display.get("bands")
+    if bands is not None:
+        # True-colour composite. The Render extension already carries `bands` for exactly
+        # this, so no OCS-specific field is invented: a render-aware client that has never
+        # seen OCS can composite the layer from the published metadata alone.
+        if not (isinstance(bands, list) and len(bands) == 3 and all(isinstance(b, str) and b for b in bands)):
+            logger.warning(
+                "Dataset '%s': display.bands must be three band names for an RGB render; got %r",
+                artifact.dataset_id,
+                bands,
+            )
+            return None
+        rescale = _rescale_pairs(value_range, 3)
+        if rescale is None:
+            logger.warning(
+                "Dataset '%s': display.bands needs a display.range of [min, max] or three "
+                "[min, max] pairs; got %r",
+                artifact.dataset_id,
+                value_range,
+            )
+            return None
+        rgb_render: dict[str, Any] = {
+            "title": artifact.dataset_name,
+            "assets": ["zarr"],
+            "bands": list(bands),
+            "rescale": rescale,
+            # Which variable the bands live on, and which cube dimension indexes them, so a
+            # client does not have to guess either. `colormap_name` is deliberately absent:
+            # a composite is not a colour ramp.
+            "open_climate_service:variable": artifact.variable,
+            "open_climate_service:band_dimension": display.get("band_dimension", "band"),
+        }
+        nodata_rgb = display.get("nodata")
+        if nodata_rgb is not None:
+            rgb_render["nodata"] = float(nodata_rgb)
+        return {"default": rgb_render}
+
+    colormap_name = display.get("colormap")
     if not isinstance(colormap_name, str) or not isinstance(value_range, list) or len(value_range) != 2:
         return None
     render: dict[str, Any] = {

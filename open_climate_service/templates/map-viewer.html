@@ -254,6 +254,51 @@
         }
       }
 
+      // A true-colour render, or null for the ordinary colormapped case. The Render
+      // extension carries `bands`; zarr-layer exposes each selected band to the shader
+      // under its own name, so `bands: ["red","green","blue"]` becomes the GLSL
+      // identifiers red, green and blue.
+      function readRgbRender(renders, dimensions) {
+        const bands = renders.bands;
+        if (!Array.isArray(bands) || bands.length !== 3) return null;
+        const rescale = Array.isArray(renders.rescale) ? renders.rescale : [];
+        if (rescale.length !== 3) return null;
+        // Prefer the dimension the collection names; otherwise find the one whose values
+        // contain all three bands, so a store using a different axis name still works.
+        const declared = renders["open_climate_service:band_dimension"];
+        const byValues = Object.entries(dimensions ?? {}).find(
+          ([, v]) => Array.isArray(v.values) && bands.every((b) => v.values.includes(b)),
+        )?.[0];
+        const dimension = declared && dimensions?.[declared] ? declared : (byValues ?? declared ?? "band");
+        return { bands, rescale, dimension };
+      }
+
+      // zarr-layer blends with premultiplied alpha and, once a customFrag is supplied, the
+      // shader owns discarding: fill pixels arrive as NaN rather than being dropped for us.
+      // Each band is stretched by its own rescale pair, which is why per-band ranges exist.
+      // zarr-layer replaces any character that is not a letter, digit or underscore with an
+      // underscore and prefixes a leading digit, so the shader has to refer to the sanitised
+      // names rather than the raw band labels.
+      function glslName(band) {
+        const safe = String(band).replace(/[^A-Za-z0-9_]/g, "_");
+        return /^[0-9]/.test(safe) ? `_${safe}` : safe;
+      }
+
+      function rgbFrag(bands, rescale) {
+        const names = bands.map(glslName);
+        const stretch = (name, pair) =>
+          `clamp((${name} - ${Number(pair[0]).toFixed(6)}) / (${(Number(pair[1]) - Number(pair[0])).toFixed(6)}), 0.0, 1.0)`;
+        return `
+          if (${names.map((n) => `isnan(${n})`).join(" || ")}) {
+            discard;
+          }
+          vec3 rgb = vec3(
+            ${names.map((n, i) => stretch(n, rescale[i])).join(",\n            ")}
+          );
+          fragColor = vec4(rgb * opacity, opacity);
+        `;
+      }
+
       // Every non-spatial dimension, in cube order, that the user steps through.
       // Each gets its own control; the layer selector must pin all of them so the
       // cube reduces to 2-D for rendering. Skip the synthetic openEO `bands`
@@ -380,6 +425,8 @@
       let dimStates = [];
       // Current index per dimension key — pins every non-spatial axis for the layer.
       let selector = {};
+      // { bands, rescale, dimension } for a true-colour collection, else null.
+      let rgb = null;
 
       const selectEl = document.getElementById("dataset-select");
       const dimControls = document.getElementById("dim-controls");
@@ -394,6 +441,12 @@
       const statusEl = document.getElementById("status");
 
       function updateLegend(cm, clim, units) {
+        if (rgb) {
+          // A true-colour composite has no single ramp to explain, and showing one from
+          // the unused colormap would be actively misleading.
+          legendEl.classList.add("hidden");
+          return;
+        }
         const stops = Array.from(
           { length: 32 },
           (_, i) => cm[Math.round((i * (cm.length - 1)) / 31)]
@@ -528,7 +581,12 @@
         // Build a control state for every non-spatial dimension. The layer selector
         // must pin each one so the cube reduces to 2-D for rendering.
         const dimensions = collection["cube:dimensions"] ?? {};
-        dimStates = getSteppingDims(dimensions).map((key) => {
+        // A true-colour render pins the band axis itself, so it must not also get a
+        // stepping control — the selector would then disagree with the shader.
+        rgb = readRgbRender(renders, dimensions);
+        dimStates = getSteppingDims(dimensions)
+          .filter((key) => key !== rgb?.dimension)
+          .map((key) => {
           const dim = dimensions[key];
           const steps = buildSteps(dimensions, key);
           const control = controlForDim(dim);
@@ -585,7 +643,8 @@
             clim,
             colormap: cm,
             opacity: 1,
-            selector,
+            selector: rgb ? { ...selector, [rgb.dimension]: rgb.bands } : selector,
+            ...(rgb !== null && { customFrag: rgbFrag(rgb.bands, rgb.rescale) }),
             ...(zarrVersion !== null && { zarrVersion }),
             ...(fillValue !== null && { fillValue }),
             crs: nativeCrs,

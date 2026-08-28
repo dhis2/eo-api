@@ -309,6 +309,41 @@ them requires re-ingesting the dataset:
 | `display.colormap` | No       | Colormap name for map rendering (e.g. `blues`, `rdbu_r`) |
 | `display.range`    | No       | `[min, max]` display range for the colormap              |
 | `display.nodata`   | No       | No-data / fill value                                     |
+| `display.bands`    | No       | Three band names for a true-colour render instead of a colormap (see below) |
+| `display.band_dimension` | No | Cube dimension holding the bands. Defaults to `band`     |
+
+### True-colour (RGB) rendering
+
+Imagery whose point is what it looks like — a flood before and after, a land-cover backdrop —
+renders as a composite rather than through a colour ramp. Declare the three bands instead of a
+colormap:
+
+```yaml
+display:
+  bands: [red, green, blue] # values on the band dimension, in R, G, B order
+  range: [0, 3000] # one stretch for all three bands
+```
+
+Bands with different dynamic ranges take one pair each:
+
+```yaml
+display:
+  bands: [red, green, blue]
+  range: [[0, 2500], [0, 2600], [0, 3000]]
+```
+
+An 8-bit true-colour source (Sentinel-2 TCI, Planet `visual`) needs no stretching, so use
+`range: [0, 255]`. Reflectance bands do need it, and a wrong range is the usual reason a
+composite comes out black or washed out.
+
+The bands live on one variable along a band dimension — the same shape the source GeoTIFF has,
+and the same mechanism `worldpop_agesex_*` uses for its `age_group` axis. `display.colormap`
+is ignored when `display.bands` is set: a composite has no single ramp, so the map legend is
+hidden for these layers.
+
+This is published as the STAC [Render extension](https://github.com/stac-extensions/render)
+`bands` array, so any render-aware client can composite the layer without knowing anything
+about OCS.
 
 ## Step 3: Point the instance at your plugins directory
 
