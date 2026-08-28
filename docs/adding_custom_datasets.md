@@ -345,6 +345,29 @@ This is published as the STAC [Render extension](https://github.com/stac-extensi
 `bands` array, so any render-aware client can composite the layer without knowing anything
 about OCS.
 
+#### Label a band axis with strings, but do not expect a client to read them
+
+Give the band dimension string labels (`red`, `green`, `blue`) rather than bare integers.
+That is what makes `ds.sel(band="red")` work for Python and openEO consumers, and it is how
+`worldpop_agesex_*` labels its `sex` axis.
+
+Be aware of the cost, because it has already produced one silent bug. A string coordinate is
+written as the Zarr v3 extension data type `fixed_length_utf32`, which is **not** in the core
+Zarr v3 specification — zarr-python itself warns that such arrays "may be unreadable by other
+Zarr libraries", and today's JavaScript reader does reject them.
+
+So a browser client cannot resolve a band *by name* from the store. OCS publishes the labels
+in `cube:dimensions.<band dimension>.values` for exactly this reason, and a client should:
+
+1. read the labels from STAC,
+2. map each render band to its position in that list,
+3. select on the store **by index**, not by name.
+
+The map viewer does this. Selecting by name looks like it works and is worse than failing:
+zarr-layer falls back to index 0 for any value it cannot resolve, so all three bands read the
+same slice and the image renders grey — a plausible-looking picture of the wrong data. Every
+other stepping control in the viewer already selects by index; a composite is no different.
+
 ## Step 3: Point the instance at your plugins directory
 
 Add `plugins_dir` to your `climate-service.yaml`:
