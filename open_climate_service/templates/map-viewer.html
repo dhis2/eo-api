@@ -299,6 +299,27 @@
         `;
       }
 
+      // The selector as the layer must always see it. A composite pins its band axis to the
+      // list of band names, and that has to be re-sent on every update, not just at
+      // construction: zarr-layer recomputes its band names from the selector inside
+      // `setSelector`, and an array-valued entry is what makes it emit one sampler per band.
+      // Send a selector without it and the bands collapse to a single one named after the
+      // variable, while `customFrag` stays in place — so the shader still refers to red, green
+      // and blue and fails to compile with "undeclared identifier". Both call sites go through
+      // here so they cannot drift apart again.
+      // Indices are clamped to the control's own step count. The store is the authority on
+      // how many slices exist, and it tells us through `values`; this only stops an index
+      // from escaping the range the controls were built for. It is not a substitute for the
+      // collection publishing `values` on a sparse axis (CLIM-950) — without that the count
+      // itself is wrong, and clamping to a wrong count still misses.
+      function layerSelector() {
+        const pinned = {};
+        for (const d of dimStates) {
+          pinned[d.key] = Math.min(Math.max(0, selector[d.key] ?? 0), Math.max(0, d.count - 1));
+        }
+        return rgb ? { ...pinned, [rgb.dimension]: rgb.bands } : pinned;
+      }
+
       // Every non-spatial dimension, in cube order, that the user steps through.
       // Each gets its own control; the layer selector must pin all of them so the
       // cube reduces to 2-D for rendering. Skip the synthetic openEO `bands`
@@ -643,7 +664,7 @@
             clim,
             colormap: cm,
             opacity: 1,
-            selector: rgb ? { ...selector, [rgb.dimension]: rgb.bands } : selector,
+            selector: layerSelector(),
             ...(rgb !== null && { customFrag: rgbFrag(rgb.bands, rgb.rescale) }),
             ...(zarrVersion !== null && { zarrVersion }),
             ...(fillValue !== null && { fillValue }),
@@ -692,7 +713,7 @@
         const layer = activeLayer;
         clearTimeout(_selectorDebounce);
         _selectorDebounce = setTimeout(() => {
-          layer?.setSelector({ ...selector });
+          layer?.setSelector(layerSelector());
         }, 150);
       }
 
