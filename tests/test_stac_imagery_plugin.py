@@ -596,3 +596,51 @@ def test_asset_href_resolves_against_the_item_self_link(
     monkeypatch.setattr(stac_imagery.httpx, "post", _FakePost([_search_page([item])]))
     scenes = _plugin(catalog_url="https://api.invalid/v1", collections=["s2"])._scenes()
     assert scenes["2026-08-12"][0].href == "https://data.invalid/tiles/45RUM/TCI.tif"
+
+
+# -- explicit date selection -----------------------------------------------------------
+
+
+def _indexed(plugin: StacImageryPlugin, dates: list[str]) -> StacImageryPlugin:
+    plugin._index = {d: [_Scene(f"{d}.tif", (85.3, 28.1, 85.4, 28.3), d)] for d in dates}
+    return plugin
+
+
+def test_dates_allow_list_keeps_a_non_contiguous_selection() -> None:
+    """A range cannot express "these two and not the five between", which is the common case
+    for a before/after pair drawn from a repeat-pass source."""
+    plugin = _indexed(
+        _plugin(dates=["2026-08-12", "2026-08-27"]),
+        ["2026-08-12", "2026-08-14", "2026-08-19", "2026-08-24", "2026-08-27"],
+    )
+    assert asyncio.run(plugin.periods("2026-08-01", "2026-08-31")) == [
+        "2026-08-12",
+        "2026-08-27",
+    ]
+
+
+def test_dates_allow_list_applies_without_a_clip() -> None:
+    plugin = _indexed(_plugin(clip_bbox=None, dates=["2026-08-12"]), ["2026-08-12", "2026-08-14"])
+    assert asyncio.run(plugin.periods("2026-08-01", "2026-08-31")) == ["2026-08-12"]
+
+
+def test_a_requested_date_that_is_not_on_offer_is_refused() -> None:
+    """Ingesting fewer periods than asked for is invisible once stored, so a date inside the
+    range that no scene covers must fail rather than quietly shrink the result."""
+    plugin = _indexed(_plugin(dates=["2026-08-12", "2026-08-13"]), ["2026-08-12"])
+    with pytest.raises(ValueError, match="2026-08-13"):
+        asyncio.run(plugin.periods("2026-08-01", "2026-08-31"))
+
+
+def test_requested_dates_outside_the_range_are_ignored_not_refused() -> None:
+    """The range is the narrower statement of intent, so it wins without complaint."""
+    plugin = _indexed(_plugin(dates=["2026-08-12", "2026-09-30"]), ["2026-08-12"])
+    assert asyncio.run(plugin.periods("2026-08-01", "2026-08-31")) == ["2026-08-12"]
+
+
+def test_no_dates_means_every_date_in_range() -> None:
+    plugin = _indexed(_plugin(), ["2026-08-12", "2026-08-14"])
+    assert asyncio.run(plugin.periods("2026-08-01", "2026-08-31")) == [
+        "2026-08-12",
+        "2026-08-14",
+    ]

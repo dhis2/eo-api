@@ -226,6 +226,7 @@ class StacImageryPlugin(BaseDatasetPlugin):
     - `collection_filter` — substring a leaf collection's URL must contain to be walked
       (static catalogues only)
     - `collections` — STAC API collection ids to search (item-search APIs only)
+    - `dates` — keep only these acquisition dates, for a non-contiguous selection
     - `max_cloud_cover` — drop items above this `eo:cloud_cover`
     - `property_filters` — mapping of STAC item property to required value(s)
     - `source_license`, `long_name` — written onto the stored variable
@@ -245,6 +246,7 @@ class StacImageryPlugin(BaseDatasetPlugin):
         target_crs: str | None = None,
         collection_filter: str | None = None,
         collections: list[str] | None = None,
+        dates: list[str] | None = None,
         max_cloud_cover: float | None = None,
         property_filters: dict[str, Any] | None = None,
         source_license: str | None = None,
@@ -279,6 +281,10 @@ class StacImageryPlugin(BaseDatasetPlugin):
         # STAC API collection ids to search. Distinct from `collection_filter`, which is a
         # substring match on a *static* catalogue's child URLs.
         self.collections = [str(c) for c in collections] if collections else []
+        # Explicit acquisition dates. A range cannot express "these two and not the five
+        # between", which is the common case for a before/after pair drawn from a repeat-pass
+        # source. Empty means "every date in the requested range".
+        self.dates = sorted({str(d)[:10] for d in dates}) if dates else []
         self.max_cloud_cover = float(max_cloud_cover) if max_cloud_cover is not None else None
         self.property_filters = dict(property_filters or {})
         self.source_license = source_license
@@ -487,7 +493,7 @@ class StacImageryPlugin(BaseDatasetPlugin):
         index = await asyncio.to_thread(self._scenes, start, end)
         dates = sorted(d for d in index if start[:10] <= d <= end[:10])
         if self.clip_bbox is None:
-            return dates
+            return self._restrict_to_requested_dates(dates, start, end)
         # A date whose scenes all miss the configured footprint is not an available period.
         # Without this the ingest requests it and `fetch_period` raises, so a release that
         # images several valleys fails the whole run on the first irrelevant date.
@@ -495,7 +501,27 @@ class StacImageryPlugin(BaseDatasetPlugin):
         usable = [d for d in dates if self._overlapping(index[d], box)]
         for dropped in sorted(set(dates) - set(usable)):
             logger.info("%s: no scene over the configured extent, skipping", dropped)
-        return usable
+        return self._restrict_to_requested_dates(usable, start, end)
+
+    def _restrict_to_requested_dates(self, available: list[str], start: str, end: str) -> list[str]:
+        """Narrow to an explicit `dates` allow-list, refusing silently-missing entries.
+
+        A requested date that falls inside the range but is not on offer is a configuration
+        error, not an empty result: ingesting fewer periods than asked for is invisible once
+        stored. Dates outside the range are ignored rather than refused, since the range is
+        the narrower statement of intent.
+        """
+        if not self.dates:
+            return available
+        in_range = [d for d in self.dates if start[:10] <= d <= end[:10]]
+        missing = sorted(set(in_range) - set(available))
+        if missing:
+            raise ValueError(
+                f"Requested date(s) {missing} are within {start[:10]}..{end[:10]} but no scene "
+                f"covers the configured extent then. Available: {available}. Check `dates` in "
+                f"the template, and `max_cloud_cover` if set — filtering can remove a date."
+            )
+        return [d for d in available if d in set(in_range)]
 
     # -- fetching ----------------------------------------------------------------------
 
