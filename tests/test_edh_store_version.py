@@ -24,10 +24,12 @@ def _capturable_logging() -> Any:
     previous = package_logger.propagate
     package_logger.propagate = True
     era5_land._edh_zarr_format_cache.clear()
+    era5_land._edh_zarr_format_unknown_until.clear()
     era5_land._edh_superseded_warned.clear()
     yield
     package_logger.propagate = previous
     era5_land._edh_zarr_format_cache.clear()
+    era5_land._edh_zarr_format_unknown_until.clear()
     era5_land._edh_superseded_warned.clear()
 
 
@@ -276,7 +278,12 @@ def test_an_unknown_result_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(era5_land, "urlopen", flaky_urlopen)
 
     assert era5_land._edh_zarr_format("https://example.invalid/store.zarr") is None
-    assert era5_land._edh_zarr_format("https://example.invalid/store.zarr") == 2, "None was cached"
+    # Within the TTL the failure is remembered, so the per-period call path does not re-probe.
+    assert era5_land._edh_zarr_format("https://example.invalid/store.zarr") is None
+    assert calls["n"] == 2, "the store was re-probed inside the negative-cache window"
+    # Past it, the check recovers on its own rather than staying off for the process.
+    era5_land._edh_zarr_format_unknown_until.clear()
+    assert era5_land._edh_zarr_format("https://example.invalid/store.zarr") == 2
 
 
 def test_the_warning_is_emitted_once_per_store(
@@ -290,3 +297,77 @@ def test_the_warning_is_emitted_once_per_store(
             era5_land._warn_if_superseded("https://example.invalid/store.zarr", _dataset_with_time())
 
     assert caplog.text.count("no longer advances") == 1
+
+
+def test_an_unknown_result_is_not_reprobed_on_every_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The regression the negative-cache TTL exists to prevent (Copilot, second review).
+
+    `_latest_available` reopens the store for every period. With no negative cache, a store
+    fsspec can read while these separate requests time out costs up to 30 s *per period* —
+    making an optional diagnostic the bottleneck during exactly the transient failure it was
+    written to tolerate.
+    """
+    calls = {"n": 0}
+
+    def always_fails(request: Any, timeout: int = 0) -> None:
+        calls["n"] += 1
+        raise OSError("timeout")
+
+    monkeypatch.setattr(era5_land, "urlopen", always_fails)
+
+    for _ in range(100):
+        assert era5_land._edh_zarr_format("https://example.invalid/store.zarr") is None
+
+    assert calls["n"] == 2, f"probed {calls['n']} times across 100 opens; expected one round of 2"
+
+
+def test_the_negative_cache_expires(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bounded, not permanent: the check must come back without a process restart."""
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(era5_land, "monotonic", lambda: clock["t"])
+
+    def always_fails(request: Any, timeout: int = 0) -> None:
+        raise OSError("timeout")
+
+    monkeypatch.setattr(era5_land, "urlopen", always_fails)
+    assert era5_land._edh_zarr_format("https://example.invalid/store.zarr") is None
+
+    clock["t"] += era5_land._EDH_UNKNOWN_FORMAT_TTL_SECONDS + 1
+    probed = {"n": 0}
+
+    def counts(request: Any, timeout: int = 0) -> None:
+        probed["n"] += 1
+        raise OSError("still down")
+
+    monkeypatch.setattr(era5_land, "urlopen", counts)
+    assert era5_land._edh_zarr_format("https://example.invalid/store.zarr") is None
+    assert probed["n"] > 0, "the negative cache never expired"
+
+
+def test_a_failing_timestamp_read_still_warns(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A diagnostic must not turn a usable store into a failed ingest (Copilot, second review).
+
+    Reading the latest timestamp is a lazy remote fetch that can fail on its own. It only
+    sharpens the message, so losing it must cost the timestamp and nothing else.
+    """
+    import numpy as np
+
+    monkeypatch.setattr(era5_land, "_edh_zarr_format", lambda _url: 2)
+
+    class _Exploding:
+        def isel(self, *args: object, **kwargs: object) -> Any:
+            raise OSError("coordinate chunk could not be fetched")
+
+    ds = xr.Dataset(
+        {"t2m": (("valid_time",), [1.0])},
+        coords={"valid_time": np.array(["2026-05-31"], dtype="datetime64[ns]")},
+    )
+    monkeypatch.setitem(ds._variables, "valid_time", _Exploding())  # type: ignore[arg-type]
+
+    with caplog.at_level(logging.WARNING, logger=era5_land.logger.name):
+        era5_land._warn_if_superseded("https://example.invalid/store.zarr", ds)
+
+    assert "Zarr v2, not v3" in caplog.text, "the warning was lost with the timestamp"
+    assert "latest timestamp" not in caplog.text

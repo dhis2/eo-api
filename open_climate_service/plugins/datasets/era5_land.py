@@ -13,6 +13,7 @@ import tempfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from threading import Lock
+from time import monotonic
 from typing import Any, cast
 from urllib.parse import urlparse, urlunparse
 from urllib.request import Request, urlopen
@@ -369,10 +370,17 @@ _EDH_DAILY_URL = "https://api.earthdatahub.destine.eu/era5/era5-land-daily-utc-v
 _EDH_API_KEY_ENV = "EDH_API_KEY"
 
 
-# Only *confirmed* formats are cached. `lru_cache` would also memoise a None, so a single
-# transient timeout or 401 would disable the diagnostic for that store until the process
-# restarts — in a long-running worker that is indistinguishable from the store being fine.
+# A confirmed format never changes for a given URL, so it is cached for the process.
 _edh_zarr_format_cache: dict[str, int] = {}
+# An *unknown* result is cached only briefly, which is a deliberate middle course between two
+# bad extremes. Memoising it permanently (as `lru_cache` would) lets one transient timeout
+# disable the diagnostic for the process — indistinguishable from the store being healthy.
+# Not caching it at all is worse: `_latest_available` reopens the store for every period, so a
+# store that fsspec can read while these separate requests time out costs up to 30 s *per
+# period*, making an optional diagnostic the bottleneck during exactly the transient failure
+# it exists to tolerate. A short TTL bounds the cost and still self-heals.
+_EDH_UNKNOWN_FORMAT_TTL_SECONDS = 300.0
+_edh_zarr_format_unknown_until: dict[str, float] = {}
 # One warning per store per process. `_latest_available` reopens the store for every period,
 # so without this a multi-year ingest emits the same line thousands of times and buries it.
 _edh_superseded_warned: set[str] = set()
@@ -410,6 +418,8 @@ def _edh_zarr_format(url: str) -> int | None:
     cached = _edh_zarr_format_cache.get(url)
     if cached is not None:
         return cached
+    if monotonic() < _edh_zarr_format_unknown_until.get(url, 0.0):
+        return None  # probed recently and could not tell; do not re-probe per period
     headers = _edh_auth_header(url)
     for probe in ("zarr.json", ".zmetadata"):
         try:
@@ -423,7 +433,9 @@ def _edh_zarr_format(url: str) -> int | None:
             continue
         if zarr_format is not None:
             _edh_zarr_format_cache[url] = zarr_format
+            _edh_zarr_format_unknown_until.pop(url, None)
             return zarr_format
+    _edh_zarr_format_unknown_until[url] = monotonic() + _EDH_UNKNOWN_FORMAT_TTL_SECONDS
     return None
 
 
@@ -447,7 +459,13 @@ def _warn_if_superseded(url: str, ds: xr.Dataset) -> None:
     latest = ""
     time_dim = next((name for name in ("valid_time", "time") if name in ds.coords), None)
     if time_dim and ds.sizes.get(time_dim):
-        latest = f"; its latest timestamp is {str(ds[time_dim].isel({time_dim: -1}).values)[:16]}"
+        try:
+            # A lazy remote read: the coordinate chunk still has to be fetched and decoded, and
+            # that can fail on its own. The timestamp only sharpens the message, so losing it
+            # must not turn a store that opened successfully into a failed ingest.
+            latest = f"; its latest timestamp is {str(ds[time_dim].isel({time_dim: -1}).values)[:16]}"
+        except Exception:  # noqa: BLE001 — enrichment is optional, the warning is not
+            logger.debug("Could not read the latest timestamp of %s for the warning", url, exc_info=True)
     logger.warning(
         "Earth Data Hub store %s is Zarr v%d, not v3. EDH applies updates only to its Zarr v3 "
         "stores, so this one no longer advances%s. See CLIM-955.",
