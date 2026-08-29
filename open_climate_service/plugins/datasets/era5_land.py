@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import calendar
+import json
+import logging
+import netrc
 import os
 import tempfile
 from datetime import date, datetime, timedelta
+from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 from typing import Any, cast
 from urllib.parse import urlparse, urlunparse
+from urllib.request import Request, urlopen
 
 import numpy as np
 import xarray as xr
@@ -25,6 +31,8 @@ from open_climate_service.shared.time import (
 from open_climate_service.streaming import BaseDatasetPlugin, monthly_period_ids
 from open_climate_service.transforms.climatology import circular_rolling_mean
 from open_climate_service.transforms.unit_conversion import kelvin_to_celsius, metres_to_mm
+
+logger = logging.getLogger(__name__)
 
 # CDS API long-name variables for reanalysis-era5-land-monthly-means
 _CDS_VARIABLE_NAMES: dict[str, str] = {
@@ -351,11 +359,67 @@ def _deaccumulate_tp(tp: xr.DataArray, time_dim: str = "valid_time") -> xr.DataA
 # Earth Data Hub (EDH) plugins — lazy Zarr access, no per-period downloads
 # ---------------------------------------------------------------------------
 
-# Hourly ERA5-Land: Zarr v2
+# Hourly ERA5-Land: Zarr v2, and **no longer updated** — see the version warning below and
+# CLIM-955. EDH has migrated its ERA5 datasets to Zarr v3 and applies future updates only to
+# the v3 stores. Measured 2026-08-29: this store ends 2026-05-31 while the v3 daily store
+# below reaches 2026-07-31. Repointing needs the v3 URL, which is not discoverable from the
+# API (no catalogue endpoint) and must come from EDH rather than a guess.
 _EDH_HOURLY_URL = "https://api.earthdatahub.destine.eu/era5/reanalysis-era5-land-no-antartica-v0.zarr"
 # Daily ERA5-Land: new DestinE API, Zarr v3, requires an additional subscription
 _EDH_DAILY_URL = "https://api.earthdatahub.destine.eu/era5/era5-land-daily-utc-v1.zarr"
 _EDH_API_KEY_ENV = "EDH_API_KEY"
+
+
+@lru_cache(maxsize=16)
+def _edh_zarr_format(url: str) -> int | None:
+    """Return the Zarr format of an EDH store, or None when it cannot be determined.
+
+    Probed rather than inferred: a v3 store answers ``zarr.json`` and a v2 store answers
+    ``.zmetadata``. Reading it off the opened ``xr.Dataset`` is not reliable — xarray does not
+    surface the store's format — and inferring it from the URL would go stale the moment a
+    store is migrated in place, which is exactly the case this is meant to catch.
+
+    Cached per URL, since it is one extra request per distinct store per process.
+    """
+    headers = _edh_basic_auth_header(url)
+    for probe, key in (("zarr.json", "zarr_format"), (".zmetadata", None)):
+        try:
+            request = Request(f"{_edh_authenticated_url(url)}/{probe}", headers=headers)
+            with urlopen(request, timeout=15) as response:  # noqa: S310  # fixed https EDH host
+                document = json.loads(response.read())
+        except Exception:  # noqa: BLE001 — a failed probe must never stop a working read
+            continue
+        if key and isinstance(document.get(key), int):
+            return int(document[key])
+        nested = document.get("metadata", {}).get(".zgroup", {})
+        if isinstance(nested.get("zarr_format"), int):
+            return int(nested["zarr_format"])
+    return None
+
+
+def _warn_if_superseded(url: str, ds: xr.Dataset) -> None:
+    """Warn when an EDH store is not Zarr v3, because it is no longer being updated.
+
+    EDH keeps superseded stores readable, so a v2 store does not fail — it silently stops
+    advancing. An ingest against one then reports no new periods, which is indistinguishable
+    from "nothing has been published yet" (the same shape as CLIM-952). This makes the stall
+    visible, and reports the store's own latest timestamp so the gap is concrete rather than
+    theoretical.
+    """
+    zarr_format = _edh_zarr_format(url)
+    if zarr_format is None or zarr_format >= 3:
+        return
+    latest = ""
+    time_dim = next((name for name in ("valid_time", "time") if name in ds.coords), None)
+    if time_dim and ds.sizes.get(time_dim):
+        latest = f"; its latest timestamp is {str(ds[time_dim].isel({time_dim: -1}).values)[:16]}"
+    logger.warning(
+        "Earth Data Hub store %s is Zarr v%d, not v3. EDH applies updates only to its Zarr v3 "
+        "stores, so this one no longer advances%s. See CLIM-955.",
+        url,
+        zarr_format,
+        latest,
+    )
 
 
 def _edh_open_zarr(url: str, *, consolidated: bool | None = None) -> xr.Dataset:
@@ -367,15 +431,44 @@ def _edh_open_zarr(url: str, *, consolidated: bool | None = None) -> xr.Dataset:
 
     Pass ``consolidated=True`` for Zarr v2 stores (the hourly ERA5-Land store).
     """
-    token = os.environ.get(_EDH_API_KEY_ENV, "")
-    if token:
-        parts = urlparse(url)
-        url = urlunparse(parts._replace(netloc=f"edh:{token}@{parts.netloc}"))
-    return xr.open_zarr(  # type: ignore[no-any-return]
-        url,
+    opened = xr.open_zarr(
+        _edh_authenticated_url(url),
         consolidated=consolidated,
         storage_options={"client_kwargs": {"trust_env": True}},
     )
+    _warn_if_superseded(url, opened)
+    return opened  # type: ignore[no-any-return]
+
+
+def _edh_authenticated_url(url: str) -> str:
+    """Inject ``EDH_API_KEY`` as HTTP Basic Auth, leaving netrc to handle it when unset."""
+    token = os.environ.get(_EDH_API_KEY_ENV, "")
+    if not token:
+        return url
+    parts = urlparse(url)
+    return urlunparse(parts._replace(netloc=f"edh:{token}@{parts.netloc}"))
+
+
+def _edh_basic_auth_header(url: str) -> dict[str, str]:
+    """Basic Auth from netrc, for the plain ``urlopen`` probe.
+
+    Only needed when ``EDH_API_KEY`` is unset and credentials live in netrc: xarray reaches EDH
+    through fsspec with ``trust_env=True``, which reads netrc itself, but ``urlopen`` does not.
+    Without this the probe gets a 401, returns None, and the superseded-store warning silently
+    never fires — which is exactly the failure it exists to prevent.
+    """
+    if os.environ.get(_EDH_API_KEY_ENV):
+        return {}  # already carried in the URL
+    try:
+        host = urlparse(url).hostname or ""
+        credentials = netrc.netrc().authenticators(host)
+    except (OSError, netrc.NetrcParseError):
+        return {}
+    if not credentials:
+        return {}
+    login, _, password = credentials
+    token = base64.b64encode(f"{login}:{password or ''}".encode()).decode()
+    return {"Authorization": f"Basic {token}"}
 
 
 class _ERA5LandEDHBase(BaseDatasetPlugin):
