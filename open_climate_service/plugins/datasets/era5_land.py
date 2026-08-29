@@ -502,7 +502,11 @@ def _edh_auth_header(url: str) -> dict[str, str]:
     if not credentials:
         return {}
     login, _, password = credentials
-    return _basic_auth(login, password or "")
+    # `or "edh"`: the netrc entry EDH documents carries only a password, and Python then
+    # reports an empty login — which would build `:key` here while the EDH_API_KEY path builds
+    # `edh:key`. EDH happens to accept both today, so this is not a live failure, but two auth
+    # paths disagreeing means one of them works only by the service's tolerance.
+    return _basic_auth(login or "edh", password or "")
 
 
 def _basic_auth(login: str, password: str) -> dict[str, str]:

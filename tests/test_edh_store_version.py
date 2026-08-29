@@ -287,7 +287,10 @@ def test_the_netrc_path_authenticates(monkeypatch: pytest.MonkeyPatch) -> None:
     class _Netrc:
         @staticmethod
         def authenticators(host: str) -> tuple[str, str, str] | None:
-            return ("edh", "", "secret") if host == "api.earthdatahub.destine.eu" else None
+            # The shape a real netrc yields for the entry EDH documents: a password and no
+            # login. The previous fixture returned ("edh", "", "secret"), which netrc never
+            # produces for that entry, and it hid the empty-login case entirely.
+            return ("", "", "secret") if host == "api.earthdatahub.destine.eu" else None
 
     monkeypatch.setattr(era5_land.netrc, "netrc", lambda: _Netrc())
 
@@ -316,3 +319,21 @@ def test_the_probe_never_puts_credentials_in_the_url(monkeypatch: pytest.MonkeyP
     era5_land._edh_is_zarr_v3(_STORE)
 
     assert seen and all("mytoken" not in url and "@" not in url for url in seen)
+
+
+def test_an_explicit_netrc_login_is_honoured(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Defaulting an empty login must not override one that was actually given."""
+    import base64
+
+    monkeypatch.delenv("EDH_API_KEY", raising=False)
+
+    class _Netrc:
+        @staticmethod
+        def authenticators(host: str) -> tuple[str, str, str] | None:
+            return ("someone", "", "secret")
+
+    monkeypatch.setattr(era5_land.netrc, "netrc", lambda: _Netrc())
+
+    header = era5_land._edh_auth_header(_STORE)
+
+    assert base64.b64decode(header["Authorization"].split()[1]).decode() == "someone:secret"
