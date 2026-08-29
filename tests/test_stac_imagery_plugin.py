@@ -13,6 +13,8 @@ from typing import Any
 
 import numpy as np
 import pytest
+import rioxarray  # noqa: F401  # pyright: ignore[reportUnusedImport]  # registers the .rio accessor
+import xarray as xr
 from rasterio.enums import ColorInterp, MaskFlags
 
 from open_climate_service.plugins.datasets.stac_imagery import (
@@ -402,3 +404,63 @@ def test_mask_reference_is_applied_per_strategy() -> None:
     assert nodata.values.tolist() == [[True, False], [True, True]]
     nonzero = plugin._valid_mask(window, _SceneMeta((1, 2, 3), _MASK_NONZERO, None, None))
     assert nonzero.values.tolist() == [[False, True], [True, True]]
+
+
+def _fake_scene_array(bounds: tuple[float, float, float, float]) -> xr.DataArray:
+    """A small RGB scene in UTM 45N carrying the TIFF tags a real Maxar asset does."""
+
+    left, bottom, right, top = bounds
+    n = 64
+    xs = np.linspace(left, right, n)
+    ys = np.linspace(top, bottom, n)
+    data = np.full((3, n, n), 120, dtype="uint8")
+    return xr.DataArray(
+        data,
+        dims=("band", "y", "x"),
+        coords={"band": [1, 2, 3], "y": ys, "x": xs},
+        attrs={
+            "ACQUISITION_TIME": "2021-10-16T05:22:48Z",
+            "COLLECT_IDENTIFIER": "10300100C86CED00",
+            "VEHICLE_NAME": "WV02",
+        },
+    ).rio.write_crs("EPSG:32645")
+
+
+def test_scene_tiff_tags_do_not_leak_onto_the_stored_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`xr.where` propagates attrs from whichever scene it last merged, so the mosaic arrives
+    carrying one contributor's ACQUISITION_TIME / COLLECT_IDENTIFIER / VEHICLE_NAME. On a cube
+    spanning several dates and several scenes per date those describe one arbitrary scene while
+    appearing to describe the whole variable."""
+    from rasterio.warp import transform_bounds
+
+    from open_climate_service.plugins.datasets import stac_imagery
+    from open_climate_service.plugins.datasets.stac_imagery import _SceneMeta
+
+    clip = [85.3474, 28.2087, 85.3608, 28.2207]
+    plugin = _plugin(
+        resolution_m=10.0,
+        clip_bbox=clip,
+        source_license="CC-BY-NC-4.0",
+        long_name="Maxar true-colour composite",
+    )
+    plugin._index = {"2026-08-27": [_Scene("s.tif", (85.34, 28.20, 85.37, 28.23), "s")]}
+    utm = transform_bounds("EPSG:4326", "EPSG:32645", 85.34, 28.20, 85.37, 28.23)
+
+    monkeypatch.setattr(stac_imagery, "_open_scene", lambda href, level: _fake_scene_array(utm))
+    monkeypatch.setattr(
+        StacImageryPlugin,
+        "_scene_meta",
+        lambda self, href, crs, res: _SceneMeta((1, 2, 3), _MASK_NONZERO, None, None),
+    )
+
+    cube = plugin.fetch_period("2026-08-27", clip)
+    attrs = cube["true_colour"].attrs
+    for leaked in ("ACQUISITION_TIME", "COLLECT_IDENTIFIER", "VEHICLE_NAME"):
+        assert leaked not in attrs, f"{leaked} leaked from a source scene onto the variable"
+    assert attrs["source_license"] == "CC-BY-NC-4.0"
+    assert attrs["long_name"] == "Maxar true-colour composite"
+    assert isinstance(cube, xr.Dataset)
+    assert cube["true_colour"].dtype == "uint8"
+    assert list(np.asarray(cube["true_colour"]["band"].values)) == ["red", "green", "blue"]

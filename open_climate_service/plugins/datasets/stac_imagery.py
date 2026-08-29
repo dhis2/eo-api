@@ -549,6 +549,12 @@ class StacImageryPlugin(BaseDatasetPlugin):
         # nodata so they render transparent rather than black.
         stored = mosaic.fillna(0).round().clip(0, 255).astype("uint8")
         cube = stored.expand_dims(t=[np.datetime64(period_id, "ns")]).to_dataset(name=self.variable)
+        # Replace the attributes rather than adding to them. `xr.where` propagates attrs from
+        # whichever scene it last merged, so the mosaic arrives carrying that one scene's TIFF
+        # tags — ACQUISITION_TIME, COLLECT_IDENTIFIER, VEHICLE_NAME. On a cube spanning several
+        # dates and several scenes per date those describe one arbitrary contributor while
+        # appearing to describe the whole variable, which is worse than having no provenance.
+        cube[self.variable].attrs.clear()
         attrs: dict[str, Any] = {
             "long_name": self.long_name or f"{'/'.join(self.bands)} composite (display values, not calibrated)",
             "units": "1",
