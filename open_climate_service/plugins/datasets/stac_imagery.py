@@ -1,18 +1,25 @@
 """Ingest a public STAC imagery release as a true-colour GeoZarr cube.
 
-A generic replacement for per-release plugins: a static STAC catalogue of georeferenced
-image assets becomes a dataset *template* rather than code (CLIM-957). Verified against two
-structurally different releases:
+A generic replacement for per-release plugins: a STAC catalogue of georeferenced image assets
+becomes a dataset *template* rather than code (CLIM-957). Verified against three structurally
+different sources, which between them exercise every branch here:
 
-- Planet crisis-response (Source Cooperative) — a nested tree, root -> pre/post-event ->
-  one collection per sensor and date -> items, with a 4-band `visual` carrying alpha.
-- Vantor open data (S3) — a flat collection of items, with a 3-band `visual` that declares
-  no mask of any kind.
+- Planet crisis-response (Source Cooperative) — a static nested tree, root -> pre/post-event
+  -> one collection per sensor and date -> items, with a 4-band `visual` carrying alpha.
+- Vantor open data (S3) — a static flat collection of items, with a 3-band `visual` that
+  declares no mask of any kind, so validity falls back to an all-zero heuristic.
+- Sentinel-2 L2A (Earth Search) — a STAC *API*, queried rather than walked, whose TCI asset
+  declares `nodata=0`.
 
-Both are CC-BY-NC-4.0. OCS has no licence field on a dataset template (CLIM-946), so a
-`source_license` param is written as an attribute on the stored variable and the published
-STAC collection still reports `various`. That attribute is not a STAC licence and no client
-looks for it — carry the restriction in the template's `source` string too.
+Those three cover the three mask strategies, both catalogue shapes, and both a projected and
+a geographic source CRS. That is the point of the module: adding a fourth release should be a
+template, not a code change.
+
+Licensing differs and matters. Planet and Vantor are CC-BY-NC-4.0; Sentinel-2 is openly
+licensed. OCS has no licence field on a dataset template (CLIM-946), so a `source_license`
+param is written as an attribute on the stored variable and the published STAC collection
+reports `various` for all of them. That attribute is not a STAC licence and no client looks
+for it — carry the restriction in the template's `source` string too.
 
 What is stored is a colour composite with dims ``(t, band, y, x)`` and a string ``band``
 coordinate, the layout OCS renders when a template declares ``display.bands`` (CLIM-947).
@@ -62,6 +69,12 @@ _GDAL_ENV: dict[str, Any] = {
 }
 
 _DEFAULT_BANDS = ("red", "green", "blue")
+
+# STAC API item search. The page size is the spec default most servers cap at anyway; the
+# page cap is a runaway guard — a clip and a date range should return far less than this, and
+# hitting it means the request was wider than intended.
+_SEARCH_PAGE_SIZE = 100
+_SEARCH_MAX_PAGES = 50
 
 # How a scene declares which pixels carry data, in the order they are preferred. Chosen by
 # probing the two known releases rather than assumed: Planet's `visual` declares colorinterp
@@ -211,6 +224,8 @@ class StacImageryPlugin(BaseDatasetPlugin):
     - `target_crs` — default: the UTM zone containing the clip centre, so the grid is metric
     - `variable` — stored variable name
     - `collection_filter` — substring a leaf collection's URL must contain to be walked
+      (static catalogues only)
+    - `collections` — STAC API collection ids to search (item-search APIs only)
     - `max_cloud_cover` — drop items above this `eo:cloud_cover`
     - `property_filters` — mapping of STAC item property to required value(s)
     - `source_license`, `long_name` — written onto the stored variable
@@ -229,6 +244,7 @@ class StacImageryPlugin(BaseDatasetPlugin):
         clip_bbox: list[float] | None = None,
         target_crs: str | None = None,
         collection_filter: str | None = None,
+        collections: list[str] | None = None,
         max_cloud_cover: float | None = None,
         property_filters: dict[str, Any] | None = None,
         source_license: str | None = None,
@@ -260,11 +276,16 @@ class StacImageryPlugin(BaseDatasetPlugin):
         self.clip_bbox = [float(v) for v in clip_bbox] if clip_bbox else None
         self.target_crs = str(target_crs) if target_crs else None
         self.collection_filter = collection_filter
+        # STAC API collection ids to search. Distinct from `collection_filter`, which is a
+        # substring match on a *static* catalogue's child URLs.
+        self.collections = [str(c) for c in collections] if collections else []
         self.max_cloud_cover = float(max_cloud_cover) if max_cloud_cover is not None else None
         self.property_filters = dict(property_filters or {})
         self.source_license = source_license
         self.long_name = long_name
         self._index: dict[str, list[_Scene]] | None = None
+        # "" means "checked, not an item-search API"; None means "not yet checked".
+        self._api_search_url: str | None = None
         self._meta_cache: dict[tuple[str, str, float], _SceneMeta] = {}
 
     # -- discovery ---------------------------------------------------------------------
@@ -282,13 +303,120 @@ class StacImageryPlugin(BaseDatasetPlugin):
                 return False
         return True
 
-    def _discover(self) -> dict[str, list[_Scene]]:
+    def _add_item(self, by_date: dict[str, list[_Scene]], item: dict[str, Any], base_url: str) -> bool:
+        """Turn one STAC item into a scene, or explain why it was not usable."""
+        assets = item.get("assets", {})
+        if self.asset not in assets:
+            logger.warning(
+                "Item %s has no %r asset; found %s",
+                item.get("id", base_url.rsplit("/", 1)[-1]),
+                self.asset,
+                sorted(assets),
+            )
+            return False
+        date = str(item["properties"]["datetime"])[:10]
+        # The item's own bbox lets a non-overlapping scene be skipped without opening the file
+        # at all — the difference between 9 opens and 5.
+        by_date.setdefault(date, []).append(
+            _Scene(
+                urllib.parse.urljoin(base_url, assets[self.asset]["href"]),
+                tuple(item["bbox"][:4]),
+                str(item.get("id", base_url.rsplit("/", 1)[-1])),
+            )
+        )
+        return True
+
+    def _is_item_search_api(self) -> bool:
+        """Whether `catalog_url` is a STAC API root that supports item search.
+
+        Both signals are required: a `search` link alone appears on some static catalogues that
+        merely link to a search UI, and the conformance class alone does not give the endpoint.
+        """
+        if self._api_search_url is not None:
+            return bool(self._api_search_url)
+        root = _get_json(self.catalog_url)
+        conforms = root.get("conformsTo", [])
+        supports = any("item-search" in str(c) for c in conforms)
+        search = _links(root, "search", self.catalog_url)
+        self._api_search_url = search[0] if (supports and search) else ""
+        if self._api_search_url:
+            logger.info("%s is a STAC API; using item search", self.catalog_url)
+        return bool(self._api_search_url)
+
+    def _discover_via_search(self, start: str | None, end: str | None) -> dict[str, list[_Scene]]:
+        """Query a STAC API instead of walking it.
+
+        A global archive cannot be walked — Earth Search's `sentinel-2-l2a` alone holds tens of
+        millions of items — so the clip and the requested date range become search parameters.
+        That inverts the cost: the static path fetches every item and discards most, while this
+        fetches only what the extent and range already imply.
+        """
+        by_date: dict[str, list[_Scene]] = {}
+        skipped = 0
+        body: dict[str, Any] = {"limit": _SEARCH_PAGE_SIZE}
+        if self.collections:
+            body["collections"] = list(self.collections)
+        if self.clip_bbox:
+            body["bbox"] = list(self.clip_bbox)
+        if start and end:
+            body["datetime"] = f"{start[:10]}T00:00:00Z/{end[:10]}T23:59:59Z"
+
+        url: str | None = self._api_search_url or None
+        pages = 0
+        total = 0
+        while url:
+            response = httpx.post(url, json=body, timeout=120, follow_redirects=True)
+            response.raise_for_status()
+            page = response.json()
+            for item in page.get("features", []):
+                total += 1
+                if not self._keep_item(item):
+                    skipped += 1
+                    continue
+                # Asset hrefs in a search response are normally absolute, but resolve them
+                # against the item's own `self` link when present rather than against whichever
+                # link happens to be first, which need not be a URL base at all.
+                self_links = [
+                    link.get("href") for link in item.get("links", []) if link.get("rel") == "self" and link.get("href")
+                ]
+                self._add_item(by_date, item, self_links[0] if self_links else url)
+            pages += 1
+            if pages >= _SEARCH_MAX_PAGES:
+                # A bounded sweep beats an unbounded one, but a silent cap would read as
+                # "that is everything". Say what was left.
+                logger.warning(
+                    "Stopped after %d search pages (%d items); narrow clip_bbox or the date range if dates are missing",
+                    pages,
+                    total,
+                )
+                break
+            nxt = [link for link in page.get("links", []) if link.get("rel") == "next"]
+            # Paging carries the cursor in the body for POST search, in the href for GET.
+            if nxt and nxt[0].get("body"):
+                body = {**body, **nxt[0]["body"]}
+                url = nxt[0].get("href", url)
+            else:
+                url = nxt[0]["href"] if nxt else None
+                body = {}
+        if skipped:
+            logger.info("%d item(s) dropped by cloud/property filters", skipped)
+        if not by_date:
+            raise ValueError(
+                f"STAC API search over {self.catalog_url} returned no items with a "
+                f"{self.asset!r} asset for bbox={self.clip_bbox} range={start}..{end}"
+            )
+        return by_date
+
+    def _discover(self, start: str | None = None, end: str | None = None) -> dict[str, list[_Scene]]:
         """Walk the catalogue once, returning ``{acquisition date: [scenes]}``.
 
         Handles both known shapes: a document may carry `child` links (a catalogue), `item`
         links (a collection), or both. A flat collection is simply the case where the root has
-        no children.
+        no children. A STAC API root is queried rather than walked.
         """
+        if self._is_item_search_api():
+            return self._discover_via_search(start, end)
+
         by_date: dict[str, list[_Scene]] = {}
         seen: set[str] = set()
         skipped = 0
@@ -312,26 +440,8 @@ class StacImageryPlugin(BaseDatasetPlugin):
                     if not self._keep_item(item):
                         filtered += 1
                         continue
-                    assets = item.get("assets", {})
-                    if self.asset not in assets:
-                        logger.warning(
-                            "Item %s has no %r asset; found %s",
-                            item_url.rsplit("/", 1)[-1],
-                            self.asset,
-                            sorted(assets),
-                        )
-                        continue
-                    date = str(item["properties"]["datetime"])[:10]
-                    # The item's own bbox lets a non-overlapping scene be skipped without
-                    # opening the file at all — the difference between 9 opens and 5.
-                    by_date.setdefault(date, []).append(
-                        _Scene(
-                            urllib.parse.urljoin(item_url, assets[self.asset]["href"]),
-                            tuple(item["bbox"][:4]),
-                            str(item.get("id", item_url.rsplit("/", 1)[-1])),
-                        )
-                    )
-                    found += 1
+                    if self._add_item(by_date, item, item_url):
+                        found += 1
                 skipped += filtered
                 if not found and not filtered:
                     # Loudly, not silently: a collection contributing nothing means a date
@@ -356,9 +466,9 @@ class StacImageryPlugin(BaseDatasetPlugin):
             raise ValueError(f"No items with a {self.asset!r} asset found under {self.catalog_url}")
         return by_date
 
-    def _scenes(self) -> dict[str, list[_Scene]]:
+    def _scenes(self, start: str | None = None, end: str | None = None) -> dict[str, list[_Scene]]:
         if self._index is None:
-            self._index = self._discover()
+            self._index = self._discover(start, end)
             logger.info(
                 "Discovered %d date(s): %s",
                 len(self._index),
@@ -372,7 +482,9 @@ class StacImageryPlugin(BaseDatasetPlugin):
         return [sc for sc in scenes if not (sc.bbox[2] <= w or sc.bbox[0] >= e or sc.bbox[3] <= s or sc.bbox[1] >= n)]
 
     async def periods(self, start: str, end: str) -> list[str]:
-        index = await asyncio.to_thread(self._scenes)
+        # The range reaches discovery so a STAC API search is bounded by it; the static walk
+        # ignores it and filters below.
+        index = await asyncio.to_thread(self._scenes, start, end)
         dates = sorted(d for d in index if start[:10] <= d <= end[:10])
         if self.clip_bbox is None:
             return dates

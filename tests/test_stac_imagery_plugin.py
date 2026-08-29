@@ -464,3 +464,135 @@ def test_scene_tiff_tags_do_not_leak_onto_the_stored_variable(
     assert isinstance(cube, xr.Dataset)
     assert cube["true_colour"].dtype == "uint8"
     assert list(np.asarray(cube["true_colour"]["band"].values)) == ["red", "green", "blue"]
+
+
+# -- STAC API item search --------------------------------------------------------------
+
+
+def _api_root(search_href: str = "https://api.invalid/search") -> dict[str, Any]:
+    return {
+        "conformsTo": ["https://api.stacspec.org/v1.0.0/item-search"],
+        "links": [{"rel": "search", "href": search_href}],
+    }
+
+
+class _FakePost:
+    """Stands in for httpx.post, serving canned search pages and recording the bodies sent."""
+
+    def __init__(self, pages: list[dict[str, Any]]) -> None:
+        self.pages = pages
+        self.bodies: list[dict[str, Any]] = []
+        self.urls: list[str] = []
+
+    def __call__(self, url: str, json: dict[str, Any], **_: Any) -> Any:
+        self.urls.append(url)
+        self.bodies.append(json)
+        page = self.pages[min(len(self.bodies) - 1, len(self.pages) - 1)]
+        return SimpleNamespace(json=lambda: page, raise_for_status=lambda: None)
+
+
+def _search_page(items: list[dict[str, Any]], next_body: dict[str, Any] | None = None) -> dict[str, Any]:
+    links = []
+    if next_body is not None:
+        links.append({"rel": "next", "href": "https://api.invalid/search", "body": next_body})
+    return {"features": items, "links": links}
+
+
+def test_stac_api_is_detected_and_searched(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A global archive cannot be walked, so an item-search API must be queried instead."""
+    from open_climate_service.plugins.datasets import stac_imagery
+
+    monkeypatch.setattr(stac_imagery, "_get_json", lambda url: _api_root())
+    post = _FakePost([_search_page([_item("2026-08-12", (85.3, 28.1, 85.4, 28.3))])])
+    monkeypatch.setattr(stac_imagery.httpx, "post", post)
+
+    plugin = _plugin(catalog_url="https://api.invalid/v1", collections=["sentinel-2-l2a"])
+    assert asyncio.run(plugin.periods("2026-08-01", "2026-08-31")) == ["2026-08-12"]
+    body = post.bodies[0]
+    assert body["collections"] == ["sentinel-2-l2a"]
+    # The clip and the range become search parameters — that is the whole point.
+    assert body["bbox"] == [85.30, 28.12, 85.40, 28.22]
+    assert body["datetime"] == "2026-08-01T00:00:00Z/2026-08-31T23:59:59Z"
+
+
+def test_a_static_catalogue_is_not_mistaken_for_an_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A `search` link alone is not enough: some static catalogues link to a search UI."""
+    from open_climate_service.plugins.datasets import stac_imagery
+
+    root = "https://example.invalid/collection.json"
+    docs = {
+        root: {
+            "links": [
+                {"rel": "search", "href": "https://example.invalid/ui"},
+                {"rel": "item", "href": "a.json"},
+            ]
+        },
+        "https://example.invalid/a.json": _item("2026-08-27", (85.3, 28.1, 85.4, 28.3)),
+    }
+    monkeypatch.setattr(stac_imagery, "_get_json", _catalog(docs))
+
+    def _explode(*_: Any, **__: Any) -> Any:
+        raise AssertionError("static catalogue must not be POSTed to")
+
+    monkeypatch.setattr(stac_imagery.httpx, "post", _explode)
+    assert sorted(_plugin(catalog_url=root)._scenes()) == ["2026-08-27"]
+
+
+def test_search_follows_next_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    from open_climate_service.plugins.datasets import stac_imagery
+
+    monkeypatch.setattr(stac_imagery, "_get_json", lambda url: _api_root())
+    post = _FakePost(
+        [
+            _search_page([_item("2026-08-12", (85.3, 28.1, 85.4, 28.3))], next_body={"page": 2}),
+            _search_page([_item("2026-08-27", (85.3, 28.1, 85.4, 28.3))]),
+        ]
+    )
+    monkeypatch.setattr(stac_imagery.httpx, "post", post)
+    plugin = _plugin(catalog_url="https://api.invalid/v1", collections=["s2"])
+    assert sorted(plugin._scenes()) == ["2026-08-12", "2026-08-27"]
+    assert post.bodies[1]["page"] == 2  # cursor carried forward
+
+
+def test_search_page_cap_warns_rather_than_silently_truncating(
+    monkeypatch: pytest.MonkeyPatch, warnings_log: pytest.LogCaptureFixture
+) -> None:
+    """Bounding the sweep is right; letting it read as 'that was everything' is not."""
+    from open_climate_service.plugins.datasets import stac_imagery
+
+    monkeypatch.setattr(stac_imagery, "_get_json", lambda url: _api_root())
+    # Every page advertises another, so only the cap stops it.
+    endless = _FakePost([_search_page([_item("2026-08-12", (85.3, 28.1, 85.4, 28.3))], next_body={"p": 1})])
+    monkeypatch.setattr(stac_imagery.httpx, "post", endless)
+    monkeypatch.setattr(stac_imagery, "_SEARCH_MAX_PAGES", 3)
+    _plugin(catalog_url="https://api.invalid/v1", collections=["s2"])._scenes()
+    assert len(endless.bodies) == 3
+    assert "Stopped after 3 search pages" in warnings_log.text
+
+
+def test_search_results_with_no_usable_asset_raise(monkeypatch: pytest.MonkeyPatch) -> None:
+    from open_climate_service.plugins.datasets import stac_imagery
+
+    monkeypatch.setattr(stac_imagery, "_get_json", lambda url: _api_root())
+    monkeypatch.setattr(stac_imagery.httpx, "post", _FakePost([_search_page([])]))
+    with pytest.raises(ValueError, match="STAC API search"):
+        _plugin(catalog_url="https://api.invalid/v1", collections=["s2"])._scenes()
+
+
+def test_asset_href_resolves_against_the_item_self_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A relative asset href in a search response must resolve against the item, not against
+    whichever link happens to be first."""
+    from open_climate_service.plugins.datasets import stac_imagery
+
+    item = _item("2026-08-12", (85.3, 28.1, 85.4, 28.3))
+    item["assets"]["visual"]["href"] = "TCI.tif"
+    item["links"] = [
+        {"rel": "collection", "href": "https://api.invalid/collections/s2"},
+        {"rel": "self", "href": "https://data.invalid/tiles/45RUM/item.json"},
+    ]
+    monkeypatch.setattr(stac_imagery, "_get_json", lambda url: _api_root())
+    monkeypatch.setattr(stac_imagery.httpx, "post", _FakePost([_search_page([item])]))
+    scenes = _plugin(catalog_url="https://api.invalid/v1", collections=["s2"])._scenes()
+    assert scenes["2026-08-12"][0].href == "https://data.invalid/tiles/45RUM/TCI.tif"
