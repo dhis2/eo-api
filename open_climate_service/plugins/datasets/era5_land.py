@@ -359,12 +359,12 @@ def _deaccumulate_tp(tp: xr.DataArray, time_dim: str = "valid_time") -> xr.DataA
 # Earth Data Hub (EDH) plugins — lazy Zarr access, no per-period downloads
 # ---------------------------------------------------------------------------
 
-# Hourly ERA5-Land: Zarr v2, and **no longer updated** — see the version warning below and
-# CLIM-955. EDH has migrated its ERA5 datasets to Zarr v3 and applies future updates only to
-# the v3 stores. Measured 2026-08-29: this store ends 2026-05-31 while the v3 daily store
-# below reaches 2026-07-31. Repointing needs the v3 URL, which is not discoverable from the
-# API (no catalogue endpoint) and must come from EDH rather than a guess.
-_EDH_HOURLY_URL = "https://api.earthdatahub.destine.eu/era5/reanalysis-era5-land-no-antartica-v0.zarr"
+# Hourly ERA5-Land: Zarr v3. The superseded v2 store (`reanalysis-era5-land-no-antartica-v0`)
+# stopped advancing at 2026-05-31 while this one tracks the daily store — EDH applies updates
+# only to its v3 stores (CLIM-955). Verified identical in every respect that matters to the
+# plugins below: 0-360 longitude, the same latitude range, a `valid_time` axis and the same 50
+# variables including t2m and tp.
+_EDH_HOURLY_URL = "https://api.earthdatahub.destine.eu/era5/era5-land-v0.zarr"
 # Daily ERA5-Land: new DestinE API, Zarr v3, requires an additional subscription
 _EDH_DAILY_URL = "https://api.earthdatahub.destine.eu/era5/era5-land-daily-utc-v1.zarr"
 _EDH_API_KEY_ENV = "EDH_API_KEY"
@@ -422,18 +422,21 @@ def _warn_if_superseded(url: str, ds: xr.Dataset) -> None:
     )
 
 
-def _edh_open_zarr(url: str, *, consolidated: bool | None = None) -> xr.Dataset:
+def _edh_open_zarr(url: str) -> xr.Dataset:
     """Open an Earth Data Hub Zarr store.
 
     Injects the ``EDH_API_KEY`` environment variable as HTTP Basic Auth
     (username ``edh``, password = key).  Falls back to netrc when the
     variable is not set.
 
-    Pass ``consolidated=True`` for Zarr v2 stores (the hourly ERA5-Land store).
+    Every store OCS pins is Zarr v3, which carries its metadata inline — so there is no
+    consolidated-metadata switch to set. `_warn_if_superseded` is the guard that this stays
+    true: EDH keeps superseded v2 stores readable, and they fail by going quiet, not by
+    erroring (CLIM-955).
     """
     opened = xr.open_zarr(
         _edh_authenticated_url(url),
-        consolidated=consolidated,
+        consolidated=None,
         storage_options={"client_kwargs": {"trust_env": True}},
     )
     _warn_if_superseded(url, opened)
@@ -475,7 +478,6 @@ class _ERA5LandEDHBase(BaseDatasetPlugin):
     """Shared cache and region logic for EDH Zarr plugins."""
 
     _edh_url: str  # set by subclass
-    _edh_consolidated: bool | None = None  # True for Zarr v2 stores
     _edh_lon_360: bool = False  # True when longitude is stored 0–360
 
     def __init__(self, variable: str) -> None:
@@ -495,7 +497,7 @@ class _ERA5LandEDHBase(BaseDatasetPlugin):
                 return self._cached_region
             self._close_cached_locked()
             xmin, ymin, xmax, ymax = bbox_tuple
-            ds = _edh_open_zarr(self._edh_url, consolidated=self._edh_consolidated)
+            ds = _edh_open_zarr(self._edh_url)
             # Extend bbox by half a grid step (0.05°) to avoid floating-point
             # boundary exclusion (e.g. 360 - 10.1 = 349.8999... misses the 349.9
             # grid point). CDS API is inclusive of boundary points; this aligns
@@ -532,7 +534,7 @@ class _ERA5LandEDHBase(BaseDatasetPlugin):
 
     def _latest_available(self) -> str:
         """Return the latest available timestamp from the EDH Zarr store."""
-        ds = _edh_open_zarr(self._edh_url, consolidated=self._edh_consolidated)
+        ds = _edh_open_zarr(self._edh_url)
         try:
             return str(np.datetime64(ds.valid_time.isel(valid_time=-1).values, "h"))
         finally:
@@ -675,7 +677,6 @@ class ERA5LandEDHPrecipitationDailyPlugin(_ERA5LandEDHBase):
     """
 
     _edh_url = _EDH_HOURLY_URL
-    _edh_consolidated = True
     _edh_lon_360 = True
     max_concurrency = 4
     commit_batch_size = 30
@@ -805,7 +806,6 @@ class ERA5LandTempDailyFromHourlyPlugin(_ERA5LandEDHBase):
     """
 
     _edh_url = _EDH_HOURLY_URL
-    _edh_consolidated = True
     _edh_lon_360 = True
     max_concurrency = 4
     commit_batch_size = 30
