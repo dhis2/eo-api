@@ -23,10 +23,12 @@ def _capturable_logging() -> Any:
     package_logger = logging.getLogger("open_climate_service")
     previous = package_logger.propagate
     package_logger.propagate = True
-    era5_land._edh_zarr_format.cache_clear()
+    era5_land._edh_zarr_format_cache.clear()
+    era5_land._edh_superseded_warned.clear()
     yield
     package_logger.propagate = previous
-    era5_land._edh_zarr_format.cache_clear()
+    era5_land._edh_zarr_format_cache.clear()
+    era5_land._edh_superseded_warned.clear()
 
 
 def _dataset_with_time(last: str = "2026-05-31T23:00") -> xr.Dataset:
@@ -178,4 +180,113 @@ def test_no_credentials_anywhere_sends_no_header(monkeypatch: pytest.MonkeyPatch
     monkeypatch.delenv("EDH_API_KEY", raising=False)
     monkeypatch.setattr(era5_land.netrc, "netrc", lambda: (_ for _ in ()).throw(OSError("no netrc")))
 
-    assert era5_land._edh_basic_auth_header("https://api.earthdatahub.destine.eu/x.zarr") == {}
+    assert era5_land._edh_auth_header("https://api.earthdatahub.destine.eu/x.zarr") == {}
+
+
+def test_the_env_key_path_also_authenticates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`urlopen` does not turn `user:pass@host` userinfo into Basic Auth the way fsspec does.
+
+    Probing the authenticated URL therefore 401s for anyone using EDH_API_KEY — the whole
+    documented environment-variable path — and the warning silently never fires. Verified
+    against the live store: the probe returned None with the key set and 2 without it.
+    """
+    monkeypatch.setenv("EDH_API_KEY", "mytoken")
+
+    header = era5_land._edh_auth_header("https://api.earthdatahub.destine.eu/era5/x.zarr")
+
+    assert header["Authorization"].startswith("Basic ")
+    import base64
+
+    assert base64.b64decode(header["Authorization"].split()[1]).decode() == "edh:mytoken"
+
+
+def test_the_probe_never_sends_credentials_in_the_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Userinfo in the probe URL is both useless to urlopen and a credential leak into logs."""
+    import json
+
+    monkeypatch.setenv("EDH_API_KEY", "mytoken")
+    seen: list[str] = []
+
+    class _Response:
+        def read(self) -> bytes:
+            return json.dumps({"zarr_format": 3}).encode()
+
+        def __enter__(self) -> "_Response":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def fake_urlopen(request: Any, timeout: int = 0) -> _Response:
+        seen.append(request.full_url)
+        return _Response()
+
+    monkeypatch.setattr(era5_land, "urlopen", fake_urlopen)
+    era5_land._edh_zarr_format("https://api.earthdatahub.destine.eu/era5/x.zarr")
+
+    assert seen and all("mytoken" not in url and "@" not in url for url in seen)
+
+
+@pytest.mark.parametrize("document", [[], {"metadata": []}, "a string", None, {"metadata": {".zgroup": []}}])
+def test_a_valid_json_response_of_the_wrong_shape_yields_none(monkeypatch: pytest.MonkeyPatch, document: Any) -> None:
+    """A 200 of an unexpected shape must not raise past the probe.
+
+    It would propagate out of `_edh_open_zarr` and take down a store that had already opened
+    successfully — turning a diagnostic into an outage.
+    """
+    import json
+
+    class _Response:
+        def read(self) -> bytes:
+            return json.dumps(document).encode()
+
+        def __enter__(self) -> "_Response":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(era5_land, "urlopen", lambda *a, **k: _Response())
+
+    assert era5_land._edh_zarr_format("https://example.invalid/store.zarr") is None
+
+
+def test_an_unknown_result_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A transient failure must not permanently disable the check in a long-running worker."""
+    import json
+
+    calls = {"n": 0}
+
+    class _Response:
+        def read(self) -> bytes:
+            return json.dumps({"zarr_format": 2}).encode()
+
+        def __enter__(self) -> "_Response":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def flaky_urlopen(request: Any, timeout: int = 0) -> _Response:
+        calls["n"] += 1
+        if calls["n"] <= 2:  # both probes fail on the first attempt
+            raise OSError("transient")
+        return _Response()
+
+    monkeypatch.setattr(era5_land, "urlopen", flaky_urlopen)
+
+    assert era5_land._edh_zarr_format("https://example.invalid/store.zarr") is None
+    assert era5_land._edh_zarr_format("https://example.invalid/store.zarr") == 2, "None was cached"
+
+
+def test_the_warning_is_emitted_once_per_store(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """`_latest_available` reopens the store per period; a multi-year ingest would flood."""
+    monkeypatch.setattr(era5_land, "_edh_zarr_format", lambda _url: 2)
+
+    with caplog.at_level(logging.WARNING, logger=era5_land.logger.name):
+        for _ in range(50):
+            era5_land._warn_if_superseded("https://example.invalid/store.zarr", _dataset_with_time())
+
+    assert caplog.text.count("no longer advances") == 1

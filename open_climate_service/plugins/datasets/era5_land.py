@@ -11,7 +11,6 @@ import netrc
 import os
 import tempfile
 from datetime import date, datetime, timedelta
-from functools import lru_cache
 from pathlib import Path
 from threading import Lock
 from typing import Any, cast
@@ -370,7 +369,36 @@ _EDH_DAILY_URL = "https://api.earthdatahub.destine.eu/era5/era5-land-daily-utc-v
 _EDH_API_KEY_ENV = "EDH_API_KEY"
 
 
-@lru_cache(maxsize=16)
+# Only *confirmed* formats are cached. `lru_cache` would also memoise a None, so a single
+# transient timeout or 401 would disable the diagnostic for that store until the process
+# restarts — in a long-running worker that is indistinguishable from the store being fine.
+_edh_zarr_format_cache: dict[str, int] = {}
+# One warning per store per process. `_latest_available` reopens the store for every period,
+# so without this a multi-year ingest emits the same line thousands of times and buries it.
+_edh_superseded_warned: set[str] = set()
+
+
+def _zarr_format_of(document: object) -> int | None:
+    """Read the Zarr format out of a ``zarr.json`` (v3) or ``.zmetadata`` (v2) document.
+
+    Every level is shape-checked rather than assumed. A 200 carrying valid JSON of an
+    unexpected shape — ``[]``, or ``{"metadata": []}`` — would otherwise raise past the
+    caller's handler and take down an open that had already succeeded, turning a diagnostic
+    into an outage.
+    """
+    if not isinstance(document, dict):
+        return None
+    inline = document.get("zarr_format")
+    if isinstance(inline, int):
+        return inline
+    metadata = document.get("metadata")
+    if isinstance(metadata, dict):
+        group = metadata.get(".zgroup")
+        if isinstance(group, dict) and isinstance(group.get("zarr_format"), int):
+            return int(group["zarr_format"])
+    return None
+
+
 def _edh_zarr_format(url: str) -> int | None:
     """Return the Zarr format of an EDH store, or None when it cannot be determined.
 
@@ -378,22 +406,24 @@ def _edh_zarr_format(url: str) -> int | None:
     ``.zmetadata``. Reading it off the opened ``xr.Dataset`` is not reliable — xarray does not
     surface the store's format — and inferring it from the URL would go stale the moment a
     store is migrated in place, which is exactly the case this is meant to catch.
-
-    Cached per URL, since it is one extra request per distinct store per process.
     """
-    headers = _edh_basic_auth_header(url)
-    for probe, key in (("zarr.json", "zarr_format"), (".zmetadata", None)):
+    cached = _edh_zarr_format_cache.get(url)
+    if cached is not None:
+        return cached
+    headers = _edh_auth_header(url)
+    for probe in ("zarr.json", ".zmetadata"):
         try:
-            request = Request(f"{_edh_authenticated_url(url)}/{probe}", headers=headers)
+            # The credential-free URL plus an explicit header: `urlopen` does not turn
+            # `user:pass@host` userinfo into Basic Auth the way fsspec does, so probing the
+            # authenticated URL fails for anyone using EDH_API_KEY.
+            request = Request(f"{url}/{probe}", headers=headers)
             with urlopen(request, timeout=15) as response:  # noqa: S310  # fixed https EDH host
-                document = json.loads(response.read())
+                zarr_format = _zarr_format_of(json.loads(response.read()))
         except Exception:  # noqa: BLE001 — a failed probe must never stop a working read
             continue
-        if key and isinstance(document.get(key), int):
-            return int(document[key])
-        nested = document.get("metadata", {}).get(".zgroup", {})
-        if isinstance(nested.get("zarr_format"), int):
-            return int(nested["zarr_format"])
+        if zarr_format is not None:
+            _edh_zarr_format_cache[url] = zarr_format
+            return zarr_format
     return None
 
 
@@ -409,6 +439,11 @@ def _warn_if_superseded(url: str, ds: xr.Dataset) -> None:
     zarr_format = _edh_zarr_format(url)
     if zarr_format is None or zarr_format >= 3:
         return
+    # Once per store per process: `_latest_available` reopens the store for every period, so a
+    # multi-year ingest would otherwise repeat this line thousands of times and bury it.
+    if url in _edh_superseded_warned:
+        return
+    _edh_superseded_warned.add(url)
     latest = ""
     time_dim = next((name for name in ("valid_time", "time") if name in ds.coords), None)
     if time_dim and ds.sizes.get(time_dim):
@@ -452,16 +487,19 @@ def _edh_authenticated_url(url: str) -> str:
     return urlunparse(parts._replace(netloc=f"edh:{token}@{parts.netloc}"))
 
 
-def _edh_basic_auth_header(url: str) -> dict[str, str]:
-    """Basic Auth from netrc, for the plain ``urlopen`` probe.
+def _edh_auth_header(url: str) -> dict[str, str]:
+    """Basic Auth for the plain ``urlopen`` probe, from either credential source.
 
-    Only needed when ``EDH_API_KEY`` is unset and credentials live in netrc: xarray reaches EDH
-    through fsspec with ``trust_env=True``, which reads netrc itself, but ``urlopen`` does not.
-    Without this the probe gets a 401, returns None, and the superseded-store warning silently
-    never fires — which is exactly the failure it exists to prevent.
+    Needed because ``urlopen`` authenticates like neither of the paths that work elsewhere:
+    it does not read netrc (fsspec does, via ``trust_env=True``) and it does not turn
+    ``user:pass@host`` userinfo into an Authorization header (fsspec does that too). So both
+    of the documented ways to give OCS an EDH credential leave the probe unauthenticated, it
+    takes a 401, returns None, and the superseded-store warning silently never fires — the
+    exact failure it exists to prevent.
     """
-    if os.environ.get(_EDH_API_KEY_ENV):
-        return {}  # already carried in the URL
+    token = os.environ.get(_EDH_API_KEY_ENV, "")
+    if token:
+        return _basic_auth("edh", token)
     try:
         host = urlparse(url).hostname or ""
         credentials = netrc.netrc().authenticators(host)
@@ -470,8 +508,12 @@ def _edh_basic_auth_header(url: str) -> dict[str, str]:
     if not credentials:
         return {}
     login, _, password = credentials
-    token = base64.b64encode(f"{login}:{password or ''}".encode()).decode()
-    return {"Authorization": f"Basic {token}"}
+    return _basic_auth(login, password or "")
+
+
+def _basic_auth(login: str, password: str) -> dict[str, str]:
+    encoded = base64.b64encode(f"{login}:{password}".encode()).decode()
+    return {"Authorization": f"Basic {encoded}"}
 
 
 class _ERA5LandEDHBase(BaseDatasetPlugin):

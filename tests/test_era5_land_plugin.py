@@ -344,6 +344,10 @@ def test_edh_open_zarr_injects_api_key_in_url(monkeypatch: pytest.MonkeyPatch) -
         return MagicMock()
 
     monkeypatch.setenv("EDH_API_KEY", "mytoken")
+    # `_edh_open_zarr` also probes the store's Zarr version on open. Stubbed, or this unit
+    # test reaches the real EDH host: the probe swallows its own failures, so it would still
+    # pass while depending on DNS and spending up to two 15-second timeouts.
+    monkeypatch.setattr("open_climate_service.plugins.datasets.era5_land._edh_zarr_format", lambda _url: 3)
     with patch("open_climate_service.plugins.datasets.era5_land.xr.open_zarr", fake_open_zarr):
         _edh_open_zarr("https://api.earthdatahub.destine.eu/era5/test.zarr")
 
