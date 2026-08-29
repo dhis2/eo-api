@@ -80,6 +80,28 @@ def test_a_composite_without_a_usable_range_is_refused(value_range: Any) -> None
     assert _render({"bands": ["red", "green", "blue"], "range": value_range}) is None
 
 
+@pytest.mark.parametrize(
+    "value_range",
+    [
+        [1, 1],
+        [10, 0],
+        [float("nan"), 10],
+        [0, float("inf")],
+        [[0, 255], [1, 1], [0, 255]],
+        [[0, 255], [0, 255], [float("-inf"), 255]],
+    ],
+)
+def test_a_stretch_the_shader_cannot_use_is_refused(value_range: Any) -> None:
+    """Shape is not enough — these are all well-formed and all unusable.
+
+    The shader divides by `max - min` and embeds both numbers as GLSL literals, so an equal
+    or inverted pair divides by zero or negates, and a non-finite endpoint gives NaN colours
+    or a shader that will not compile. `NaN` and `Infinity` are not valid JSON either, so the
+    collection response itself would be malformed.
+    """
+    assert _render({"bands": ["red", "green", "blue"], "range": value_range}) is None
+
+
 def test_nodata_is_carried_onto_a_composite() -> None:
     render = _render({"bands": ["red", "green", "blue"], "range": [0, 255], "nodata": 0})
 

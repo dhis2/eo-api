@@ -267,9 +267,19 @@
       // and passed as `{selected: [...], type: "index"}`, which skips the lookup entirely.
       function readRgbRender(renders, dimensions) {
         const bands = renders.bands;
-        if (!Array.isArray(bands) || bands.length !== 3) return null;
+        // No `bands` at all is the ordinary colormapped case, not a failure — return null
+        // quietly and let the caller take the ramp path. Every refusal *after* this point
+        // explains itself, because the caller stops loading once `bands` was declared.
+        if (!Array.isArray(bands)) return null;
+        if (bands.length !== 3) {
+          setStatus(`Cannot composite: expected 3 bands, the collection declares ${bands.length}.`, true);
+          return null;
+        }
         const rescale = Array.isArray(renders.rescale) ? renders.rescale : [];
-        if (rescale.length !== 3) return null;
+        if (rescale.length !== 3) {
+          setStatus(`Cannot composite: expected 3 rescale pairs, the collection declares ${rescale.length}.`, true);
+          return null;
+        }
         // Prefer the dimension the collection names; otherwise find the one whose values
         // contain all three bands, so a store using a different axis name still works.
         const declared = renders["open_climate_service:band_dimension"];
@@ -629,6 +639,13 @@
         // A true-colour render pins the band axis itself, so it must not also get a
         // stepping control — the selector would then disagree with the shader.
         rgb = readRgbRender(renders, dimensions);
+        // A collection that declares `bands` and cannot be resolved into one must not quietly
+        // fall through to the colormapped path: that renders a single band under a ramp, which
+        // looks like a working layer and is a picture of different data. `readRgbRender` has
+        // already explained why on the status line, so stop here rather than clearing it below.
+        if (rgb === null && Array.isArray(renders?.bands)) {
+          return;
+        }
         dimStates = getSteppingDims(dimensions)
           .filter((key) => key !== rgb?.dimension)
           .map((key) => {

@@ -8,7 +8,7 @@ import pytest
 import xarray as xr
 
 from open_climate_service.stac.services import (
-    _implied_step_count,
+    _expected_time_walk,
     _temporal_values_needed,
 )
 
@@ -64,13 +64,6 @@ def test_a_single_slice_store_stays_implied() -> None:
     assert _temporal_values_needed(ds, "t", "daily", "P1D") is False
 
 
-def test_a_step_that_cannot_be_walked_draws_no_conclusion() -> None:
-    """A compound duration is not parsed, so the count must not be guessed from it."""
-    ds = _ds(["2026-05-27", "2026-08-26"])
-
-    assert _temporal_values_needed(ds, "t", "daily", "P1Y2M") is False
-
-
 def test_a_dimension_the_store_does_not_have_is_left_alone() -> None:
     ds = _ds(["2026-05-27", "2026-08-26"])
 
@@ -88,9 +81,56 @@ def test_a_dimension_the_store_does_not_have_is_left_alone() -> None:
         ("2026-01-01", "2026-01-29", "P7D", 5),
     ],
 )
-def test_implied_step_count_matches_what_a_client_would_build(start: str, end: str, step: str, expected: int) -> None:
-    assert _implied_step_count(pd.Timestamp(start), pd.Timestamp(end), step) == expected
+def test_expected_time_walk_matches_what_a_client_would_build(start: str, end: str, step: str, expected: int) -> None:
+    walk = _expected_time_walk(pd.Timestamp(start), pd.Timestamp(end), step)
+
+    assert walk is not None
+    assert len(walk) == expected
+    assert walk[0] == pd.Timestamp(start)
+    # The walk starts at `start` and steps by the duration, so it may end past `end` — what
+    # matters is that a client stepping the same way lands on the same instants.
+    assert walk.is_monotonic_increasing
 
 
-def test_implied_step_count_refuses_a_duration_it_cannot_walk() -> None:
-    assert _implied_step_count(pd.Timestamp("2026-01-01"), pd.Timestamp("2026-02-01"), "P1Y2M") is None
+def test_the_walk_refuses_a_duration_it_cannot_be_built_from() -> None:
+    assert _expected_time_walk(pd.Timestamp("2026-01-01"), pd.Timestamp("2026-02-01"), "P1Y2M") is None
+
+
+# --- an unwalkable or absent step must not be read as agreement ------------------------
+
+
+@pytest.mark.parametrize("step", ["P1Y2M", "P1W", "PT30M", "not-a-duration"])
+def test_a_step_no_client_can_walk_still_lists_its_timestamps(step: str) -> None:
+    """Being unable to check is not the same as agreeing.
+
+    A consumer stepping `extent` by a duration it cannot parse builds a single position, so
+    every slice past the first becomes unreachable. Previously this returned False and
+    published nothing, which is the same blank-map failure CLIM-950 is about.
+    """
+    ds = _ds(["2026-01-01", "2026-01-02", "2026-01-03"])
+
+    assert _temporal_values_needed(ds, "t", "daily", step) is True
+
+
+def test_a_multi_slice_axis_with_no_step_lists_its_timestamps() -> None:
+    ds = _ds(["2026-01-01", "2026-01-02"])
+
+    assert _temporal_values_needed(ds, "t", "daily", None) is True
+
+
+def test_a_single_slice_axis_with_no_step_stays_implied() -> None:
+    """One slice is one position however the client walks it, so nothing can disagree."""
+    ds = _ds(["2026-01-01"])
+
+    assert _temporal_values_needed(ds, "t", "daily", None) is False
+
+
+def test_timestamps_that_drift_within_a_matching_count_are_caught() -> None:
+    """The count agrees and the instants do not — a count-only check passes this wrongly.
+
+    Three daily slices imply three positions, so the arithmetic lines up while the middle
+    label is twelve hours out. Comparing the sequence is what catches it.
+    """
+    ds = _ds(["2026-01-01T00:00", "2026-01-02T12:00", "2026-01-03T00:00"])
+
+    assert _temporal_values_needed(ds, "t", "daily", "P1D") is True

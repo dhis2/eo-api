@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 from copy import deepcopy
@@ -567,29 +568,35 @@ def _override_time_step(collection: dict[str, Any], step: str | None, *, cadence
 _SIMPLE_ISO_STEP_RE = re.compile(r"^P(?:T(\d+)H|(\d+)D|(\d+)M|(\d+)Y)$")
 
 
-def _implied_step_count(start: pd.Timestamp, end: pd.Timestamp, step: str) -> int | None:
-    """How many positions a client builds by walking *step* from *start* to *end*.
+def _expected_time_walk(start: pd.Timestamp, end: pd.Timestamp, step: str) -> pd.DatetimeIndex | None:
+    """The timestamps a client builds by walking *step* from *start* to *end*.
 
     Mirrors ``generateDateRange`` in map-viewer.html, including its calendar handling for
-    months and years — an approximation in fixed days drifts and overcounts. Returns None
-    for a duration that cannot be walked, in which case the caller must not draw any
-    conclusion from the count.
+    months and years — an approximation in fixed days drifts and overcounts.
+
+    The whole sequence rather than only its length: a count alone cannot tell a dense axis
+    from one that merely happens to have the same number of slices. A daily store holding
+    ``[Jan 1 00:00, Jan 2 12:00, Jan 3 00:00]`` implies three positions and has three, so a
+    count check passes while the middle label is wrong by twelve hours.
+
+    Returns None for a duration this cannot walk, which the caller must treat as "cannot
+    reconstruct" rather than as agreement.
     """
     match = _SIMPLE_ISO_STEP_RE.match(step)
     if match is None:
         return None
     hours, days, months, years = match.groups()
-    if months is not None:
-        n = int(months)
-        total = (end.year - start.year) * 12 + (end.month - start.month)
-        return max(1, total // n + 1)
-    if years is not None:
-        n = int(years)
-        return max(1, (end.year - start.year) // n + 1)
+    if months is not None or years is not None:
+        n = int(months or years)
+        offset = pd.DateOffset(months=n) if months is not None else pd.DateOffset(years=n)
+        span = (end.year - start.year) * 12 + (end.month - start.month) if months is not None else end.year - start.year
+        count = max(1, span // n + 1)
+        return pd.DatetimeIndex([start + offset * i for i in range(count)])
     inc = timedelta(hours=int(hours)) if hours is not None else timedelta(days=int(days))
     # Via seconds rather than dividing the two deltas directly: `end - start` is a pandas
     # Timedelta, and dividing that by a stdlib timedelta has no typed overload.
-    return max(1, int((end - start).total_seconds() // inc.total_seconds()) + 1)
+    count = max(1, int((end - start).total_seconds() // inc.total_seconds()) + 1)
+    return pd.DatetimeIndex([start + inc * i for i in range(count)])
 
 
 def _temporal_values_needed(ds: xr.Dataset, time_dimension: str, period_type: Any, iso_step: str | None) -> bool:
@@ -611,15 +618,24 @@ def _temporal_values_needed(ds: xr.Dataset, time_dimension: str, period_type: An
     """
     if period_cadence(period_type) is Cadence.IRREGULAR:
         return True
-    if not isinstance(iso_step, str) or time_dimension not in ds.dims:
+    if time_dimension not in ds.dims:
         return False
     stamps = pd.DatetimeIndex(np.asarray(ds[time_dimension].values, dtype="datetime64[ns]"))
-    if len(stamps) == 0:
+    # One slice implies one position, so there is nothing for a client to get wrong.
+    if len(stamps) <= 1:
         return False
+    # No step, or one no client can walk (P1W, PT30M, a compound duration): a consumer
+    # stepping `extent` gets a single position and every slice past the first is unreachable.
+    # Listing the timestamps is the only way the axis survives, so default to publishing them
+    # rather than staying silent — being unable to check is not the same as agreeing.
+    if not isinstance(iso_step, str):
+        return True
     # The store's own endpoints rather than the published extent strings: they are the same
     # instants, and using them avoids re-parsing timezone-suffixed ISO text to compare.
-    implied = _implied_step_count(stamps[0], stamps[-1], iso_step)
-    return implied is not None and implied != len(stamps)
+    expected = _expected_time_walk(stamps[0], stamps[-1], iso_step)
+    if expected is None:
+        return True
+    return not expected.equals(stamps)
 
 
 def _add_temporal_values(collection: dict[str, Any], ds: xr.Dataset, time_dimension: str) -> None:
@@ -868,13 +884,22 @@ def _rescale_pairs(value_range: Any, count: int) -> list[list[float]] | None:
     if not isinstance(value_range, list) or not value_range:
         return None
     if all(isinstance(v, (int, float)) for v in value_range) and len(value_range) == 2:
-        return [[float(value_range[0]), float(value_range[1])]] * count
-    if len(value_range) == count and all(
+        pairs = [[float(value_range[0]), float(value_range[1])]] * count
+    elif len(value_range) == count and all(
         isinstance(pair, list) and len(pair) == 2 and all(isinstance(v, (int, float)) for v in pair)
         for pair in value_range
     ):
-        return [[float(pair[0]), float(pair[1])] for pair in value_range]
-    return None
+        pairs = [[float(pair[0]), float(pair[1])] for pair in value_range]
+    else:
+        return None
+    # Shape is not enough: the viewer's shader divides by `max - min` and embeds both numbers
+    # as GLSL literals. An equal pair divides by zero, and a non-finite endpoint produces
+    # either NaN colours or a shader that will not compile — and `NaN`/`Infinity` are not
+    # valid JSON either, so the collection response itself would be malformed. Refusing here
+    # gives the warned-and-omitted behaviour the caller already handles.
+    if any(not math.isfinite(lo) or not math.isfinite(hi) or lo >= hi for lo, hi in pairs):
+        return None
+    return pairs
 
 
 def _build_renders(artifact: ArtifactRecord, source_dataset: dict[str, Any]) -> dict[str, Any] | None:
