@@ -15,6 +15,7 @@ from pathlib import Path
 from threading import Lock
 from time import monotonic
 from typing import Any, cast
+from urllib.error import HTTPError
 from urllib.parse import urlparse, urlunparse
 from urllib.request import Request, urlopen
 
@@ -359,125 +360,95 @@ def _deaccumulate_tp(tp: xr.DataArray, time_dim: str = "valid_time") -> xr.DataA
 # Earth Data Hub (EDH) plugins — lazy Zarr access, no per-period downloads
 # ---------------------------------------------------------------------------
 
-# Hourly ERA5-Land: Zarr v3. The superseded v2 store (`reanalysis-era5-land-no-antartica-v0`)
-# stopped advancing at 2026-05-31 while this one tracks the daily store — EDH applies updates
-# only to its v3 stores (CLIM-955). Verified identical in every respect that matters to the
-# plugins below: 0-360 longitude, the same latitude range, a `valid_time` axis and the same 50
-# variables including t2m and tp.
+# Hourly ERA5-Land, Zarr v3. The store this replaced stopped advancing at 2026-05-31 while the
+# daily store kept moving, because EDH applies updates only to its v3 stores (CLIM-955).
+# Verified identical in every respect that matters to the plugins below: 0-360 longitude, the
+# same latitude range, a `valid_time` axis and the same 50 variables including t2m and tp.
 _EDH_HOURLY_URL = "https://api.earthdatahub.destine.eu/era5/era5-land-v0.zarr"
 # Daily ERA5-Land: new DestinE API, Zarr v3, requires an additional subscription
 _EDH_DAILY_URL = "https://api.earthdatahub.destine.eu/era5/era5-land-daily-utc-v1.zarr"
 _EDH_API_KEY_ENV = "EDH_API_KEY"
 
 
-# A confirmed format never changes for a given URL, so it is cached for the process.
-_edh_zarr_format_cache: dict[str, int] = {}
-# An *unknown* result is cached only briefly, which is a deliberate middle course between two
-# bad extremes. Memoising it permanently (as `lru_cache` would) lets one transient timeout
-# disable the diagnostic for the process — indistinguishable from the store being healthy.
-# Not caching it at all is worse: `_latest_available` reopens the store for every period, so a
-# store that fsspec can read while these separate requests time out costs up to 30 s *per
-# period*, making an optional diagnostic the bottleneck during exactly the transient failure
-# it exists to tolerate. A short TTL bounds the cost and still self-heals.
-_EDH_UNKNOWN_FORMAT_TTL_SECONDS = 300.0
-_edh_zarr_format_unknown_until: dict[str, float] = {}
-# One warning per store per process. `_latest_available` reopens the store for every period,
-# so without this a multi-year ingest emits the same line thousands of times and buries it.
-_edh_superseded_warned: set[str] = set()
+# A confirmed verdict never changes for a given URL, so it is cached for the process.
+_edh_is_v3_cache: dict[str, bool] = {}
+# An *undeterminable* verdict is cached only briefly — a deliberate middle course. Memoising it
+# permanently would let one transient timeout disable the check for the process. Not caching it
+# at all is worse: `_latest_available` reopens the store for every period, so a store fsspec can
+# read while this separate request times out would cost a 15 s probe *per period*. A short TTL
+# bounds the cost and still recovers on its own.
+_EDH_UNKNOWN_TTL_SECONDS = 300.0
+_edh_unknown_until: dict[str, float] = {}
 
 
-def _zarr_format_of(document: object) -> int | None:
-    """Read the Zarr format out of a ``zarr.json`` or a ``.zmetadata`` document.
+def _edh_is_zarr_v3(url: str) -> bool | None:
+    """Whether an EDH store is Zarr v3. None when the question cannot be answered.
 
-    OCS reads only v3 stores; it still *recognises* an older one, which is not the same thing.
-    Checking ``zarr.json`` alone would answer "not v3" for a superseded store and for a
-    mistyped URL alike, and those want opposite responses. Reading ``.zmetadata`` as well
-    confirms the target really is a Zarr store and names the version it found, so the warning
-    can say what is wrong rather than that something is.
+    A v3 store answers ``zarr.json``; anything else does not. That single probe is the whole
+    test — OCS reads only v3, so there is nothing to learn from identifying *which* older
+    format a store uses.
 
-    Every level is shape-checked rather than assumed. A 200 carrying valid JSON of an
-    unexpected shape — ``[]``, or ``{"metadata": []}`` — would otherwise raise past the
-    caller's handler and take down an open that had already succeeded, turning a diagnostic
-    into an outage.
+    The three-way result matters. A definite 404 means the store is not v3 and the caller
+    should refuse. A timeout or a 5xx means we do not know, and a transient network fault must
+    never be turned into a refusal of a store that reads perfectly well.
     """
-    if not isinstance(document, dict):
-        return None
-    inline = document.get("zarr_format")
-    if isinstance(inline, int):
-        return inline
-    metadata = document.get("metadata")
-    if isinstance(metadata, dict):
-        group = metadata.get(".zgroup")
-        if isinstance(group, dict) and isinstance(group.get("zarr_format"), int):
-            return int(group["zarr_format"])
-    return None
-
-
-def _edh_zarr_format(url: str) -> int | None:
-    """Return the Zarr format of an EDH store, or None when it cannot be determined.
-
-    Probed rather than inferred: a v3 store answers ``zarr.json`` and a v2 store answers
-    ``.zmetadata``. Reading it off the opened ``xr.Dataset`` is not reliable — xarray does not
-    surface the store's format — and inferring it from the URL would go stale the moment a
-    store is migrated in place, which is exactly the case this is meant to catch.
-    """
-    cached = _edh_zarr_format_cache.get(url)
+    cached = _edh_is_v3_cache.get(url)
     if cached is not None:
         return cached
-    if monotonic() < _edh_zarr_format_unknown_until.get(url, 0.0):
+    if monotonic() < _edh_unknown_until.get(url, 0.0):
         return None  # probed recently and could not tell; do not re-probe per period
-    headers = _edh_auth_header(url)
-    for probe in ("zarr.json", ".zmetadata"):
-        try:
-            # The credential-free URL plus an explicit header: `urlopen` does not turn
-            # `user:pass@host` userinfo into Basic Auth the way fsspec does, so probing the
-            # authenticated URL fails for anyone using EDH_API_KEY.
-            request = Request(f"{url}/{probe}", headers=headers)
-            with urlopen(request, timeout=15) as response:  # noqa: S310  # fixed https EDH host
-                zarr_format = _zarr_format_of(json.loads(response.read()))
-        except Exception:  # noqa: BLE001 — a failed probe must never stop a working read
-            continue
-        if zarr_format is not None:
-            _edh_zarr_format_cache[url] = zarr_format
-            _edh_zarr_format_unknown_until.pop(url, None)
-            return zarr_format
-    _edh_zarr_format_unknown_until[url] = monotonic() + _EDH_UNKNOWN_FORMAT_TTL_SECONDS
-    return None
+    verdict: bool | None = None
+    try:
+        # The credential-free URL plus an explicit header: `urlopen` does not turn
+        # `user:pass@host` userinfo into Basic Auth the way fsspec does, so probing the
+        # authenticated URL fails for anyone using EDH_API_KEY.
+        request = Request(f"{url}/zarr.json", headers=_edh_auth_header(url))
+        with urlopen(request, timeout=15) as response:  # noqa: S310  # fixed https EDH host
+            document = json.loads(response.read())
+        # Only a document that actually states its format is evidence. A 200 of an unexpected
+        # shape — `[]`, or a proxy's JSON error page — says nothing about the store, so it is
+        # unknown rather than non-v3: refusing on it would break a store that reads fine.
+        declared = document.get("zarr_format") if isinstance(document, dict) else None
+        verdict = declared >= 3 if isinstance(declared, int) else None
+    except HTTPError as error:
+        # 404 is an answer: there is no v3 metadata document here. Any other status is not.
+        verdict = False if error.code == 404 else None
+    except Exception:  # noqa: BLE001 — an unreachable store is unknown, not non-v3
+        verdict = None
+    if verdict is None:
+        _edh_unknown_until[url] = monotonic() + _EDH_UNKNOWN_TTL_SECONDS
+        return None
+    _edh_is_v3_cache[url] = verdict
+    _edh_unknown_until.pop(url, None)
+    return verdict
 
 
-def _warn_if_superseded(url: str, ds: xr.Dataset) -> None:
-    """Warn when an EDH store is not Zarr v3, because it is no longer being updated.
+def _require_zarr_v3(url: str, ds: xr.Dataset) -> None:
+    """Refuse a store that is not Zarr v3, closing it first.
 
-    EDH keeps superseded stores readable, so a v2 store does not fail — it silently stops
-    advancing. An ingest against one then reports no new periods, which is indistinguishable
-    from "nothing has been published yet" (the same shape as CLIM-952). This makes the stall
-    visible, and reports the store's own latest timestamp so the gap is concrete rather than
-    theoretical.
+    OCS reads only Zarr v3. EDH keeps superseded stores readable and applies updates only to
+    the v3 ones, so an older store does not fail — it silently stops advancing, and an ingest
+    against it reports no new periods, which is indistinguishable from "nothing has been
+    published yet" (the same shape as CLIM-952). Refusing is what makes that visible.
+
+    Only a *confirmed* non-v3 store is refused. An undeterminable probe leaves the store
+    usable, because a network fault is not evidence about the store's format.
     """
-    zarr_format = _edh_zarr_format(url)
-    if zarr_format is None or zarr_format >= 3:
+    if _edh_is_zarr_v3(url) is not False:
         return
-    # Once per store per process: `_latest_available` reopens the store for every period, so a
-    # multi-year ingest would otherwise repeat this line thousands of times and bury it.
-    if url in _edh_superseded_warned:
-        return
-    _edh_superseded_warned.add(url)
     latest = ""
     time_dim = next((name for name in ("valid_time", "time") if name in ds.coords), None)
     if time_dim and ds.sizes.get(time_dim):
         try:
-            # A lazy remote read: the coordinate chunk still has to be fetched and decoded, and
-            # that can fail on its own. The timestamp only sharpens the message, so losing it
-            # must not turn a store that opened successfully into a failed ingest.
-            latest = f"; its latest timestamp is {str(ds[time_dim].isel({time_dim: -1}).values)[:16]}"
-        except Exception:  # noqa: BLE001 — enrichment is optional, the warning is not
-            logger.debug("Could not read the latest timestamp of %s for the warning", url, exc_info=True)
-    logger.warning(
-        "Earth Data Hub store %s is Zarr v%d, not v3. EDH applies updates only to its Zarr v3 "
-        "stores, so this one no longer advances%s. See CLIM-955.",
-        url,
-        zarr_format,
-        latest,
+            # A lazy remote read, which can fail on its own. It only sharpens the message.
+            latest = f" Its latest timestamp is {str(ds[time_dim].isel({time_dim: -1}).values)[:16]}."
+        except Exception:  # noqa: BLE001 — enrichment is optional, the refusal is not
+            logger.debug("Could not read the latest timestamp of %s", url, exc_info=True)
+    ds.close()
+    raise RuntimeError(
+        f"Earth Data Hub store {url} is not Zarr v3, and OCS reads only v3 stores. EDH applies "
+        f"updates only to its Zarr v3 stores, so this one no longer advances.{latest} "
+        f"Repoint it at the v3 store for this dataset. See CLIM-955."
     )
 
 
@@ -490,14 +461,14 @@ def _edh_open_zarr(url: str) -> xr.Dataset:
 
     Every store OCS pins is Zarr v3, which carries its metadata inline, so nothing here has to
     say how to find it — the `consolidated` switch that older stores needed is gone with them.
-    `_warn_if_superseded` is what keeps that assumption honest: EDH leaves superseded stores
+    `_require_zarr_v3` is what keeps that assumption honest: EDH leaves superseded stores
     readable, and they fail by going quiet rather than by erroring (CLIM-955).
     """
     opened = xr.open_zarr(
         _edh_authenticated_url(url),
         storage_options={"client_kwargs": {"trust_env": True}},
     )
-    _warn_if_superseded(url, opened)
+    _require_zarr_v3(url, opened)
     return opened  # type: ignore[no-any-return]
 
 
