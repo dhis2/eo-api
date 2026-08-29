@@ -387,7 +387,13 @@ _edh_superseded_warned: set[str] = set()
 
 
 def _zarr_format_of(document: object) -> int | None:
-    """Read the Zarr format out of a ``zarr.json`` (v3) or ``.zmetadata`` (v2) document.
+    """Read the Zarr format out of a ``zarr.json`` or a ``.zmetadata`` document.
+
+    OCS reads only v3 stores; it still *recognises* an older one, which is not the same thing.
+    Checking ``zarr.json`` alone would answer "not v3" for a superseded store and for a
+    mistyped URL alike, and those want opposite responses. Reading ``.zmetadata`` as well
+    confirms the target really is a Zarr store and names the version it found, so the warning
+    can say what is wrong rather than that something is.
 
     Every level is shape-checked rather than assumed. A 200 carrying valid JSON of an
     unexpected shape — ``[]``, or ``{"metadata": []}`` — would otherwise raise past the
@@ -482,14 +488,13 @@ def _edh_open_zarr(url: str) -> xr.Dataset:
     (username ``edh``, password = key).  Falls back to netrc when the
     variable is not set.
 
-    Every store OCS pins is Zarr v3, which carries its metadata inline — so there is no
-    consolidated-metadata switch to set. `_warn_if_superseded` is the guard that this stays
-    true: EDH keeps superseded v2 stores readable, and they fail by going quiet, not by
-    erroring (CLIM-955).
+    Every store OCS pins is Zarr v3, which carries its metadata inline, so nothing here has to
+    say how to find it — the `consolidated` switch that older stores needed is gone with them.
+    `_warn_if_superseded` is what keeps that assumption honest: EDH leaves superseded stores
+    readable, and they fail by going quiet rather than by erroring (CLIM-955).
     """
     opened = xr.open_zarr(
         _edh_authenticated_url(url),
-        consolidated=None,
         storage_options={"client_kwargs": {"trust_env": True}},
     )
     _warn_if_superseded(url, opened)
