@@ -212,7 +212,7 @@
           <dl id="dataset-meta" class="meta-grid hidden">
             <dt>Source</dt>
             <dd id="meta-source">—</dd>
-            <dt>Units</dt>
+            <dt id="meta-units-label">Units</dt>
             <dd id="meta-units">—</dd>
           </dl>
 
@@ -488,6 +488,7 @@
       const datasetMeta = document.getElementById("dataset-meta");
       const metaSource = document.getElementById("meta-source");
       const metaUnits = document.getElementById("meta-units");
+      const metaUnitsLabel = document.getElementById("meta-units-label");
       const legendEl = document.getElementById("legend");
       const legendBar = document.getElementById("legend-bar");
       const legendMin = document.getElementById("legend-min");
@@ -742,7 +743,17 @@
         );
         const units = collection["cube:variables"]?.[variable]?.unit ?? "";
         metaSource.textContent = source ?? "—";
-        metaUnits.textContent = units || "—";
+        // A composite is a picture, not a measurement, so its unit is an artefact of having to
+        // put something in the field: the imagery layers declare `1`, which tells a reader
+        // nothing and invites them to treat display values as calibrated. Hide the row for
+        // those, and for a dataset that declares no unit at all — an em dash is not
+        // information either. The same reasoning already hides the legend for a composite.
+        // The `.hidden` class rather than the `hidden` attribute: it carries `!important`, so
+        // it cannot be defeated by an author `display` rule on a grid item.
+        const showUnits = !rgb && Boolean(units);
+        metaUnits.textContent = units;
+        metaUnitsLabel.classList.toggle("hidden", !showUnits);
+        metaUnits.classList.toggle("hidden", !showUnits);
         datasetMeta.classList.remove("hidden");
 
         updateLegend(cm, clim, units);
