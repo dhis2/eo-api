@@ -482,6 +482,15 @@
       let selector = {};
       // { bands, rescale, dimension } for a true-colour collection, else null.
       let rgb = null;
+      // Set once a dataset has positioned the view, so the instance-extent fit cannot undo it.
+      // `fitToExtent` awaits a fetch, so without this it can resolve *after* the first
+      // dataset has loaded and yank the view back out to the whole country.
+      let viewPinnedByLayer = false;
+
+      // A layer spanning less than this fraction of the viewport is treated as out of view.
+      // The 1.3 km Vantor footprint is 0.2% of Nepal's width: technically on screen at the
+      // instance extent, and impossible to find.
+      const MIN_VISIBLE_SPAN = 0.1;
 
       const selectEl = document.getElementById("dataset-select");
       const dimControls = document.getElementById("dim-controls");
@@ -551,7 +560,7 @@
       }
 
       async function fitToExtent() {
-        if (!map || mapUnavailable) return;
+        if (!map || mapUnavailable || viewPinnedByLayer) return;
         try {
           const res = await fetch("{{ base }}/extent");
           if (!res.ok) return;
@@ -559,6 +568,44 @@
           const [xmin, ymin, xmax, ymax] = extent.bbox;
           map.fitBounds([[xmin, ymin], [xmax, ymax]], { padding: 40, maxZoom: 10 });
         } catch {}
+      }
+
+
+      // Bring a newly selected layer into view when it would otherwise be unfindable.
+      //
+      // Deliberately conditional. Re-fitting on every dataset switch would discard a view the
+      // user had chosen — comparing two layers over the same spot means switching between them
+      // without the map moving — so this only acts when the layer is genuinely not viewable:
+      // outside the viewport entirely, or so small within it as to be a speck.
+      //
+      // Zooming *out* is not handled: a layer larger than the viewport is still visible, and a
+      // user zoomed into a global dataset is looking at exactly what they asked for.
+      function revealLayer(collection) {
+        if (!map || mapUnavailable) return;
+        const bbox = collection.extent?.spatial?.bbox?.[0];
+        if (!Array.isArray(bbox) || bbox.length < 4) return;
+        const [w, s, e, n] = bbox.slice(0, 4).map(Number);
+        if (![w, s, e, n].every(Number.isFinite) || w >= e || s >= n) return;
+
+        const view = map.getBounds();
+        const viewWidth = view.getEast() - view.getWest();
+        const viewHeight = view.getNorth() - view.getSouth();
+        // Before the map has a size, getBounds is not meaningful; fit rather than divide by it.
+        const measurable = Number.isFinite(viewWidth) && Number.isFinite(viewHeight) && viewWidth > 0 && viewHeight > 0;
+
+        if (measurable) {
+          const offscreen =
+            e < view.getWest() || w > view.getEast() || n < view.getSouth() || s > view.getNorth();
+          const spanRatio = Math.max((e - w) / viewWidth, (n - s) / viewHeight);
+          if (!offscreen && spanRatio >= MIN_VISIBLE_SPAN) {
+            viewPinnedByLayer = true;
+            return;
+          }
+        }
+        // maxZoom so a sub-kilometre footprint stops at a usable scale instead of going to
+        // street level, where the imagery is past its own resolution.
+        map.fitBounds([[w, s], [e, n]], { padding: 40, maxZoom: 16 });
+        viewPinnedByLayer = true;
       }
 
       async function loadCatalog() {
@@ -757,6 +804,7 @@
         datasetMeta.classList.remove("hidden");
 
         updateLegend(cm, clim, units);
+        revealLayer(collection);
 
         setStatus("");
       }
