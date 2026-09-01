@@ -106,6 +106,7 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
         dataset_href=dataset_href,
         zarr_href=zarr_href,
         source_dataset=source_dataset,
+        description=_collection_description(dataset_id, artifact, source_dataset),
     )
     template_links = [_link_to_dict(link) for link in template.links]
     period_type = source_dataset.get("period_type")
@@ -169,6 +170,27 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
     return collection_payload
 
 
+def _collection_description(dataset_id: str, artifact: ArtifactRecord, source_dataset: dict[str, Any]) -> str:
+    """The collection description: the template's own text when it has one (CLIM-973).
+
+    A dataset template can carry a `description`, and until this it had no reader anywhere —
+    the collection always published a generated sentence, so a template author wrote a
+    description, saw it accepted, and it went nowhere. That matters most for datasets whose
+    values mislead without a caveat: Meta RWI ranks micro-regions *within one country*, MODIS
+    LST is surface rather than 2 m air temperature, CHIRPS3 monthly is a mean daily rate and
+    not a monthly total. Each is a trap that produces plausible-looking output when missed, and
+    the published collection is the only place an API consumer would look.
+
+    The generated fallback stays for templates without one, and notably for openEO
+    `save_result` outputs, which have no template block at all.
+    """
+    description = source_dataset.get("description")
+    if isinstance(description, str) and description.strip():
+        return description.strip()
+    logger.debug("Dataset %s declares no description; using the generated one", dataset_id)
+    return f"Published GeoZarr dataset for {artifact.dataset_name}"
+
+
 def _eligible_artifacts_by_dataset() -> dict[str, ArtifactRecord]:
     return ingestion_services.latest_published_zarr_artifacts_by_dataset()
 
@@ -182,12 +204,13 @@ def _build_collection_template(
     dataset_href: str,
     zarr_href: str,
     source_dataset: dict[str, Any],
+    description: str,
 ) -> pystac.Collection:
     spatial = artifact.coverage.spatial_wgs84 or artifact.coverage.spatial
     temporal = artifact.coverage.temporal
     template = pystac.Collection(
         id=dataset_id,
-        description=f"Published GeoZarr dataset for {artifact.dataset_name}",
+        description=description,
         extent=pystac.Extent(
             spatial=pystac.SpatialExtent([[spatial.xmin, spatial.ymin, spatial.xmax, spatial.ymax]]),
             temporal=pystac.TemporalExtent(
@@ -641,6 +664,11 @@ def _build_cube_variables(ds: xr.Dataset) -> dict[str, Any]:
             "dimensions": [str(d) for d in var.dims],
             "unit": var.attrs.get("units"),
         }
+        # See `_sanitize_variable_attrs`: unprefixed, because the CF extension does not define
+        # `cf:comment`. Both builders must agree or the field appears on one path only.
+        comment = var.attrs.get("comment")
+        if isinstance(comment, str):
+            entry.setdefault("attrs", {})["comment"] = comment
         # Surface the CF semantics stamped onto the store so catalog clients can identify the
         # quantity, not just its unit (CLIM-828). Named per the STAC CF extension, which lists
         # `cube:variables` among the places its fields may be used — an unprefixed
@@ -721,6 +749,15 @@ def _sanitize_variable_attrs(collection: dict[str, Any]) -> None:
         if isinstance(units, str):
             kept_attrs["units"] = units
             variable["unit"] = units
+        # `comment` is where CF puts a caveat about the values, and it is the per-variable
+        # counterpart to the collection description above. Deliberately NOT emitted as
+        # `cf:comment`: the STAC CF extension v1.0.0 defines only `cf:standard_name` and
+        # `cf:cell_methods`, so prefixing it would invent a field and then declare conformance
+        # to an extension that does not define it. `attrs` is a passthrough of the store's own
+        # CF attribute names, which is exactly what this is.
+        comment = attrs.get("comment")
+        if isinstance(comment, str):
+            kept_attrs["comment"] = comment
         # Same CF semantics as _build_cube_variables, for the xstac-produced path. Prefixed at
         # the cube:variable level (a defined STAC CF extension field); unprefixed inside
         # `attrs`, which is a passthrough of the store's own CF attribute names.

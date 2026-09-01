@@ -1335,6 +1335,7 @@ def _build_dataset_record(dataset_id: str, artifacts: list[ArtifactRecord]) -> D
         source_dataset_id=latest.source_dataset_id or latest.dataset_id,
         dataset_name=latest.dataset_name,
         short_name=_as_optional_str(source_dataset.get("short_name")),
+        description=_as_optional_str(source_dataset.get("description")),
         variable=latest.variable,
         period_type=_as_optional_str(source_dataset.get("period_type")) or latest.period_type or "unknown",
         units=_as_optional_str(source_dataset.get("units")),
