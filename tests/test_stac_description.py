@@ -141,3 +141,21 @@ def test_a_non_string_comment_is_dropped() -> None:
     collection = _collection_with_attrs({"long_name": "RWI", "comment": 3.14})
     _sanitize_variable_attrs(collection)
     assert "comment" not in collection["cube:variables"]["rwi"]["attrs"]
+
+
+# -- /datasets applies the same normalisation as STAC -----------------------------------
+
+
+def test_datasets_description_is_stripped_and_blank_becomes_null() -> None:
+    """The two public catalogue surfaces must agree about the same template field.
+
+    Without this, `/datasets` published "   " where the STAC collection fell back to the
+    generated sentence — and `description: >-` folded YAML routinely leaves a trailing newline.
+    """
+    from open_climate_service.ingestions.services import _as_optional_text
+
+    assert _as_optional_text("  Caveat.\n") == "Caveat."
+    for blank in ("", "   ", "\n\t "):
+        assert _as_optional_text(blank) is None
+    for bad in (42, ["a"], {"t": "x"}, None):
+        assert _as_optional_text(bad) is None

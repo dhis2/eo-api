@@ -637,8 +637,12 @@
         // relative within one country, MODIS LST is surface and not air temperature. Skipped
         // when it is the generated fallback, which tells a reader nothing the dataset name
         // does not already.
+        // Compared exactly, not by prefix: the collection title is the same string the
+        // fallback is built from, so a real description that happens to open with those words
+        // ("Published GeoZarr dataset for X - use only within one country") is kept rather
+        // than mistaken for the generated one.
         const description = collection.description ?? "";
-        const generated = description.startsWith("Published GeoZarr dataset for");
+        const generated = description === `Published GeoZarr dataset for ${collection.title}`;
         metaDescription.textContent = description;
         metaDescription.classList.toggle("hidden", !description || generated);
 
