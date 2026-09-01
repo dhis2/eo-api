@@ -78,6 +78,30 @@ def test_variable_comment_survives_sanitisation() -> None:
     assert collection["cube:variables"]["rwi"]["attrs"]["comment"] == comment
 
 
+@pytest.mark.parametrize("attr", ["comment", "references", "institution", "source"])
+def test_every_cf_2_6_2_variable_attribute_survives(attr: str) -> None:
+    """CF s2.6.2 allows institution, source, references and comment "to be either global or
+    assigned to individual variables", so all four are legal at variable scope and all four
+    pass through. `references` matters most: it is the standard home for attribution, so a
+    plugin should use it rather than inventing an `attribution` attribute.
+
+    CF is formally a netCDF convention and GeoZarr does not mandate it; OCS adopts it anyway
+    (`shared/cf.py`, and the STAC CF extension is already emitted), so 2.6.2 is what decides
+    which of these belong on a variable rather than globally."""
+    collection = _collection_with_attrs({"long_name": "X", attr: "value"})
+    _sanitize_variable_attrs(collection)
+    assert collection["cube:variables"]["rwi"]["attrs"][attr] == "value"
+
+
+@pytest.mark.parametrize("attr", ["title", "history"])
+def test_global_only_cf_attributes_are_not_passed_through(attr: str) -> None:
+    """`title` and `history` are global-only in CF 2.6.2 — the "newly defined attributes"
+    sentence names only the other four — so they have no place on a variable."""
+    collection = _collection_with_attrs({"long_name": "X", attr: "value"})
+    _sanitize_variable_attrs(collection)
+    assert attr not in collection["cube:variables"]["rwi"]["attrs"]
+
+
 def test_comment_is_not_emitted_as_a_cf_field() -> None:
     """The STAC CF extension v1.0.0 defines only `cf:standard_name` and `cf:cell_methods`.
 
@@ -95,8 +119,18 @@ def test_comment_is_not_emitted_as_a_cf_field() -> None:
 
 def test_unlisted_attrs_are_still_dropped() -> None:
     """Adding `comment` must not turn the allowlist into a passthrough of everything."""
+    # The real noise: WorldPop rasters arrive with all of these on the variable.
     collection = _collection_with_attrs(
-        {"long_name": "RWI", "comment": "keep", "_FillValue": "drop", "grid_mapping": "drop"}
+        {
+            "long_name": "RWI",
+            "comment": "keep",
+            "_FillValue": "drop",
+            "grid_mapping": "drop",
+            "AREA_OR_POINT": "drop",
+            "TIFFTAG_COPYRIGHT": "drop",
+            "STATISTICS_MEAN": "drop",
+            "source_license": "drop, CLIM-946 owns licensing",
+        }
     )
     _sanitize_variable_attrs(collection)
     kept = collection["cube:variables"]["rwi"]["attrs"]
