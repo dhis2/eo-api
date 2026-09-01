@@ -773,6 +773,60 @@ def _recover_temporal_from_attrs(ds: Any) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _apply_derived_licence(
+    template: dict[str, Any], options: dict[str, Any], source_template: dict[str, Any] | None
+) -> None:
+    """Set the derived product's licence, and refuse one more permissive than its input.
+
+    A derived product is a derivative work: a water mask computed from CC-BY-NC imagery
+    inherits the restriction. Before CLIM-946 this path published every derived collection as
+    `various`, which is licence laundering by accident — and it is the *default* path, so
+    nothing had to go wrong for it to happen.
+
+    ⚠️ ONE INPUT, NOT ALL OF THEM. OCS records a single `source_dataset_id` on save_result, so
+    that is the only input whose licence can be read here. A process with several inputs —
+    `compute_anomaly` takes an observed dataset *and* a normal — propagates only from the one
+    it was told about. If the other input were more restrictive, this would not catch it.
+    Closing that needs save_result to carry every contributing dataset id, which is a change to
+    the process graph contract rather than to this function.
+    """
+    from open_climate_service.shared.licences import UNDECLARED, parse_licence, refuses_publication
+
+    inputs = []
+    if isinstance(source_template, dict):
+        inherited = parse_licence(source_template.get("license"))
+        if inherited is not UNDECLARED:
+            inputs.append(inherited)
+
+    explicit = options.get("license")
+    if explicit is not None:
+        declared = parse_licence(explicit)
+        refusal = refuses_publication(declared, inputs)
+        if refusal:
+            raise ValueError(refusal)
+        template["license"] = explicit
+        return
+
+    # No explicit licence: inherit the input's rather than leaving it undeclared, which is the
+    # whole point — the derived product must not be more permissive by omission.
+    if inputs:
+        source_licence = source_template.get("license") if isinstance(source_template, dict) else None
+        if source_licence is not None:
+            template["license"] = source_licence
+            logger.info(
+                "Derived dataset %s inherits licence %s from %s",
+                template.get("id"),
+                inputs[0].label,
+                options.get("source_dataset_id"),
+            )
+
+    providers = options.get("providers")
+    if providers is None and isinstance(source_template, dict):
+        providers = source_template.get("providers")
+    if isinstance(providers, list) and providers:
+        template["providers"] = providers
+
+
 def _resolve_source_template(options: dict[str, Any]) -> dict[str, Any] | None:
     """Return the source dataset template referenced in save_result options, if any."""
     source_dataset_id = options.get("source_dataset_id")
@@ -842,6 +896,8 @@ def _derive_managed_dataset_template(
         inherited = source_template.get(field) if isinstance(source_template, dict) else None
         if isinstance(inherited, str) and inherited:
             template[field] = inherited
+
+    _apply_derived_licence(template, options, source_template)
 
     return template
 

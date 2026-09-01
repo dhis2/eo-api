@@ -22,6 +22,7 @@ from open_climate_service.data_registry.services import datasets as registry_dat
 from open_climate_service.ingestions import services as ingestion_services
 from open_climate_service.ingestions.schemas import ArtifactFormat, ArtifactRecord
 from open_climate_service.shared.crs import canonical_crs_code, is_builtin_crs
+from open_climate_service.shared.licences import DatasetLicence, parse_licence
 from open_climate_service.shared.time import (
     Cadence,
     parse_period_string_to_datetime,
@@ -126,6 +127,7 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
     catalog_href = _abs_url(request, "/stac/catalog.json")
     dataset_href = _abs_url(request, f"/datasets/{dataset_id}")
     zarr_href = _public_zarr_asset_href(request, dataset_id, artifact, source_dataset)
+    licence = parse_licence(source_dataset.get("license"))
 
     template = _build_collection_template(
         dataset_id=dataset_id,
@@ -136,6 +138,7 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
         zarr_href=zarr_href,
         source_dataset=source_dataset,
         description=_collection_description(dataset_id, artifact, source_dataset),
+        licence=licence,
     )
     template_links = [_link_to_dict(link) for link in template.links]
     period_type = source_dataset.get("period_type")
@@ -156,6 +159,18 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
         collection_payload["stac_extensions"] = sorted({*existing_extensions, *extensions})
     else:
         collection_payload["stac_extensions"] = sorted(extensions)
+    # STAC defines `rel: license` for exactly this, and it is the only way a bespoke licence
+    # travels: the `license` field can only say `other`, so without the link a client learns
+    # nothing about the Copernicus terms beyond "not SPDX".
+    if licence.url:
+        template_links.append(
+            {
+                "rel": "license",
+                "href": licence.url,
+                "type": "text/html",
+                "title": licence.name or licence.identifier or "Licence",
+            }
+        )
     collection_payload["links"] = template_links
     assets = collection_payload.setdefault("assets", {})
     zarr_from_xstac = assets.get("zarr", {}) if isinstance(assets, dict) else {}
@@ -179,6 +194,9 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
             "xarray:open_kwargs": {"zarr_format": 3, "consolidated": False},
         }
     collection_payload["license"] = template.license
+    providers = _build_providers(source_dataset)
+    if providers:
+        collection_payload["providers"] = providers
     _remove_helper_variables(collection_payload)
     _round_spatial_steps(collection_payload)
     # Prefer an explicit extents.temporal.resolution; fall back to the dataset's
@@ -220,6 +238,38 @@ def _collection_description(dataset_id: str, artifact: ArtifactRecord, source_da
     return f"Published GeoZarr dataset for {artifact.dataset_name}"
 
 
+def _build_providers(source_dataset: dict[str, Any]) -> list[dict[str, Any]]:
+    """STAC `providers` from the template, for carrying attribution (CLIM-946).
+
+    Attribution is a licence condition under CC-BY and CC-BY-NC, not a courtesy, and OCS had
+    nowhere to record it at collection level. Entries are passed through with only their shape
+    checked — STAC defines `name`, `description`, `roles` and `url`, and inventing validation
+    beyond that would reject legitimate metadata.
+    """
+    declared = source_dataset.get("providers")
+    if not isinstance(declared, list):
+        return []
+    providers: list[dict[str, Any]] = []
+    for entry in declared:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        provider: dict[str, Any] = {"name": name.strip()}
+        for key in ("description", "url"):
+            value = entry.get(key)
+            if isinstance(value, str) and value.strip():
+                provider[key] = value.strip()
+        roles = entry.get("roles")
+        if isinstance(roles, list):
+            cleaned = [str(r) for r in roles if isinstance(r, str) and r.strip()]
+            if cleaned:
+                provider["roles"] = cleaned
+        providers.append(provider)
+    return providers
+
+
 def _eligible_artifacts_by_dataset() -> dict[str, ArtifactRecord]:
     return ingestion_services.latest_published_zarr_artifacts_by_dataset()
 
@@ -234,6 +284,7 @@ def _build_collection_template(
     zarr_href: str,
     source_dataset: dict[str, Any],
     description: str,
+    licence: DatasetLicence,
 ) -> pystac.Collection:
     spatial = artifact.coverage.spatial_wgs84 or artifact.coverage.spatial
     temporal = artifact.coverage.temporal
@@ -257,7 +308,7 @@ def _build_collection_template(
             PROJECTION_EXTENSION,
             ZARR_EXTENSION,
         ],
-        license=DEFAULT_STAC_LICENSE,
+        license=licence.stac_license,
     )
     # WGS84 default; the store's native CRS (read from its proj:code attr in
     # _build_collection_with_xstac) overrides this. The instance config CRS is
