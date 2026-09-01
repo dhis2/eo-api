@@ -40,7 +40,7 @@
   # while looking entirely plausible. The YAML comment below explains it to whoever edits this
   # file; this explains it to whoever uses the data.
   description: >-
-    Units are MEAN DAILY RATE in mm/d, not a monthly total. Multiply by the days in the month
+    Units are mm/d — a MEAN DAILY RATE, not a monthly total. Multiply by the days in the month
     to get the total.
   sync:
     kind: temporal
