@@ -7,12 +7,15 @@ restriction — on the default path, with nothing to catch it.
 
 import glob
 import pathlib
+import re
 from typing import TYPE_CHECKING
 
 import pytest
 import yaml
 
 from open_climate_service.shared.licences import (
+    ATTRIBUTION,
+    NON_COMMERCIAL,
     STAC_LICENSE_OTHER,
     UNDECLARED,
     most_restrictive,
@@ -32,14 +35,32 @@ _BUILTIN_TEMPLATES = sorted(glob.glob("open_climate_service/plugins/datasets/*.y
 def test_spdx_identifier_is_recognised() -> None:
     licence = parse_licence("CC-BY-4.0")
     assert licence.identifier == "CC-BY-4.0"
+    assert licence.obligations == frozenset({ATTRIBUTION})
     assert licence.commercial_use is True
     assert licence.stac_license == "CC-BY-4.0"
 
 
+def test_spdx_matching_is_case_insensitive_but_output_is_canonical() -> None:
+    """`cc-by-4.0` is easy to write in YAML; the published identifier must still be canonical,
+    because `license` is a constrained STAC field."""
+    assert parse_licence("cc-by-4.0").stac_license == "CC-BY-4.0"
+
+
+def test_an_unrecognised_string_is_a_name_not_an_spdx_identifier() -> None:
+    """Emitting a vendor string verbatim would produce a collection that does not validate.
+
+    It is kept as a name — so nothing is lost — and published as `other`.
+    """
+    licence = parse_licence("SomeVendorLicence-2.0")
+    assert licence.identifier is None
+    assert licence.name == "SomeVendorLicence-2.0"
+    assert licence.stac_license == STAC_LICENSE_OTHER
+    assert licence.known is False
+
+
 @pytest.mark.parametrize("identifier", ["CC-BY-NC-4.0", "CC-BY-NC-SA-4.0", "CC-BY-NC-ND-4.0", "cc-by-nc-3.0"])
 def test_every_non_commercial_cc_licence_is_caught(identifier: str) -> None:
-    """Matched on the CC `NC` element rather than an enumeration, so the whole family is
-    covered — including a lower-cased identifier, which YAML makes easy to write."""
+    assert NON_COMMERCIAL in parse_licence(identifier).obligations
     assert parse_licence(identifier).commercial_use is False
 
 
@@ -56,13 +77,22 @@ def test_a_named_licence_without_spdx_is_accepted() -> None:
     assert licence.identifier is None
     assert licence.name == "Licence to Use Copernicus Products"
     assert licence.commercial_use is True
+    assert licence.obligations == frozenset({ATTRIBUTION})
     # STAC 1.1 has a defined value for "not SPDX", and it is not `various`.
     assert licence.stac_license == STAC_LICENSE_OTHER
 
 
 def test_an_unknown_identifier_is_unknown_not_permissive() -> None:
-    """The safe answer for an identifier nobody has checked is "we do not know"."""
+    """The safe answer for a licence nobody has checked is "we do not know"."""
     assert parse_licence("SomeVendorLicence-2.0").commercial_use is None
+
+
+def test_explicit_obligations_describe_a_licence_in_neither_table() -> None:
+    licence = parse_licence(
+        {"name": "Vendor Terms", "url": "https://x", "obligations": ["attribution", "non-commercial"]}
+    )
+    assert licence.known is True
+    assert licence.commercial_use is False
 
 
 @pytest.mark.parametrize("bad", [None, "", "   ", 42, [], {}, {"url": "https://x"}])
@@ -74,6 +104,7 @@ def test_unusable_declarations_degrade_to_undeclared(bad: object) -> None:
 def test_undeclared_publishes_as_other() -> None:
     assert UNDECLARED.stac_license == STAC_LICENSE_OTHER
     assert UNDECLARED.commercial_use is None
+    assert UNDECLARED.known is False
 
 
 # -- comparison -------------------------------------------------------------------------
@@ -85,14 +116,26 @@ def test_non_commercial_beats_permissive() -> None:
 
 
 def test_unknown_beats_permissive() -> None:
-    """Deriving from an unlabelled input yields unknown, not permissive. Assuming permissive is
-    exactly the laundering this exists to prevent."""
+    """Deriving from an unlabelled input yields unknown, not permissive."""
     assert most_restrictive([parse_licence("CC0-1.0"), UNDECLARED]) is UNDECLARED
 
 
-def test_non_commercial_beats_unknown() -> None:
-    nc = parse_licence("CC-BY-NC-4.0")
-    assert most_restrictive([UNDECLARED, nc]) is nc
+def test_attribution_alone_makes_a_licence_more_restrictive_than_cc0() -> None:
+    """Commercial use is one obligation among several. Comparing on it alone would rank CC0 and
+    CC-BY-4.0 as equivalent and let a derived product quietly drop attribution."""
+    cc_by = parse_licence("CC-BY-4.0")
+    assert most_restrictive([parse_licence("CC0-1.0"), cc_by]) is cc_by
+
+
+def test_unknown_beats_even_non_commercial() -> None:
+    """Unknown wins outright, including over a known-restrictive licence.
+
+    Deliberate: "most restrictive" cannot be answered when one input has not been described,
+    because it might require more than any of the others. Returning the unknown one says so.
+    The decision about whether anything may be published from such a mix belongs to
+    `refuses_publication`, which fails closed.
+    """
+    assert most_restrictive([UNDECLARED, parse_licence("CC-BY-NC-4.0")]) is UNDECLARED
 
 
 def test_a_single_input_is_returned_unchanged() -> None:
@@ -118,6 +161,25 @@ def test_a_derived_product_may_match_its_input() -> None:
 
 def test_a_derived_product_may_be_more_restrictive_than_its_input() -> None:
     assert refuses_publication(parse_licence("CC-BY-NC-4.0"), [parse_licence("CC0-1.0")]) is None
+
+
+def test_dropping_attribution_is_refused_even_though_both_allow_commercial_use() -> None:
+    """CC0 from CC-BY-4.0: both permit commercial use, but the derived product would shed
+    WorldPop's attribution requirement."""
+    refusal = refuses_publication(parse_licence("CC0-1.0"), [parse_licence("CC-BY-4.0")])
+    assert refusal is not None
+    assert "attribution" in refusal
+
+
+def test_dropping_share_alike_is_refused() -> None:
+    refusal = refuses_publication(parse_licence("CC-BY-4.0"), [parse_licence("CC-BY-SA-4.0")])
+    assert refusal is not None
+    assert "share-alike" in refusal
+
+
+def test_an_unparseable_declared_licence_is_refused_not_waved_through() -> None:
+    """Fails closed: if either side is not understood the pair is incomparable."""
+    assert refuses_publication(parse_licence("MysteryTerms"), [parse_licence("CC-BY-4.0")]) is not None
 
 
 def test_claiming_permissive_from_an_unlabelled_input_is_refused() -> None:
@@ -156,25 +218,46 @@ def test_every_builtin_licence_parses(path: str) -> None:
         )
 
 
-def test_derived_builtins_are_no_more_permissive_than_their_source() -> None:
-    """The normals and anomalies are derivative works of CHIRPS3 and ERA5-Land, and were the
-    templates the first pass missed — they carry no `source_url`, so an insertion anchored on
-    that skipped every one of them."""
-    by_id = {}
+def _builtin_licences() -> dict:
+    licences = {}
     for path in _BUILTIN_TEMPLATES:
         for template in yaml.safe_load(pathlib.Path(path).read_text(encoding="utf-8")):
             if isinstance(template, dict) and template.get("id"):
-                by_id[template["id"]] = parse_licence(template.get("license"))
+                licences[template["id"]] = parse_licence(template.get("license"))
+    return licences
 
-    for derived_id, source_id in (
-        ("chirps3_precipitation_monthly_normal_1991_2020", "chirps3_precipitation_monthly"),
-        ("chirps3_precipitation_monthly_anomaly_1991_2020", "chirps3_precipitation_monthly"),
-        ("era5land_temperature_monthly_normal_1991_2020", "era5land_temperature_monthly"),
-        ("era5land_temperature_monthly_anomaly_1991_2020", "era5land_temperature_monthly"),
-    ):
-        assert refuses_publication(by_id[derived_id], [by_id[source_id]]) is None, (
-            f"{derived_id} is more permissive than {source_id}"
-        )
+
+def _derived_source_pairs() -> list[tuple[str, str]]:
+    """Every derived built-in paired with the dataset it is computed from.
+
+    Derived from the ids rather than listed by hand: an earlier version enumerated four pairs
+    and left twelve unchecked, so a licence change in any of those twelve could have loosened
+    silently. Suffix-stripping means a new normal or anomaly is covered the day it is added.
+    """
+    ids = set(_builtin_licences())
+    pairs = []
+    for dataset_id in sorted(ids):
+        base = re.sub(r"_(relative_)?(normal|anomaly)_\d{4}_\d{4}$", "", dataset_id)
+        if base != dataset_id and base in ids:
+            pairs.append((dataset_id, base))
+    return pairs
+
+
+def test_the_derived_pairs_are_actually_found() -> None:
+    """Guards the guard: a suffix change would silently empty the parametrisation below and
+    the whole check would pass by testing nothing."""
+    assert len(_derived_source_pairs()) >= 12
+
+
+@pytest.mark.parametrize(("derived_id", "source_id"), _derived_source_pairs(), ids=lambda v: v)
+def test_no_derived_builtin_is_more_permissive_than_its_source(derived_id: str, source_id: str) -> None:
+    """The normals and anomalies are derivative works of CHIRPS3 and ERA5-Land.
+
+    They carry no `source_url`, so a first pass that anchored insertion on that field skipped
+    every one of them.
+    """
+    licences = _builtin_licences()
+    assert refuses_publication(licences[derived_id], [licences[source_id]]) is None
 
 
 # -- the derive path, end to end -----------------------------------------------------------
@@ -227,7 +310,7 @@ def test_a_product_derived_from_a_non_commercial_source_inherits_the_restriction
 def test_publishing_a_derived_product_as_permissive_is_refused() -> None:
     """Refused, not warned about: the output is a derivative work and a log line is not a
     defence."""
-    with pytest.raises(ValueError, match="more permissive"):
+    with pytest.raises(ValueError, match="drops"):
         _derive(
             {
                 "dataset_id": "flood_water_mask",

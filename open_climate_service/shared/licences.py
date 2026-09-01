@@ -42,52 +42,56 @@ logger = logging.getLogger(__name__)
 # never defined "various", which is what OCS was publishing on every collection.
 STAC_LICENSE_OTHER = "other"
 
-# SPDX identifiers known to permit commercial use. Deliberately a small, checked list rather
-# than an attempt at the full SPDX register: an identifier absent here is reported as unknown,
-# which is the safe answer, and adding one is a one-line change with a citation.
-_COMMERCIAL_USE_ALLOWED = frozenset(
-    {
-        "CC0-1.0",
-        "CC-BY-4.0",
-        "CC-BY-3.0",
-        "CC-BY-SA-4.0",
-        "ODbL-1.0",
-        "PDDL-1.0",
-        "Apache-2.0",
-        "MIT",
-        "OGL-UK-3.0",
-    }
-)
+# What a licence requires of anyone redistributing the data, or a work derived from it. A
+# derived product may add obligations; it may never drop one.
+ATTRIBUTION = "attribution"
+SHARE_ALIKE = "share-alike"
+NON_COMMERCIAL = "non-commercial"
 
-# Creative Commons marks a non-commercial licence with an `NC` element, so this catches the
-# whole family — CC-BY-NC-4.0, CC-BY-NC-SA-4.0, CC-BY-NC-ND-4.0 — without enumerating it.
-_NON_COMMERCIAL_MARKER = "-NC"
+# SPDX identifiers whose terms have been read, with the obligations each imposes. Deliberately
+# a small checked table rather than an attempt at the full SPDX register: an identifier absent
+# here is not an SPDX identifier as far as OCS is concerned, which keeps an unvalidated string
+# out of the published `license` field.
+#
+# Commercial use is one obligation among several, not the whole model. Comparing on it alone
+# would let CC0 be derived from CC-BY-4.0 — both permit commercial use — silently dropping
+# WorldPop's attribution requirement.
+_SPDX_OBLIGATIONS: dict[str, frozenset[str]] = {
+    "CC0-1.0": frozenset(),
+    "PDDL-1.0": frozenset(),
+    "MIT": frozenset({ATTRIBUTION}),
+    "Apache-2.0": frozenset({ATTRIBUTION}),
+    "CC-BY-3.0": frozenset({ATTRIBUTION}),
+    "CC-BY-4.0": frozenset({ATTRIBUTION}),
+    "OGL-UK-3.0": frozenset({ATTRIBUTION}),
+    "ODbL-1.0": frozenset({ATTRIBUTION, SHARE_ALIKE}),
+    "CC-BY-SA-3.0": frozenset({ATTRIBUTION, SHARE_ALIKE}),
+    "CC-BY-SA-4.0": frozenset({ATTRIBUTION, SHARE_ALIKE}),
+    "CC-BY-NC-3.0": frozenset({ATTRIBUTION, NON_COMMERCIAL}),
+    "CC-BY-NC-4.0": frozenset({ATTRIBUTION, NON_COMMERCIAL}),
+    "CC-BY-NC-SA-3.0": frozenset({ATTRIBUTION, SHARE_ALIKE, NON_COMMERCIAL}),
+    "CC-BY-NC-SA-4.0": frozenset({ATTRIBUTION, SHARE_ALIKE, NON_COMMERCIAL}),
+    "CC-BY-NC-ND-4.0": frozenset({ATTRIBUTION, NON_COMMERCIAL}),
+}
+_SPDX_BY_LOWER = {identifier.lower(): identifier for identifier in _SPDX_OBLIGATIONS}
 
 # Licences with no SPDX identifier, whose terms have been read. Without this a template author
-# has to assert `commercial_use` by hand for every one of them, and an assertion repeated in
-# five templates is an assertion that will eventually be wrong in one of them.
+# has to restate the obligations by hand for every one, and an assertion repeated in five
+# templates is one that will eventually be wrong in a sixth.
 #
-# Note what this is NOT: a default. An unrecognised licence still resolves to "unknown", never
-# to "commercial use allowed". Defaulting to allowed would mean an author who forgets the flag
-# publishes a restrictive source as permissive — precisely the laundering this module exists to
-# prevent. Each entry here is a licence someone read, not a guess applied wholesale.
-_KNOWN_NAMED_LICENCES: dict[str, bool] = {
+# Note what this is NOT: a default. An unrecognised licence resolves to "obligations unknown",
+# never to "no obligations". Defaulting to permissive would mean an author who forgets to
+# describe a restrictive source publishes it as freely reusable, which is the laundering this
+# module exists to prevent.
+_KNOWN_NAMED_LICENCES: dict[str, frozenset[str]] = {
     # "free of charge, worldwide, non-exclusive, royalty free and perpetual", for "any purpose
-    # in so far as it is lawful", with attribution required.
-    "licence to use copernicus products": True,
+    # in so far as it is lawful", with clear attribution to Copernicus required.
+    "licence to use copernicus products": frozenset({ATTRIBUTION}),
     # Free and open including commercial reuse, subject to the Notice's conditions.
-    "copernicus sentinel data legal notice": True,
+    "copernicus sentinel data legal notice": frozenset({ATTRIBUTION}),
     # NASA Earth science data carries no copyright and no use restrictions.
-    "nasa earth science data": True,
+    "nasa earth science data": frozenset(),
 }
-
-# How restrictive a licence is, for picking the one a derived product must carry. Unknown
-# ranks above permissive on purpose: a licence nobody has declared might forbid anything, so
-# inheriting "unknown" from an unlabelled input is honest, and the alternative — assuming
-# permissive — is exactly the laundering this module exists to prevent.
-_RANK_PERMISSIVE = 0
-_RANK_UNKNOWN = 1
-_RANK_NON_COMMERCIAL = 2
 
 
 @dataclass(frozen=True)
@@ -95,69 +99,73 @@ class DatasetLicence:
     """A licence declaration, parsed into something two datasets can be compared on."""
 
     identifier: str | None
-    """SPDX identifier, or None when the licence is named rather than identified."""
+    """Canonical SPDX identifier, or None when the licence is named rather than identified."""
 
     name: str | None
-    """Human-readable name, for a licence with no SPDX identifier."""
-
     url: str | None
 
-    commercial_use: bool | None
-    """True, False, or None for "not known" — which is not the same as True."""
+    obligations: frozenset[str]
+    """What the licence requires. Meaningless unless `known` is true."""
+
+    known: bool
+    """Whether the obligations were actually determined, rather than defaulted."""
 
     @property
     def stac_license(self) -> str:
         """The value for a STAC collection's `license` field.
 
-        An SPDX identifier when there is one, otherwise the literal `other`, which STAC 1.1
-        defines for exactly this case. Never `various`: that is not a STAC value at all, and it
-        reads as "no restrictions worth mentioning" when the truth may be the opposite.
+        A canonical SPDX identifier when there is one, otherwise the literal `other`, which
+        STAC 1.1 defines for exactly this case. Never a free-form string: `license` is a
+        constrained field, and emitting an unvalidated vendor name there produces a collection
+        that does not validate. Never `various` either, which is not a STAC value at all and
+        reads as "no restrictions worth mentioning".
         """
         return self.identifier or STAC_LICENSE_OTHER
 
     @property
     def label(self) -> str:
-        """A short human label — the identifier, the name, or an explicit "not declared"."""
         return self.identifier or self.name or "not declared"
 
     @property
-    def restrictiveness(self) -> int:
-        if self.commercial_use is False:
-            return _RANK_NON_COMMERCIAL
-        if self.commercial_use is None:
-            return _RANK_UNKNOWN
-        return _RANK_PERMISSIVE
+    def commercial_use(self) -> bool | None:
+        """Whether commercial use is permitted, or None when the licence is not understood."""
+        if not self.known:
+            return None
+        return NON_COMMERCIAL not in self.obligations
 
-    def is_at_least_as_restrictive_as(self, other: DatasetLicence) -> bool:
-        return self.restrictiveness >= other.restrictiveness
-
-
-UNDECLARED = DatasetLicence(identifier=None, name=None, url=None, commercial_use=None)
-"""What a template without a `license` field resolves to. Published as `other`."""
+    def drops_obligations_of(self, other: DatasetLicence) -> frozenset[str]:
+        """Obligations of `other` that this licence does not carry."""
+        return other.obligations - self.obligations
 
 
-def _commercial_use_for_name(name: str | None) -> bool | None:
-    """Commercial-use status for a licence known by name rather than SPDX identifier.
+UNDECLARED = DatasetLicence(identifier=None, name=None, url=None, obligations=frozenset(), known=False)
+"""A template with no `license`, or one that could not be parsed. Published as `other`."""
 
-    Matched on a normalised prefix so a template may add a version or a qualifier — "Licence to
+
+def _obligations_for_name(name: str | None) -> frozenset[str] | None:
+    """Obligations for a licence known by name rather than SPDX identifier.
+
+    Matched on a normalised prefix so a template may add a version or qualifier — "Licence to
     Use Copernicus Products v1.2" resolves the same as the bare name — without a new entry.
     """
     if not name:
         return None
     normalised = " ".join(name.lower().split())
-    for known, commercial in _KNOWN_NAMED_LICENCES.items():
+    for known, obligations in _KNOWN_NAMED_LICENCES.items():
         if normalised.startswith(known):
-            return commercial
+            return obligations
     return None
 
 
-def _commercial_use_for(identifier: str) -> bool | None:
-    upper = identifier.upper()
-    if _NON_COMMERCIAL_MARKER in upper:
-        return False
-    if identifier in _COMMERCIAL_USE_ALLOWED:
-        return True
-    return None
+def _canonical_spdx(value: str) -> str | None:
+    """The canonical SPDX identifier for `value`, or None if it is not one we recognise.
+
+    Case-insensitive, because `cc-by-4.0` is an easy thing to write in YAML and rejecting it
+    outright would be unhelpful. An unrecognised string is not treated as SPDX at all: it
+    becomes a licence *name*, so the collection publishes `other` rather than an identifier no
+    STAC client can resolve.
+    """
+    return _SPDX_BY_LOWER.get(value.strip().lower())
 
 
 def parse_licence(declared: Any) -> DatasetLicence:
@@ -170,25 +178,30 @@ def parse_licence(declared: Any) -> DatasetLicence:
           name: Licence to Use Copernicus Products
           url: https://apps.ecmwf.int/datasets/licences/copernicus/
 
-    An `id` key is treated as an SPDX identifier, so a bespoke licence can still carry one if
-    it ever gets registered. Anything unparseable resolves to `UNDECLARED` rather than raising:
-    a malformed licence should degrade to "unknown, published as other", not take down the
-    catalogue — and the template validator warns about it separately.
+    A string that is not a recognised SPDX identifier is kept as a *name*, not passed through
+    to STAC as though it were one. Anything unparseable resolves to `UNDECLARED` rather than
+    raising: a malformed licence should degrade to "unknown, published as other", not take down
+    the catalogue, and the template validator warns about it separately.
     """
     if isinstance(declared, str):
-        spdx = declared.strip()
-        if not spdx:
+        text = declared.strip()
+        if not text:
             return UNDECLARED
+        spdx = _canonical_spdx(text)
+        if spdx is not None:
+            return DatasetLicence(identifier=spdx, name=None, url=None, obligations=_SPDX_OBLIGATIONS[spdx], known=True)
+        named = _obligations_for_name(text)
         return DatasetLicence(
-            identifier=spdx,
-            name=None,
+            identifier=None,
+            name=text,
             url=None,
-            commercial_use=_commercial_use_for(spdx),
+            obligations=named if named is not None else frozenset(),
+            known=named is not None,
         )
 
     if isinstance(declared, dict):
         raw_id = declared.get("id") or declared.get("spdx")
-        identifier: str | None = str(raw_id).strip() if isinstance(raw_id, str) and raw_id.strip() else None
+        identifier = _canonical_spdx(str(raw_id)) if isinstance(raw_id, str) and raw_id.strip() else None
         raw_name = declared.get("name")
         name = str(raw_name).strip() if isinstance(raw_name, str) and raw_name.strip() else None
         raw_url = declared.get("url")
@@ -197,18 +210,19 @@ def parse_licence(declared: Any) -> DatasetLicence:
         if identifier is None and name is None:
             return UNDECLARED
 
-        # An explicit `commercial_use` overrides the lookup, for a licence whose terms we have
-        # actually read. The Copernicus licence is the live example: no SPDX identifier, so the
-        # lookup can only say "unknown", but its text plainly permits commercial use.
-        declared_commercial = declared.get("commercial_use")
-        if isinstance(declared_commercial, bool):
-            commercial_use: bool | None = declared_commercial
+        # An explicit `obligations` list wins, for a licence whose terms someone has read and
+        # which is in neither table.
+        raw_obligations = declared.get("obligations")
+        if isinstance(raw_obligations, list):
+            obligations = frozenset(str(o).strip().lower() for o in raw_obligations if str(o).strip())
+            known = True
         elif identifier is not None:
-            commercial_use = _commercial_use_for(identifier)
+            obligations, known = _SPDX_OBLIGATIONS[identifier], True
         else:
-            commercial_use = _commercial_use_for_name(name)
+            named = _obligations_for_name(name)
+            obligations, known = (named, True) if named is not None else (frozenset(), False)
 
-        return DatasetLicence(identifier=identifier, name=name, url=url, commercial_use=commercial_use)
+        return DatasetLicence(identifier=identifier, name=name, url=url, obligations=obligations, known=known)
 
     return UNDECLARED
 
@@ -216,36 +230,46 @@ def parse_licence(declared: Any) -> DatasetLicence:
 def most_restrictive(licences: list[DatasetLicence]) -> DatasetLicence:
     """The licence a product derived from these inputs must carry.
 
-    Ties keep the first, so a single-input derivation returns that input's licence unchanged
-    rather than a synthesised equivalent.
+    "Most restrictive" is the one carrying the most obligations, with an unknown licence
+    winning outright — a licence nobody has described might require anything.
     """
     if not licences:
         return UNDECLARED
-    return max(licences, key=lambda licence: licence.restrictiveness)
+    unknown = [licence for licence in licences if not licence.known]
+    if unknown:
+        return unknown[0]
+    return max(licences, key=lambda licence: len(licence.obligations))
 
 
 def refuses_publication(declared: DatasetLicence, inputs: list[DatasetLicence]) -> str | None:
     """Why publishing `declared` for a product derived from `inputs` must be refused, or None.
 
-    The rule from CLIM-946: a derived product may not claim a licence more permissive than any
-    of its inputs. Refused rather than warned about, because the failure is silent and the
-    output is a derivative work — a warning in a log is not a defence.
+    A derived product is a derivative work: it may add obligations, never drop one. Refused
+    rather than warned about, because the failure is silent and a log line is not a defence.
+
+    Fails closed on anything not understood. If either side's obligations are unknown the pair
+    is incomparable, and the safe answer is to refuse rather than assume they are compatible —
+    which is how an unlabelled restrictive source would otherwise be laundered.
     """
-    if not inputs:
-        return None
-    strictest = most_restrictive(inputs)
-    if declared.is_at_least_as_restrictive_as(strictest):
-        return None
-    return (
-        f"Derived dataset declares licence {declared.label!r} (commercial use: "
-        f"{_describe(declared.commercial_use)}), which is more permissive than its input "
-        f"{strictest.label!r} (commercial use: {_describe(strictest.commercial_use)}). "
-        f"A derived product is a derivative work and inherits the most restrictive licence "
-        f"among its inputs."
-    )
-
-
-def _describe(commercial_use: bool | None) -> str:
-    if commercial_use is None:
-        return "not known"
-    return "allowed" if commercial_use else "not allowed"
+    for candidate in inputs:
+        if not candidate.known:
+            return (
+                f"Derived dataset declares licence {declared.label!r}, but its input "
+                f"{candidate.label!r} has no licence OCS understands, so the two cannot be "
+                f"compared. Declare the input's licence, or the derived product's terms are a "
+                f"guess."
+            )
+        if not declared.known:
+            return (
+                f"Derived dataset declares licence {declared.label!r}, which OCS does not "
+                f"understand, so it cannot be checked against its input {candidate.label!r}. "
+                f"Use an SPDX identifier, or a licence name OCS knows, or list `obligations`."
+            )
+        dropped = declared.drops_obligations_of(candidate)
+        if dropped:
+            return (
+                f"Derived dataset declares licence {declared.label!r}, which drops "
+                f"{sorted(dropped)} required by its input {candidate.label!r}. A derived "
+                f"product is a derivative work and inherits its inputs' obligations."
+            )
+    return None
