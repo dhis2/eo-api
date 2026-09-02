@@ -15,10 +15,10 @@ import yaml
 
 from open_climate_service.shared.licences import (
     ATTRIBUTION,
+    NO_DERIVATIVES,
     NON_COMMERCIAL,
     STAC_LICENSE_OTHER,
     UNDECLARED,
-    most_restrictive,
     parse_licence,
     refuses_publication,
 )
@@ -108,39 +108,23 @@ def test_undeclared_publishes_as_other() -> None:
 
 
 # -- comparison -------------------------------------------------------------------------
+#
+# `most_restrictive` used to live here and has been removed. It ordered licences by how many
+# obligations they carried, which is not an ordering: CC-BY-SA and CC-BY-NC both carry two, so
+# it returned whichever came first and silently dropped the other's requirement. Nothing in
+# production ever called it. `refuses_publication` compares against every input in turn, which
+# handles incomparable sets correctly — see the two tests below. If multi-input propagation
+# ever needs a single inherited licence, it needs a union-preserving representation, not a
+# cardinality comparison.
 
 
-def test_non_commercial_beats_permissive() -> None:
-    nc = parse_licence("CC-BY-NC-4.0")
-    assert most_restrictive([parse_licence("CC0-1.0"), nc]) is nc
-
-
-def test_unknown_beats_permissive() -> None:
-    """Deriving from an unlabelled input yields unknown, not permissive."""
-    assert most_restrictive([parse_licence("CC0-1.0"), UNDECLARED]) is UNDECLARED
-
-
-def test_attribution_alone_makes_a_licence_more_restrictive_than_cc0() -> None:
-    """Commercial use is one obligation among several. Comparing on it alone would rank CC0 and
-    CC-BY-4.0 as equivalent and let a derived product quietly drop attribution."""
-    cc_by = parse_licence("CC-BY-4.0")
-    assert most_restrictive([parse_licence("CC0-1.0"), cc_by]) is cc_by
-
-
-def test_unknown_beats_even_non_commercial() -> None:
-    """Unknown wins outright, including over a known-restrictive licence.
-
-    Deliberate: "most restrictive" cannot be answered when one input has not been described,
-    because it might require more than any of the others. Returning the unknown one says so.
-    The decision about whether anything may be published from such a mix belongs to
-    `refuses_publication`, which fails closed.
-    """
-    assert most_restrictive([UNDECLARED, parse_licence("CC-BY-NC-4.0")]) is UNDECLARED
-
-
-def test_a_single_input_is_returned_unchanged() -> None:
-    cc = parse_licence("CC-BY-4.0")
-    assert most_restrictive([cc]) is cc
+def test_incomparable_licences_refuse_in_both_directions() -> None:
+    """CC-BY-SA and CC-BY-NC each carry an obligation the other lacks, so neither can cover
+    both. Checking per input catches this; picking a winner by obligation count does not."""
+    share_alike = parse_licence("CC-BY-SA-4.0")
+    non_commercial = parse_licence("CC-BY-NC-4.0")
+    assert refuses_publication(share_alike, [share_alike, non_commercial]) is not None
+    assert refuses_publication(non_commercial, [share_alike, non_commercial]) is not None
 
 
 # -- the rule that matters ----------------------------------------------------------------
@@ -343,3 +327,83 @@ def test_deriving_from_an_unlabelled_source_leaves_the_output_unlabelled() -> No
         {"id": "mystery", "variable": "value"},
     )
     assert parse_licence(template.get("license")) is UNDECLARED
+
+
+# -- the ND prohibition ------------------------------------------------------------------
+
+
+def test_no_derivatives_is_recorded_as_a_prohibition() -> None:
+    assert NO_DERIVATIVES in parse_licence("CC-BY-NC-ND-4.0").obligations
+
+
+def test_nothing_may_be_derived_from_an_nd_input_not_even_under_the_same_licence() -> None:
+    """ND forbids distributing adapted material at all, so this is not a matter of matching
+    obligations — there is no licence under which the derived product may be published."""
+    nd = parse_licence("CC-BY-NC-ND-4.0")
+    refusal = refuses_publication(nd, [nd])
+    assert refusal is not None
+    assert "prohibits derivative works" in refusal
+
+
+# -- the SPDX table is authoritative ------------------------------------------------------
+
+
+def test_explicit_obligations_cannot_override_a_recognised_spdx_identifier() -> None:
+    """`{id: CC-BY-NC-4.0, obligations: []}` would otherwise publish as CC-BY-NC while every
+    compatibility check saw no restrictions — laundering by configuration."""
+    licence = parse_licence({"id": "CC-BY-NC-4.0", "obligations": []})
+    assert licence.stac_license == "CC-BY-NC-4.0"
+    assert licence.commercial_use is False
+    assert NON_COMMERCIAL in licence.obligations
+
+
+def test_explicit_obligations_cannot_override_a_recognised_name() -> None:
+    licence = parse_licence({"name": "Licence to Use Copernicus Products", "url": "https://x", "obligations": []})
+    assert licence.obligations == frozenset({ATTRIBUTION})
+
+
+def test_explicit_obligations_are_used_when_nothing_else_supplies_them() -> None:
+    """The legitimate case: a licence in neither table, whose terms someone has read."""
+    licence = parse_licence({"name": "Vendor Terms", "url": "https://x", "obligations": ["attribution"]})
+    assert licence.known is True
+    assert licence.obligations == frozenset({ATTRIBUTION})
+
+
+# -- providers on a derived product --------------------------------------------------------
+
+
+def test_derived_providers_keep_the_source_licensor() -> None:
+    """Attribution is a licence condition, so dropping the source's licensor breaches it even
+    when the obligation check passes. An explicit list adds to the source's, never replaces."""
+    template = _derive(
+        {
+            "dataset_id": "d",
+            "variable": "water",
+            "source_dataset_id": "vantor_flood_rgb_2026",
+            "providers": [{"name": "DHIS2"}],
+        },
+        _NC_SOURCE,
+    )
+    names = [p["name"] for p in template["providers"]]
+    assert names == ["Vantor", "DHIS2"]
+
+
+def test_an_empty_providers_option_cannot_erase_the_source_licensor() -> None:
+    template = _derive(
+        {"dataset_id": "d", "variable": "water", "source_dataset_id": "vantor_flood_rgb_2026", "providers": []},
+        _NC_SOURCE,
+    )
+    assert [p["name"] for p in template["providers"]] == ["Vantor"]
+
+
+def test_duplicate_providers_are_not_doubled() -> None:
+    template = _derive(
+        {
+            "dataset_id": "d",
+            "variable": "water",
+            "source_dataset_id": "vantor_flood_rgb_2026",
+            "providers": [{"name": "vantor"}],
+        },
+        _NC_SOURCE,
+    )
+    assert len(template["providers"]) == 1

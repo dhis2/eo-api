@@ -47,6 +47,10 @@ STAC_LICENSE_OTHER = "other"
 ATTRIBUTION = "attribution"
 SHARE_ALIKE = "share-alike"
 NON_COMMERCIAL = "non-commercial"
+# Not an obligation you can satisfy — a prohibition on distributing adapted material at all.
+# Recording ND alongside attribution and non-commercial would let a derivative be published
+# under the same ND licence, which the licence forbids outright.
+NO_DERIVATIVES = "no-derivatives"
 
 # SPDX identifiers whose terms have been read, with the obligations each imposes. Deliberately
 # a small checked table rather than an attempt at the full SPDX register: an identifier absent
@@ -71,7 +75,8 @@ _SPDX_OBLIGATIONS: dict[str, frozenset[str]] = {
     "CC-BY-NC-4.0": frozenset({ATTRIBUTION, NON_COMMERCIAL}),
     "CC-BY-NC-SA-3.0": frozenset({ATTRIBUTION, SHARE_ALIKE, NON_COMMERCIAL}),
     "CC-BY-NC-SA-4.0": frozenset({ATTRIBUTION, SHARE_ALIKE, NON_COMMERCIAL}),
-    "CC-BY-NC-ND-4.0": frozenset({ATTRIBUTION, NON_COMMERCIAL}),
+    "CC-BY-NC-ND-4.0": frozenset({ATTRIBUTION, NON_COMMERCIAL, NO_DERIVATIVES}),
+    "CC-BY-ND-4.0": frozenset({ATTRIBUTION, NO_DERIVATIVES}),
 }
 _SPDX_BY_LOWER = {identifier.lower(): identifier for identifier in _SPDX_OBLIGATIONS}
 
@@ -210,35 +215,33 @@ def parse_licence(declared: Any) -> DatasetLicence:
         if identifier is None and name is None:
             return UNDECLARED
 
-        # An explicit `obligations` list wins, for a licence whose terms someone has read and
-        # which is in neither table.
+        # Order matters. A recognised identifier or name is authoritative, and an explicit
+        # `obligations` list is consulted only when neither supplies semantics. Letting the
+        # list win would make `{id: CC-BY-NC-4.0, obligations: []}` publish as CC-BY-NC while
+        # every compatibility check saw no restrictions — laundering by configuration, which is
+        # worse than the silence this module replaced.
         raw_obligations = declared.get("obligations")
-        if isinstance(raw_obligations, list):
-            obligations = frozenset(str(o).strip().lower() for o in raw_obligations if str(o).strip())
-            known = True
-        elif identifier is not None:
+        if identifier is not None:
             obligations, known = _SPDX_OBLIGATIONS[identifier], True
+            if isinstance(raw_obligations, list):
+                logger.warning(
+                    "Licence %s declares explicit obligations; ignoring them because the SPDX "
+                    "identifier already defines its terms",
+                    identifier,
+                )
         else:
             named = _obligations_for_name(name)
-            obligations, known = (named, True) if named is not None else (frozenset(), False)
+            if named is not None:
+                obligations, known = named, True
+            elif isinstance(raw_obligations, list):
+                obligations = frozenset(str(o).strip().lower() for o in raw_obligations if str(o).strip())
+                known = True
+            else:
+                obligations, known = frozenset(), False
 
         return DatasetLicence(identifier=identifier, name=name, url=url, obligations=obligations, known=known)
 
     return UNDECLARED
-
-
-def most_restrictive(licences: list[DatasetLicence]) -> DatasetLicence:
-    """The licence a product derived from these inputs must carry.
-
-    "Most restrictive" is the one carrying the most obligations, with an unknown licence
-    winning outright — a licence nobody has described might require anything.
-    """
-    if not licences:
-        return UNDECLARED
-    unknown = [licence for licence in licences if not licence.known]
-    if unknown:
-        return unknown[0]
-    return max(licences, key=lambda licence: len(licence.obligations))
 
 
 def refuses_publication(declared: DatasetLicence, inputs: list[DatasetLicence]) -> str | None:
@@ -264,6 +267,12 @@ def refuses_publication(declared: DatasetLicence, inputs: list[DatasetLicence]) 
                 f"Derived dataset declares licence {declared.label!r}, which OCS does not "
                 f"understand, so it cannot be checked against its input {candidate.label!r}. "
                 f"Use an SPDX identifier, or a licence name OCS knows, or list `obligations`."
+            )
+        if NO_DERIVATIVES in candidate.obligations:
+            return (
+                f"Input {candidate.label!r} prohibits derivative works, so no derived product "
+                f"may be published from it under any licence — including the same one. "
+                f"ND licences forbid distributing adapted material."
             )
         dropped = declared.drops_obligations_of(candidate)
         if dropped:

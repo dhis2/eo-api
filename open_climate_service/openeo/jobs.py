@@ -821,11 +821,28 @@ def _apply_derived_licence(
             options.get("source_dataset_id"),
         )
 
-    providers = options.get("providers")
-    if providers is None and isinstance(source_template, dict):
-        providers = source_template.get("providers")
-    if isinstance(providers, list) and providers:
-        template["providers"] = providers
+    # Merged, not replaced. Attribution is a licence condition, so dropping the source's
+    # licensor would breach it even while the obligation check still passes — and
+    # `providers: []` or a list naming only the derived product's author would have done
+    # exactly that. Source providers come first, then any the output declares, with duplicates
+    # by name removed so a caller repeating the source does not double it.
+    merged: list[Any] = []
+    seen: set[str] = set()
+    for group in (
+        source_template.get("providers") if isinstance(source_template, dict) else None,
+        options.get("providers"),
+    ):
+        if not isinstance(group, list):
+            continue
+        for entry in group:
+            name = entry.get("name") if isinstance(entry, dict) else None
+            key = name.strip().lower() if isinstance(name, str) else None
+            if key is None or key in seen:
+                continue
+            seen.add(key)
+            merged.append(entry)
+    if merged:
+        template["providers"] = merged
 
 
 def _resolve_source_template(options: dict[str, Any]) -> dict[str, Any] | None:
