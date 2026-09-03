@@ -305,12 +305,52 @@ def test_the_validator_names_the_contradiction_rather_than_calling_it_unreadable
     assert "attribution" in problem
 
 
-def test_explicit_obligations_beside_an_identifier_are_reported_once() -> None:
+@pytest.mark.parametrize(
+    "declared",
+    [
+        pytest.param({"id": "CC-BY-NC-4.0", "obligations": []}, id="spdx-identifier"),
+        pytest.param(
+            {"name": "Licence to Use Copernicus Products", "url": "https://x", "obligations": ["non-commercial"]},
+            id="recognised-name",
+        ),
+    ],
+)
+def test_ignored_obligations_are_reported_whatever_supplied_the_terms(declared: dict) -> None:
+    """Parametrised over both, because the two were checked in separate places and drifted.
+
+    `parse_licence` ignores an explicit list whenever the identifier *or* the name is one OCS
+    knows, but the validator reported only the identifier case. So Copernicus plus
+    `obligations: [non-commercial]` was read as commercially usable and said nothing — the
+    operator asserted a restriction and OCS silently dropped it, which is the laundering
+    direction.
+    """
     from open_climate_service.shared.licences import licence_declaration_problem
 
-    problem = licence_declaration_problem({"id": "CC-BY-NC-4.0", "obligations": []})
+    problem = licence_declaration_problem(declared)
     assert problem is not None
     assert "ignored" in problem
+
+
+def test_the_report_names_both_what_was_asked_for_and_what_applies() -> None:
+    """An operator who wrote non-commercial needs to see that attribution is what took effect,
+    not just that something was ignored."""
+    from open_climate_service.shared.licences import licence_declaration_problem
+
+    problem = licence_declaration_problem(
+        {"name": "Licence to Use Copernicus Products", "url": "https://x", "obligations": ["non-commercial"]}
+    )
+    assert problem is not None
+    assert "non-commercial" in problem
+    assert "attribution" in problem
+
+
+def test_a_recognised_name_still_outranks_a_contradictory_obligations_list() -> None:
+    """The behaviour is unchanged — the researched terms win. Only the silence is fixed."""
+    licence = parse_licence(
+        {"name": "Licence to Use Copernicus Products", "url": "https://x", "obligations": ["non-commercial"]}
+    )
+    assert licence.obligations == frozenset({ATTRIBUTION})
+    assert licence.commercial_use is True
 
 
 def test_a_sound_declaration_has_nothing_to_report() -> None:

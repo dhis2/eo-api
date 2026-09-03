@@ -236,6 +236,25 @@ def _contradiction(identifier: str | None, name: str | None) -> str | None:
     )
 
 
+def _declared_semantics(identifier: str | None, name: str | None) -> tuple[frozenset[str], str] | None:
+    """The obligations this declaration resolves to, and what supplied them.
+
+    None when neither the identifier nor the name is one OCS knows, which is the only case
+    where an explicit `obligations` list is consulted.
+
+    Single owner of that precedence rule. `parse_licence` and `licence_declaration_problem`
+    both need to know whether the list was used or ignored, and when each decided it
+    separately they disagreed: a contradictory list beside a recognised *name* was silently
+    discarded while the same list beside an SPDX identifier was reported.
+    """
+    if identifier is not None and identifier in _SPDX_OBLIGATIONS:
+        return _SPDX_OBLIGATIONS[identifier], f"the SPDX identifier {identifier}"
+    named = _obligations_for_name(name)
+    if named is not None:
+        return named, f"the recognised licence name {name!r}"
+    return None
+
+
 def licence_declaration_problem(declared: Any) -> str | None:
     """A specific complaint about a `license` declaration, for the template validator.
 
@@ -259,11 +278,15 @@ def licence_declaration_problem(declared: Any) -> str | None:
     if contradiction is not None:
         return contradiction
 
-    if identifier is not None and identifier in _SPDX_OBLIGATIONS and isinstance(declared.get("obligations"), list):
+    semantics = _declared_semantics(identifier, name)
+    if semantics is not None and isinstance(declared.get("obligations"), list):
+        known_obligations, supplier = semantics
+        declared_obligations = sorted(str(o).strip().lower() for o in declared["obligations"] if str(o).strip())
         return (
-            f"declares explicit 'obligations' alongside the SPDX identifier {identifier}, which "
-            f"already defines its terms; the list is ignored. Remove it, or drop the identifier "
-            f"if the terms genuinely differ."
+            f"declares explicit 'obligations' {declared_obligations} alongside {supplier}, which "
+            f"OCS knows to require {sorted(known_obligations) or 'nothing'}; the list is ignored. "
+            f"Remove it, or give the licence a name of its own if its terms genuinely differ from "
+            f"the licence it is named after."
         )
     return None
 
@@ -336,17 +359,14 @@ def parse_licence(declared: Any) -> DatasetLicence:
         # every compatibility check saw no restrictions — laundering by configuration, which is
         # worse than the silence this module replaced.
         raw_obligations = declared.get("obligations")
-        if identifier is not None and identifier in _SPDX_OBLIGATIONS:
-            obligations, known = _SPDX_OBLIGATIONS[identifier], True
+        semantics = _declared_semantics(identifier, name)
+        if semantics is not None:
+            obligations, known = semantics[0], True
+        elif isinstance(raw_obligations, list):
+            obligations = frozenset(str(o).strip().lower() for o in raw_obligations if str(o).strip())
+            known = True
         else:
-            named = _obligations_for_name(name)
-            if named is not None:
-                obligations, known = named, True
-            elif isinstance(raw_obligations, list):
-                obligations = frozenset(str(o).strip().lower() for o in raw_obligations if str(o).strip())
-                known = True
-            else:
-                obligations, known = frozenset(), False
+            obligations, known = frozenset(), False
 
         return DatasetLicence(identifier=identifier, name=name, url=url, obligations=obligations, known=known)
 
