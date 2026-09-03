@@ -1,4 +1,4 @@
-"""Dataset licences: declare them, compare them, and refuse to launder them (CLIM-946).
+"""Dataset licences: declare them and publish them honestly (CLIM-946).
 
 OCS had no per-dataset licence concept — every collection published the constant `various`,
 whether the data came from ERA5-Land or a non-commercial imagery release. That was tolerable
@@ -11,12 +11,20 @@ allowing them unlabelled is worse than either, because a derived product is a de
 A water mask computed from CC-BY-NC imagery inherits the restriction, and publishing it as
 `various` is licence laundering by accident — on the default path, with nothing to catch it.
 
+## Scope
+
+This module declares and publishes. Propagating a licence to a derived product — the
+laundering half — is a separate change, because two licences must be *comparable* for that
+and the comparison has to happen at exactly one point in the publish path. Splitting that
+decision across the synthesise and reload paths produced four rounds of fixes that
+contradicted each other, so the obligations recorded below are the input to that work rather
+than the whole of it.
+
 ## Why this is not just a string field
 
-Two licences must be *comparable*, or propagation cannot be checked. So a declaration is
-parsed into a `DatasetLicence` carrying one decisive fact: whether commercial use is allowed.
-Three states, not two — `None` means "we do not know", which is different from "yes" and must
-not be treated as it.
+A declaration is parsed into a `DatasetLicence` carrying one decisive fact: whether
+commercial use is allowed. Three states, not two — `None` means "we do not know", which is
+different from "yes" and must not be treated as it.
 
 ## SPDX where it exists, a name and URL where it does not
 
@@ -33,6 +41,7 @@ about what a user may do, so the field accepts a name plus a URL as well.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -99,22 +108,6 @@ _SPDX_UNREVIEWED = frozenset(
 )
 _SPDX_BY_LOWER = {identifier.lower(): identifier for identifier in (*_SPDX_OBLIGATIONS, *_SPDX_UNREVIEWED)}
 
-# Share-alike is not satisfied by carrying "a share-alike obligation" — it requires the same
-# licence, or one the licence itself names as compatible. Without this, ODbL-1.0 and
-# CC-BY-SA-4.0 both reduce to {attribution, share-alike} and each would be accepted in place
-# of the other, and CC-BY-NC-SA-4.0 would be accepted over CC-BY-SA-4.0 because its obligation
-# set is a superset. Both are relicensing that share-alike forbids.
-#
-# Only same-family upgrades are listed. Cross-licence compatibility (CC-BY-SA to GPL, say) is
-# a legal judgement, not a lookup, so it is absent and therefore refused.
-_SHARE_ALIKE_COMPATIBLE: dict[str, frozenset[str]] = {
-    "CC-BY-SA-3.0": frozenset({"CC-BY-SA-3.0", "CC-BY-SA-4.0"}),
-    "CC-BY-SA-4.0": frozenset({"CC-BY-SA-4.0"}),
-    "CC-BY-NC-SA-3.0": frozenset({"CC-BY-NC-SA-3.0", "CC-BY-NC-SA-4.0"}),
-    "CC-BY-NC-SA-4.0": frozenset({"CC-BY-NC-SA-4.0"}),
-    "ODbL-1.0": frozenset({"ODbL-1.0"}),
-}
-
 # Licences with no SPDX identifier, whose terms have been read. Without this a template author
 # has to restate the obligations by hand for every one, and an assertion repeated in five
 # templates is one that will eventually be wrong in a sixth.
@@ -173,26 +166,35 @@ class DatasetLicence:
             return None
         return NON_COMMERCIAL not in self.obligations
 
-    def drops_obligations_of(self, other: DatasetLicence) -> frozenset[str]:
-        """Obligations of `other` that this licence does not carry."""
-        return other.obligations - self.obligations
-
 
 UNDECLARED = DatasetLicence(identifier=None, name=None, url=None, obligations=frozenset(), known=False)
 """A template with no `license`, or one that could not be parsed. Published as `other`."""
 
 
+_NAME_VERSION_SUFFIX = re.compile(r"\s+v?\d+(\.\d+)*$")
+"""A trailing version on an otherwise exact name — "… Products v1.2", "… Notice 1.0".
+
+Only a version. This used to be a `startswith` test so that qualifiers came along for free,
+which meant any suffix inherited the base licence's terms: "NASA Earth Science Data -
+Non-Commercial Terms" matched the NASA entry and was classified as unrestricted commercial
+use. A version number cannot change what a licence requires; an arbitrary suffix is exactly
+how it gets said that it does.
+"""
+
+
 def _obligations_for_name(name: str | None) -> frozenset[str] | None:
     """Obligations for a licence known by name rather than SPDX identifier.
 
-    Matched on a normalised prefix so a template may add a version or qualifier — "Licence to
-    Use Copernicus Products v1.2" resolves the same as the bare name — without a new entry.
+    Matched exactly, after normalising whitespace and case and dropping a trailing version, so
+    a name this module has not had its terms read stays unknown rather than borrowing another
+    licence's semantics.
     """
     if not name:
         return None
     normalised = " ".join(name.lower().split())
-    for known, obligations in _KNOWN_NAMED_LICENCES.items():
-        if normalised.startswith(known):
+    for candidate in (normalised, _NAME_VERSION_SUFFIX.sub("", normalised)):
+        obligations = _KNOWN_NAMED_LICENCES.get(candidate)
+        if obligations is not None:
             return obligations
     return None
 
@@ -258,6 +260,29 @@ def parse_licence(declared: Any) -> DatasetLicence:
         if identifier is None and name is None:
             return UNDECLARED
 
+        # An identifier and a name that require different things is a contradiction, not a
+        # redundancy. `{id: CC0-1.0, name: <a licence requiring attribution>, url: ...}` would
+        # publish `license: CC0-1.0` while the `rel: license` link points at terms that demand
+        # credit, and a STAC client reads the field far more often than it fetches the link.
+        # There is no basis for picking a winner, so neither is used.
+        #
+        # Only a *recognised* name can be shown to disagree. An unrecognised one is left alone:
+        # it is a label and a link, the identifier stays authoritative for the terms, and the
+        # common `{id, name, url}` spelling of a single licence has to keep working.
+        if identifier is not None and identifier in _SPDX_OBLIGATIONS:
+            named_obligations = _obligations_for_name(name)
+            if named_obligations is not None and named_obligations != _SPDX_OBLIGATIONS[identifier]:
+                logger.warning(
+                    "Licence declares SPDX identifier %s together with the name %r, which OCS "
+                    "knows to require %s rather than %s. Treating the licence as undeclared: "
+                    "declare whichever one describes the terms, not both.",
+                    identifier,
+                    name,
+                    sorted(named_obligations) or "nothing",
+                    sorted(_SPDX_OBLIGATIONS[identifier]) or "nothing",
+                )
+                return UNDECLARED
+
         # Order matters. A recognised identifier or name is authoritative, and an explicit
         # `obligations` list is consulted only when neither supplies semantics. Letting the
         # list win would make `{id: CC-BY-NC-4.0, obligations: []}` publish as CC-BY-NC while
@@ -285,82 +310,3 @@ def parse_licence(declared: Any) -> DatasetLicence:
         return DatasetLicence(identifier=identifier, name=name, url=url, obligations=obligations, known=known)
 
     return UNDECLARED
-
-
-def _no_derivatives_refusal(candidate: DatasetLicence) -> str | None:
-    """Why `candidate` forbids any derived product, or None."""
-    if NO_DERIVATIVES not in candidate.obligations:
-        return None
-    return (
-        f"Input {candidate.label!r} prohibits derivative works, so no derived product "
-        f"may be published from it under any licence — including the same one. "
-        f"ND licences forbid distributing adapted material."
-    )
-
-
-def refuses_derivation(inputs: list[DatasetLicence]) -> str | None:
-    """Why no derived product may be published from `inputs` at all, or None.
-
-    Narrower than `refuses_publication`, which compares a *declared output* licence against
-    its inputs. This asks only whether the derivation itself is permitted, so it is the right
-    check when the output carries its input's licence verbatim: relicensing is impossible
-    there, but a no-derivatives input still forbids the derivative work.
-
-    Deliberately does NOT fail closed on an unknown input licence, unlike
-    `refuses_publication`. Copying a licence forward preserves whatever terms it carries, so
-    there is nothing to launder, and refusing would block every derived product whose source
-    licence OCS cannot parse — which template validation already warns about. The residual
-    gap is an unparseable licence that is ND in substance; that is unknowable here, and the
-    output at least carries the same terms as its input.
-    """
-    for candidate in inputs:
-        refusal = _no_derivatives_refusal(candidate)
-        if refusal:
-            return refusal
-    return None
-
-
-def refuses_publication(declared: DatasetLicence, inputs: list[DatasetLicence]) -> str | None:
-    """Why publishing `declared` for a product derived from `inputs` must be refused, or None.
-
-    A derived product is a derivative work: it may add obligations, never drop one. Refused
-    rather than warned about, because the failure is silent and a log line is not a defence.
-
-    Fails closed on anything not understood. If either side's obligations are unknown the pair
-    is incomparable, and the safe answer is to refuse rather than assume they are compatible —
-    which is how an unlabelled restrictive source would otherwise be laundered.
-    """
-    for candidate in inputs:
-        if not candidate.known:
-            return (
-                f"Derived dataset declares licence {declared.label!r}, but its input "
-                f"{candidate.label!r} has no licence OCS understands, so the two cannot be "
-                f"compared. Declare the input's licence, or the derived product's terms are a "
-                f"guess."
-            )
-        if not declared.known:
-            return (
-                f"Derived dataset declares licence {declared.label!r}, which OCS does not "
-                f"understand, so it cannot be checked against its input {candidate.label!r}. "
-                f"Use an SPDX identifier, or a licence name OCS knows, or list `obligations`."
-            )
-        no_derivatives = _no_derivatives_refusal(candidate)
-        if no_derivatives:
-            return no_derivatives
-        if SHARE_ALIKE in candidate.obligations:
-            compatible = _SHARE_ALIKE_COMPATIBLE.get(candidate.identifier or "", frozenset())
-            if declared.identifier not in compatible:
-                return (
-                    f"Input {candidate.label!r} is share-alike, so a derived product must carry "
-                    f"that licence or one it names as compatible ({sorted(compatible) or 'none'}), "
-                    f"not {declared.label!r}. Carrying some other share-alike licence is still "
-                    f"relicensing."
-                )
-        dropped = declared.drops_obligations_of(candidate)
-        if dropped:
-            return (
-                f"Derived dataset declares licence {declared.label!r}, which drops "
-                f"{sorted(dropped)} required by its input {candidate.label!r}. A derived "
-                f"product is a derivative work and inherits its inputs' obligations."
-            )
-    return None

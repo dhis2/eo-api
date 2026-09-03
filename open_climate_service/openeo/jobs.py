@@ -680,13 +680,6 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     if template is None:
         raise ValueError(f"Auto-registered dataset template for '{dataset_id}' could not be reloaded")
 
-    # Also check a template that already existed. The licence rule used to run only while
-    # *synthesising* one, and CLIM-946 recommends pre-registering workflow outputs to control
-    # their display — so the recommended path skipped the check entirely, and a pre-registered
-    # CC0 template could publish data derived from CC-BY-NC. An undeclared template left by an
-    # older run is also migrated here rather than staying undeclared forever.
-    template = _enforce_licence_on_loaded_template(dataset_id, template, source_template)
-
     # Prefer an explicit option, then the registered template's display name, and
     # only fall back to the raw id so published collections read as e.g.
     # "Mosquito hotspots (Rwanda 2018 Q1)" rather than "mosquito_hotspots".
@@ -780,212 +773,14 @@ def _recover_temporal_from_attrs(ds: Any) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _apply_derived_licence(
-    template: dict[str, Any], options: dict[str, Any], source_template: dict[str, Any] | None
-) -> None:
-    """Set the derived product's licence, and refuse one that drops its input's obligations.
-
-    A derived product is a derivative work: a water mask computed from CC-BY-NC imagery
-    inherits the restriction. Before CLIM-946 this path published every derived collection as
-    `various`, which is licence laundering by accident — and it is the *default* path, so
-    nothing had to go wrong for it to happen.
-
-    An input whose licence is not understood is kept in the comparison rather than filtered
-    out. Dropping it would turn "unlabelled source" into "no inputs", and a permissive output
-    would then sail past the check — which is exactly what an earlier version of this function
-    did, while the unit tests on `refuses_publication` all passed.
-
-    WARNING: ONE INPUT, NOT ALL OF THEM. OCS records a single `source_dataset_id` on
-    save_result, so that is the only input whose licence can be read here. A process with
-    several inputs — `compute_anomaly` takes an observed dataset *and* a normal — propagates
-    only from the one it was told about. If the other were more restrictive, this would not
-    catch it. Closing that needs save_result to carry every contributing dataset id, which is a
-    change to the process graph contract rather than to this function.
-    """
-    from open_climate_service.shared.licences import (
-        parse_licence,
-        refuses_derivation,
-        refuses_publication,
-    )
-
-    # Only a *declared source* counts as an input. A dataset with no source_dataset_id is not
-    # derived from anything, so there is nothing to inherit and nothing to check.
-    inputs = []
-    if isinstance(source_template, dict):
-        inputs.append(parse_licence(source_template.get("license")))
-
-    explicit = options.get("license")
-    if explicit is not None:
-        declared = parse_licence(explicit)
-        refusal = refuses_publication(declared, inputs)
-        if refusal:
-            raise ValueError(refusal)
-        template["license"] = explicit
-    elif isinstance(source_template, dict) and source_template.get("license") is not None:
-        # No explicit licence: inherit the input's rather than leaving it undeclared, which is
-        # the point — the derived product must not become permissive by omission.
-        #
-        # Inheriting still has to clear the no-derivatives bar. Carrying the licence forward
-        # answers the relicensing question, so the obligation comparison has nothing to say
-        # here, but an ND input forbids the derivative work itself — under any licence,
-        # including its own. Without this the check was reachable only by *naming* the licence:
-        # `license: CC-BY-ND-4.0` was refused while saying nothing published the same data.
-        refusal = refuses_derivation(inputs)
-        if refusal:
-            raise ValueError(refusal)
-        template["license"] = source_template["license"]
-        logger.info(
-            "Derived dataset %s inherits licence %s from %s",
-            template.get("id"),
-            inputs[0].label,
-            options.get("source_dataset_id"),
-        )
-
-    merged = _merge_providers(
-        source_template.get("providers") if isinstance(source_template, dict) else None,
-        options.get("providers"),
-    )
-    if merged:
-        template["providers"] = merged
-
-
-def _merge_providers(*groups: Any) -> list[Any]:
-    """Combine provider lists in order, dropping repeats of a name already seen.
-
-    Merged, not replaced. Attribution is a licence condition, so dropping the source's
-    licensor would breach it even while the obligation check still passes — and
-    `providers: []` or a list naming only the derived product's author would have done
-    exactly that. Source providers come first so the upstream licensor survives a derived
-    template that names only its own author.
-    """
-    merged: list[Any] = []
-    seen: set[str] = set()
-    for group in groups:
-        if not isinstance(group, list):
-            continue
-        for entry in group:
-            name = entry.get("name") if isinstance(entry, dict) else None
-            key = name.strip().lower() if isinstance(name, str) else None
-            if key is None or key in seen:
-                continue
-            seen.add(key)
-            merged.append(entry)
-    return merged
-
-
-def _enforce_licence_on_loaded_template(
-    dataset_id: str, template: dict[str, Any], source_template: dict[str, Any] | None
-) -> dict[str, Any]:
-    """Check an already-registered output template against the source it is derived from.
-
-    Returns the template, with an inherited licence and the source's providers filled in.
-    Refuses when the registered licence would drop an obligation of the source, because a
-    pre-registered template is not a licence decision the source can be overruled by.
-
-    The source's providers are merged even when the registered licence already passes the
-    obligation check. Attribution is a condition of the licence, not of the identifier, so a
-    template that declares `CC-BY-NC-4.0` and lists only its own author satisfies the check
-    and still publishes without naming the licensor it has to credit.
-
-    Any change is written back to the registry. STAC reads the licence and providers from the
-    on-disk template when it builds the collection (`stac.services.build_collection`), so an
-    in-memory fix would leave the published collection exactly as wrong as before — the
-    enforcement would hold only for the fields this publish happens to consult.
-    """
-    if not isinstance(source_template, dict):
-        return template
-
-    from open_climate_service.shared.licences import (
-        parse_licence,
-        refuses_derivation,
-        refuses_publication,
-    )
-
-    source_licence = parse_licence(source_template.get("license"))
-    declared_raw = template.get("license")
-    inherited = source_template.get("license")
-    updates: dict[str, Any] = {}
-
-    def refuse(reason: str) -> None:
-        raise ValueError(
-            f"Registered output template {dataset_id!r} cannot receive data derived from "
-            f"{source_template.get('id')!r}: {reason}"
-        )
-
-    if declared_raw is None:
-        if inherited is not None:
-            # Inheriting answers the relicensing question but not whether the derivation was
-            # allowed at all; see the same check in `_apply_derived_licence`.
-            refusal = refuses_derivation([source_licence])
-            if refusal:
-                refuse(refusal)
-            logger.info(
-                "Output template %s declares no licence; inheriting %s from %s",
-                dataset_id,
-                source_licence.label,
-                source_template.get("id"),
-            )
-            updates["license"] = inherited
-    else:
-        refusal = refuses_publication(parse_licence(declared_raw), [source_licence])
-        if refusal:
-            refuse(refusal)
-
-    merged = _merge_providers(source_template.get("providers"), template.get("providers"))
-    if merged and merged != template.get("providers"):
-        updates["providers"] = merged
-
-    if not updates:
-        return template
-    return _persist_template_updates(dataset_id, template, updates)
-
-
-def _persist_template_updates(dataset_id: str, template: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any]:
-    """Return `template` with `updates` applied, written back to the instance registry.
-
-    A failed write is logged, not raised: the licence and providers are already correct on the
-    returned template, so the publish should go ahead rather than abort over a read-only
-    templates directory. The next publish recomputes the same updates, so nothing is lost
-    permanently — what is lost is only the STAC collection's view of them until then.
-    """
-    updated = {**template, **updates}
-    from open_climate_service.data_registry.services import datasets as _reg
-
-    try:
-        _reg.write_dataset_template(updated, overwrite=True)
-    except Exception:
-        logger.warning(
-            "Could not persist licence metadata %s onto dataset template %s; the published "
-            "STAC collection will keep the registered values",
-            sorted(updates),
-            dataset_id,
-            exc_info=True,
-        )
-    return updated
-
-
 def _resolve_source_template(options: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the source dataset template referenced in save_result options, if any.
-
-    Raises when a `source_dataset_id` is given but does not resolve. Returning None there
-    would silently mean "not derived from anything", which disables licence propagation
-    entirely — so a typo in the id would let a permissive output be published from a
-    restrictive source, with no error anywhere (CLIM-946).
-    """
+    """Return the source dataset template referenced in save_result options, if any."""
     source_dataset_id = options.get("source_dataset_id")
     if not isinstance(source_dataset_id, str) or not source_dataset_id:
         return None
     from open_climate_service.data_registry.services import datasets as _reg
 
-    template = _reg.get_dataset(source_dataset_id)
-    if template is None:
-        raise ValueError(
-            f"save_result declares source_dataset_id {source_dataset_id!r}, which is not a "
-            f"registered dataset template. Fix the id, or omit it if this output is not "
-            f"derived from another dataset — it governs which licence and attribution the "
-            f"output inherits."
-        )
-    return template
+    return _reg.get_dataset(source_dataset_id)
 
 
 def _derive_period_type(
@@ -1047,8 +842,6 @@ def _derive_managed_dataset_template(
         inherited = source_template.get(field) if isinstance(source_template, dict) else None
         if isinstance(inherited, str) and inherited:
             template[field] = inherited
-
-    _apply_derived_licence(template, options, source_template)
 
     return template
 
