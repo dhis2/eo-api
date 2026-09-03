@@ -76,10 +76,7 @@ def test_the_self_url_keeps_the_requested_path(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setenv(BASE_URL_ENV, _CONFIGURED)
     assert self_url(_fake_request("http://internal:9000/", "/stac")) == f"{_CONFIGURED}/stac"
-    assert (
-        self_url(_fake_request("http://internal:9000/", "/stac/catalog.json"))
-        == f"{_CONFIGURED}/stac/catalog.json"
-    )
+    assert self_url(_fake_request("http://internal:9000/", "/stac/catalog.json")) == f"{_CONFIGURED}/stac/catalog.json"
 
 
 def test_the_self_url_drops_the_query_string(monkeypatch: pytest.MonkeyPatch) -> None:
