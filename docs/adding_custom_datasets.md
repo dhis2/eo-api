@@ -228,7 +228,7 @@ async def periods(self, start: str, end: str) -> list[str]:
 
 Note `end` stays a plain `str`, so there is no missing-value case to handle.
 
-**Honour `end` when it is given.** If your plugin returns periods outside the requested scope, the ingestion is refused with `Materialized artifact coverage does not match the requested scope`. That guard is helpful — it catches a plugin that ignores the range rather than silently storing more than was asked for — but it means a lead-day plugin has to filter rather than ignore.
+**Honour `end` when it is given.** If your plugin returns periods outside the requested temporal union, ingestion is refused before mutation. That guard catches a plugin that ignores the range rather than silently storing more than was asked for, so a lead-day plugin has to filter rather than ignore.
 
 `temporal_direction` is separate from `sync.kind` on purpose: a forecast is still `temporal` for sync (re-run it and you get fresher data); what differs is which way its periods run. It cannot be combined with `sync.kind: static`, which has no upstream to look ahead into.
 

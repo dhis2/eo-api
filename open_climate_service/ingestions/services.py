@@ -10,6 +10,7 @@ import os
 import shutil
 import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -45,6 +46,7 @@ from open_climate_service.ingestions.schemas import (
     IngestionListResponse,
     IngestionResponse,
     PublicationStatus,
+    SyncAction,
     SyncDetail,
     SyncResponse,
 )
@@ -53,12 +55,17 @@ from open_climate_service.publications.services import managed_dataset_id_for, p
 from open_climate_service.shared.time import (
     datetime_to_period_string,
     dekad_start,
+    next_period_string,
     normalize_period_string,
     utc_now,
     utc_today,
 )
 from open_climate_service.streaming.orchestrator import run_streaming_ingest_sync
 from open_climate_service.streaming.protocol import IngestionPlugin
+from open_climate_service.streaming.store import (
+    open_or_create_repo,
+    read_committed_period_ids_ordered,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +87,25 @@ _MAX_CONSOLIDATED_CACHE_ENTRIES = 512
 # Avoids reading and deserializing the full artifact index on every chunk request
 # from the /icechunk/ endpoint.  Invalidated when records.json changes on disk.
 _icechunk_artifact_cache: dict[str, tuple[float, "ArtifactRecord"]] = {}
+
+
+@dataclass(frozen=True)
+class _StreamingMaterializationPlan:
+    """Write shape selected before a streaming ingest mutates its store."""
+
+    action: SyncAction
+    start: str
+    end: str
+    periods: list[str] | None
+    has_committed_periods: bool
+
+
+@dataclass(frozen=True)
+class _StoreNormalizationResult:
+    """Outcome of normalizing a store, including whether its directory was swapped."""
+
+    completed: bool
+    swapped: bool = False
 
 
 def _acquire_store_lock(store_path: Path) -> threading.Lock:
@@ -287,6 +313,227 @@ def create_artifact(
     raise HTTPException(status_code=500, detail=f"Dataset '{dataset['id']}' does not define ingestion.plugin")
 
 
+def _period_order_key(period: str, period_type: str) -> str:
+    """Return a lexically sortable key for one normalized period id."""
+    normalized = normalize_period_string(period, period_type)
+    if period_type == "climatology":
+        try:
+            return f"{int(normalized):03d}"
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Source returned invalid climatology period '{period}'",
+            ) from exc
+    return normalized
+
+
+def _normalize_ordered_periods(
+    periods: list[str], *, period_type: str, source: str, require_ordered: bool = True
+) -> list[str]:
+    """Normalize periods and optionally require a unique, ascending sequence."""
+    try:
+        normalized = [normalize_period_string(period, period_type) for period in periods]
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=f"{source} returned an invalid period sequence: {exc}") from exc
+    keys = [_period_order_key(period, period_type) for period in normalized]
+    if require_ordered and (len(set(normalized)) != len(normalized) or keys != sorted(keys)):
+        raise HTTPException(
+            status_code=409,
+            detail=f"{source} periods must be unique and in ascending order; refusing to mutate the store",
+        )
+    return normalized
+
+
+def _periods_are_contiguous(periods: list[str], period_type: str) -> bool:
+    """Return whether each period immediately follows the previous one."""
+    return all(next_period_string(previous, period_type) == current for previous, current in zip(periods, periods[1:]))
+
+
+def _validate_source_periods(
+    periods: list[str],
+    *,
+    start: str,
+    end: str,
+    period_type: str,
+    scope: str,
+) -> list[str]:
+    """Normalize and validate one source-provided materialization sequence."""
+    available = _normalize_ordered_periods(periods, period_type=period_type, source="Ingestion plugin")
+    if not available:
+        raise HTTPException(status_code=409, detail=f"Source has no data for the requested {scope}")
+    if available[0] != start:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Source cannot materialize the requested {scope} from {start}; first available is {available[0]}",
+        )
+    if _period_order_key(available[-1], period_type) > _period_order_key(end, period_type):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Source returned period {available[-1]} beyond the requested {scope} ending {end}",
+        )
+    if not _periods_are_contiguous(available, period_type):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Source returned a non-contiguous period sequence for the requested {scope}",
+        )
+    return available
+
+
+def _plan_streaming_materialization(
+    *,
+    plugin: IngestionPlugin,
+    store_path: Path,
+    start: str,
+    end: str,
+    period_type: str,
+    overwrite: bool,
+    periods: list[str] | None,
+) -> _StreamingMaterializationPlan:
+    """Plan a contiguous union before allowing streaming ingest to write.
+
+    A forward request can append only when the committed coordinate is an exact
+    prefix of every source-valid period in the union. Earlier requests, gaps, or
+    non-monotonic committed coordinates require a sibling-store rematerialization.
+    """
+    committed = _normalize_ordered_periods(
+        read_committed_period_ids_ordered(
+            store_path,
+            period_type,
+            time_dim=str(getattr(plugin, "time_dim", "t")),
+        ),
+        period_type=period_type,
+        source="Committed store",
+        require_ordered=False,
+    )
+    if overwrite:
+        available = _validate_source_periods(
+            periods if periods is not None else asyncio.run(plugin.periods(start, end)),
+            start=start,
+            end=end,
+            period_type=period_type,
+            scope="temporal scope",
+        )
+        return _StreamingMaterializationPlan(
+            action=SyncAction.REMATERIALIZE,
+            start=start,
+            end=available[-1],
+            periods=available,
+            has_committed_periods=bool(committed),
+        )
+
+    if not committed:
+        available = _validate_source_periods(
+            periods if periods is not None else asyncio.run(plugin.periods(start, end)),
+            start=start,
+            end=end,
+            period_type=period_type,
+            scope="temporal scope",
+        )
+        return _StreamingMaterializationPlan(
+            action=SyncAction.APPEND,
+            start=start,
+            end=available[-1],
+            periods=available,
+            has_committed_periods=False,
+        )
+
+    current_start = min(committed, key=lambda value: _period_order_key(value, period_type))
+    current_end = max(committed, key=lambda value: _period_order_key(value, period_type))
+    materialization_start = min((current_start, start), key=lambda value: _period_order_key(value, period_type))
+    materialization_end = max((current_end, end), key=lambda value: _period_order_key(value, period_type))
+    committed_is_contiguous = _periods_are_contiguous(committed, period_type)
+
+    # A request wholly contained by an already contiguous store cannot add data.
+    # Reuse the current artifact without asking a rolling source to enumerate
+    # historical periods that it may no longer expose.
+    if materialization_start == current_start and materialization_end == current_end and committed_is_contiguous:
+        return _StreamingMaterializationPlan(
+            action=SyncAction.NO_OP,
+            start=current_start,
+            end=current_end,
+            periods=committed,
+            has_committed_periods=True,
+        )
+
+    # A contiguous store that only needs a forward extension requires the source
+    # to enumerate the missing delta, not reproduce committed history. Reuse a
+    # sync planner's prefetched delta when present; direct ingestion queries it here.
+    if materialization_start == current_start and committed_is_contiguous:
+        expected_start = next_period_string(current_end, period_type)
+        source_periods = _normalize_ordered_periods(
+            periods if periods is not None else asyncio.run(plugin.periods(expected_start, materialization_end)),
+            period_type=period_type,
+            source="Ingestion plugin",
+        )
+        # Plugins should honor the requested bounds, but accepting an already
+        # committed leading prefix keeps broader source enumerators compatible.
+        delta = [
+            period
+            for period in source_periods
+            if _period_order_key(period, period_type) >= _period_order_key(expected_start, period_type)
+        ]
+        if not delta:
+            return _StreamingMaterializationPlan(
+                action=SyncAction.NO_OP,
+                start=current_start,
+                end=current_end,
+                periods=committed,
+                has_committed_periods=True,
+            )
+        if delta[0] != expected_start or not _periods_are_contiguous(delta, period_type):
+            raise HTTPException(
+                status_code=409,
+                detail=(f"Source append periods must form a contiguous sequence beginning at {expected_start}"),
+            )
+        if _period_order_key(delta[-1], period_type) > _period_order_key(materialization_end, period_type):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Source returned period {delta[-1]} beyond the requested temporal union ending "
+                    f"{materialization_end}"
+                ),
+            )
+        return _StreamingMaterializationPlan(
+            action=SyncAction.APPEND,
+            start=current_start,
+            end=delta[-1],
+            periods=[*committed, *delta],
+            has_committed_periods=True,
+        )
+
+    available = _validate_source_periods(
+        asyncio.run(plugin.periods(materialization_start, materialization_end)),
+        start=materialization_start,
+        end=materialization_end,
+        period_type=period_type,
+        scope="temporal union",
+    )
+    available_set = set(available)
+    missing_committed = [period for period in committed if period not in available_set]
+    if missing_committed:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Source can no longer reproduce committed period(s) required for the temporal union: "
+                + ", ".join(missing_committed[:5])
+            ),
+        )
+
+    committed_is_prefix = available[: len(committed)] == committed
+    action = (
+        SyncAction.APPEND
+        if committed_is_prefix and materialization_start == current_start
+        else SyncAction.REMATERIALIZE
+    )
+    return _StreamingMaterializationPlan(
+        action=action,
+        start=materialization_start,
+        end=available[-1],
+        periods=available,
+        has_committed_periods=True,
+    )
+
+
 def _create_streaming_artifact(
     *,
     dataset: dict[str, object],
@@ -313,15 +560,6 @@ def _create_streaming_artifact(
     if bbox is None:
         raise HTTPException(status_code=400, detail="Streaming ingest requires a bounding box")
 
-    existing = _find_existing_artifact(
-        dataset_id=str(dataset["id"]),
-        request_scope=request_scope,
-    )
-    if existing is not None and not overwrite:
-        if publish and existing.publication.status != PublicationStatus.PUBLISHED:
-            return publish_artifact_record(existing.artifact_id)
-        return existing
-
     ingestion = dataset.get("ingestion")
     raw_params = ingestion.get("params") if isinstance(ingestion, dict) else None
     if raw_params is None:
@@ -343,6 +581,12 @@ def _create_streaming_artifact(
             detail=f"An ingest or sync is already running for dataset '{dataset['id']}'. Wait for it to finish.",
         )
     replacement_path: Path | None = None
+    rollback_repo: Any | None = None
+    rollback_branch: str | None = None
+    rollback_snapshot: str | None = None
+    published_swap_pending = False
+    store_committed = False
+    plugin_handed_to_orchestrator = False
     try:
         # First thing under the lock, before anything looks at the store. A swap killed between
         # its two renames leaves the published path missing and the data at `.retired`; ingest
@@ -351,28 +595,56 @@ def _create_streaming_artifact(
         # `.retired`. Healing before any inspection makes the next sync an ordinary append.
         recover_interrupted_swap(store_path)
 
+        plan = _plan_streaming_materialization(
+            plugin=plugin,
+            store_path=store_path,
+            start=start,
+            end=end,
+            period_type=str(dataset["period_type"]),
+            overwrite=overwrite,
+            periods=periods,
+        )
+        if plan.action == SyncAction.NO_OP:
+            existing = get_latest_artifact_for_dataset_or_404(str(dataset["id"]))
+            if publish and existing.publication.status != PublicationStatus.PUBLISHED:
+                return publish_artifact_record(existing.artifact_id)
+            return existing
+        materialization_scope = request_scope.model_copy(update={"start": plan.start, "end": plan.end})
+
         ingest_path = store_path
-        if overwrite and store_path.exists():
-            # Build overwrite data beside the published store. Fetching is the least reliable
-            # part of ingestion, so the current data must remain readable until the replacement
-            # has been fetched, validated, and normalized successfully.
+        if plan.action == SyncAction.REMATERIALIZE and store_path.exists():
+            # Build a prepend/overwrite beside the published store. Fetching is the least
+            # reliable part of ingestion, so the current data remains readable until the
+            # contiguous replacement has been fetched, validated, and normalized.
             replacement_path = store_path.with_name(f"{store_path.name}.replacement")
             _remove_store_path(replacement_path)
             ingest_path = replacement_path
+        elif plan.has_committed_periods:
+            # Icechunk commits each fetched period independently. Keep the pre-ingest
+            # snapshot reachable so an exception after any commit can restore the public
+            # branch instead of leaving a partial append or a stale pyramid behind.
+            repo = open_or_create_repo(store_path)
+            snapshot = repo.lookup_branch("main")
+            branch = f"ocs-ingest-rollback-{uuid4().hex}"
+            repo.create_branch(branch, snapshot)
+            rollback_repo = repo
+            rollback_snapshot = snapshot
+            rollback_branch = branch
 
+        plugin_handed_to_orchestrator = True
         result = run_streaming_ingest_sync(
             plugin=plugin,
             params=params,
             dataset=dataset,
             bbox=bbox,
-            start=start,
-            end=end,
+            start=plan.start,
+            end=plan.end,
             store_path=ingest_path,
             period_type=str(dataset["period_type"]),
             on_progress=on_progress,
             is_cancel_requested=is_cancel_requested,
             save_cursor=save_cursor,
-            periods=periods,
+            periods=plan.periods,
         )
         if result.periods_written == 0 and not ingest_path.exists():
             raise HTTPException(status_code=409, detail="Source has no data for the requested temporal scope")
@@ -390,25 +662,42 @@ def _create_streaming_artifact(
             spatial=CoverageSpatial(**coverage_data["coverage"]["spatial"]),
             spatial_wgs84=CoverageSpatial(**_spatial_wgs84_data) if _spatial_wgs84_data else None,
         )
-        # Temporal datasets: verify the realized coverage matches the requested scope
-        # and clamp the request end to the realized (possibly source-limited) end. A
-        # non-temporal (ordinal) dataset — e.g. a day-of-year climatology — has no
-        # temporal coverage, so there is nothing to match or clamp.
+        # Temporal datasets validate against the cumulative materialization scope, not
+        # the raw user request. The latter remains on the record as operation provenance.
+        # A brand-new store may legitimately clamp its end to source availability; an
+        # update was already planned from the source's exact available period sequence.
         if coverage.temporal.start is not None:
-            if not _temporal_coverage_matches_streaming_request_scope(coverage.temporal, request_scope):
+            coverage_matches_plan = (
+                _temporal_coverage_matches_request_scope(coverage.temporal, materialization_scope)
+                if plan.has_committed_periods
+                else _temporal_coverage_matches_streaming_request_scope(coverage.temporal, materialization_scope)
+            )
+            if not coverage_matches_plan:
                 raise HTTPException(
                     status_code=409,
                     detail=(
-                        "Materialized artifact coverage does not match the requested scope: "
+                        "Materialized artifact coverage does not match the planned contiguous scope: "
                         f"coverage={coverage.temporal.start}..{coverage.temporal.end}, "
-                        f"request={request_scope.start}..{request_scope.end}"
+                        f"plan={materialization_scope.start}..{materialization_scope.end}"
                     ),
                 )
-            request_scope = request_scope.model_copy(update={"end": coverage.temporal.end})
 
-        _maybe_build_pyramid(ingest_path, dataset)
+        normalization = _maybe_build_pyramid(
+            ingest_path,
+            dataset,
+            retain_previous=plan.has_committed_periods and replacement_path is None,
+        )
+        if plan.has_committed_periods and not normalization.completed:
+            raise RuntimeError(f"Could not normalize '{dataset['id']}'; the dataset update was rolled back")
+        if normalization.swapped and ingest_path == store_path:
+            # Pyramid normalization replaced the published repository but retained
+            # the previous one until its matching artifact record is durable. From
+            # here, rollback first restores that repository and then resets its main
+            # branch to the pre-ingest snapshot retained above.
+            published_swap_pending = True
         if replacement_path is not None:
-            _swap_store(replacement_path, store_path)
+            _swap_store(replacement_path, store_path, retain_previous=True)
+            published_swap_pending = True
 
         record = ArtifactRecord(
             artifact_id=str(uuid4()),
@@ -430,11 +719,62 @@ def _create_streaming_artifact(
             publish=publish,
             overwrite=overwrite,
         )
+        store_committed = True
+        if published_swap_pending:
+            try:
+                _finalize_store_swap(store_path)
+                published_swap_pending = False
+            except Exception:
+                # The record and replacement are already durable. Retaining the old
+                # directory is only a cleanup leak; restoring it would make the record
+                # point at stale data. A later run may retry the cleanup.
+                logger.warning("Could not remove retired store '%s' after commit", store_path, exc_info=True)
+            # A swapped-out repository either disappeared with successful cleanup or
+            # remains only as a retired fallback. Never try to operate on its temporary
+            # branch through the newly published repository path.
+            rollback_repo = None
+            rollback_branch = None
+            rollback_snapshot = None
         if publish and stored_record.publication.status != PublicationStatus.PUBLISHED:
             return publish_artifact_record(stored_record.artifact_id)
         return stored_record
     finally:
         try:
+            if published_swap_pending and not store_committed:
+                try:
+                    _rollback_store_swap(store_path)
+                    published_swap_pending = False
+                except Exception:
+                    logger.error(
+                        "Could not restore the previous store for '%s' after artifact registration failed",
+                        store_path,
+                        exc_info=True,
+                    )
+            elif published_swap_pending:
+                try:
+                    _finalize_store_swap(store_path)
+                    published_swap_pending = False
+                except Exception:
+                    logger.warning("Could not clean up retired store '%s'", store_path, exc_info=True)
+            if not plugin_handed_to_orchestrator:
+                close_plugin = getattr(plugin, "close", None)
+                if callable(close_plugin):
+                    try:
+                        close_plugin()
+                    except Exception:
+                        logger.warning("Could not close ingestion plugin after planning failure", exc_info=True)
+            if rollback_repo is not None and rollback_branch is not None and rollback_snapshot is not None:
+                try:
+                    if not store_committed:
+                        rollback_repo.reset_branch("main", rollback_snapshot)
+                    rollback_repo.delete_branch(rollback_branch)
+                except Exception:
+                    logger.error(
+                        "Could not %s append transaction for '%s'",
+                        "roll back" if not store_committed else "clean up",
+                        store_path,
+                        exc_info=True,
+                    )
             if replacement_path is not None:
                 # Failed fetches and validations leave only a disposable partial replacement. A
                 # successful swap has already moved this path away, making cleanup a no-op.
@@ -485,7 +825,7 @@ def recover_interrupted_swap(target: Path) -> bool:
     return True
 
 
-def _swap_store(staging: Path, target: Path) -> None:
+def _swap_store(staging: Path, target: Path, *, retain_previous: bool = False) -> None:
     """Move ``staging`` into ``target``'s place, keeping the original until the swap lands.
 
     Two directory renames on one filesystem rather than a copy, so the cost is metadata
@@ -509,10 +849,37 @@ def _swap_store(staging: Path, target: Path) -> None:
     except Exception:
         retired.rename(target)  # leave the store exactly as it was
         raise
-    shutil.rmtree(retired, ignore_errors=True)
+    if not retain_previous:
+        shutil.rmtree(retired, ignore_errors=True)
 
 
-def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
+def _finalize_store_swap(target: Path) -> None:
+    """Discard the previous store after its replacement record is durable."""
+    _remove_store_path(_retired_path(target))
+
+
+def _rollback_store_swap(target: Path) -> None:
+    """Restore the retained store when replacement metadata cannot be persisted."""
+    retired = _retired_path(target)
+    if not retired.exists():
+        return
+    failed = target.with_name(f"{target.name}.failed")
+    _remove_store_path(failed)
+    target.rename(failed)
+    try:
+        retired.rename(target)
+    except Exception:
+        failed.rename(target)
+        raise
+    _remove_store_path(failed)
+
+
+def _maybe_build_pyramid(
+    store_path: Path,
+    dataset: dict[str, object],
+    *,
+    retain_previous: bool = False,
+) -> _StoreNormalizationResult:
     """Apply GeoZarr conventions and a multiscale pyramid to the committed Icechunk store.
 
     Streaming ingest writes a flat store with root GeoZarr attrs but no
@@ -530,8 +897,10 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
     attrs on every commit. We detect that case and skip the read-rewrite entirely, avoiding
     the write amplification of re-emitting the whole store on every sync.
 
-    Errors are logged and swallowed so that the plain flat artifact is still
-    registered.
+    Returns whether normalization completed and whether it swapped the store.
+    Errors remain logged and swallowed so a brand-new plain flat artifact can
+    still be registered; callers updating an existing store use the result to
+    roll back instead.
     """
     from open_climate_service.data_accessor.services.accessor import open_icechunk_dataset
 
@@ -544,7 +913,7 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
         ds = open_icechunk_dataset(store_path)
     except Exception:
         logger.warning("Could not open Icechunk store for GeoZarr write; skipping", exc_info=True)
-        return
+        return _StoreNormalizationResult(completed=False)
 
     try:
         already_normalized = "spatial_ref" in ds.coords or "spatial_ref" in ds.variables
@@ -564,7 +933,7 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
                 "Store '%s' is already GeoZarr-normalized and flat; skipping read-rewrite",
                 store_path.name,
             )
-            return
+            return _StoreNormalizationResult(completed=True)
         # `ds` reads lazily from `store_path`, and the rewrite overwrites that same store —
         # the aliasing is why this used to materialise everything first. Build into a sibling
         # store and swap it in, so the source stays readable while topozarr streams the
@@ -580,7 +949,7 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
                 commit_message="Applied GeoZarr conventions",
             )
             ds.close()  # drop the read session before the directory moves under it
-            _swap_store(staging, store_path)
+            _swap_store(staging, store_path, retain_previous=retain_previous)
         finally:
             # A failed build leaves a partial copy of the whole store behind. That matters most
             # when the failure *was* disk exhaustion: the flat-store fallback below would
@@ -593,8 +962,10 @@ def _maybe_build_pyramid(store_path: Path, dataset: dict[str, object]) -> None:
             store_path.name,
             exc_info=True,
         )
+        return _StoreNormalizationResult(completed=False)
     finally:
         ds.close()
+    return _StoreNormalizationResult(completed=True, swapped=True)
 
 
 def _load_streaming_plugin(plugin_path: str, *, params: dict[str, object]) -> IngestionPlugin:
@@ -1019,14 +1390,12 @@ def _store_artifact_record(
     """Persist a newly created artifact record while avoiding lost updates."""
 
     def mutate(records: list[ArtifactRecord]) -> ArtifactRecord:
-        existing = _find_existing_artifact_in_records(
+        existing = _find_artifact_by_request_scope(
             records=records,
             dataset_id=record.dataset_id,
             request_scope=record.request_scope,
         )
-        if existing is not None:
-            if publish and existing.publication.status != PublicationStatus.PUBLISHED:
-                return existing
+        if existing is not None and existing.coverage == record.coverage:
             return existing
 
         records.append(record)
@@ -1046,7 +1415,7 @@ def _upsert_artifact_record(
         return _store_artifact_record(record, publish=publish)
 
     def mutate(records: list[ArtifactRecord]) -> ArtifactRecord:
-        existing = _find_existing_artifact_in_records(
+        existing = _find_artifact_by_request_scope(
             records=records,
             dataset_id=record.dataset_id,
             request_scope=record.request_scope,
@@ -1259,6 +1628,26 @@ def _find_existing_artifact_in_records(
             )
             continue
         return record
+    return None
+
+
+def _find_artifact_by_request_scope(
+    *,
+    records: list[ArtifactRecord],
+    dataset_id: str,
+    request_scope: ArtifactRequestScope,
+) -> ArtifactRecord | None:
+    """Return the latest materialized record for the same operation request.
+
+    Unlike the API reuse lookup above, persistence must allow cumulative coverage
+    to extend beyond a finite incremental request. The caller compares coverage
+    when deduplicating and replaces the record explicitly for overwrite semantics.
+    """
+    for record in reversed(records):
+        if record.dataset_id != dataset_id or record.request_scope != request_scope:
+            continue
+        if _artifact_storage_exists(record):
+            return record
     return None
 
 
