@@ -95,9 +95,6 @@
     kind: static
   units: mm/d
   source: Derived (climate_normal workflow)
-  # Inherited from CHIRPS3: a derived product is a derivative work, so it cannot be more
-  # permissive than its input. CC0 is already maximally permissive, so this is a formality
-  # here — but stating it keeps the rule visible rather than implicit.
   license: CC0-1.0
   providers:
     - name: UCSB Climate Hazards Center
@@ -116,9 +113,6 @@
     kind: static
   units: mm/d
   source: Derived (climate_normal workflow)
-  # Inherited from CHIRPS3: a derived product is a derivative work, so it cannot be more
-  # permissive than its input. CC0 is already maximally permissive, so this is a formality
-  # here — but stating it keeps the rule visible rather than implicit.
   license: CC0-1.0
   providers:
     - name: UCSB Climate Hazards Center
@@ -142,9 +136,6 @@
     kind: static
   units: "%"
   source: Derived (climate_anomaly workflow, method=relative)
-  # Inherited from CHIRPS3: a derived product is a derivative work, so it cannot be more
-  # permissive than its input. CC0 is already maximally permissive, so this is a formality
-  # here — but stating it keeps the rule visible rather than implicit.
   license: CC0-1.0
   providers:
     - name: UCSB Climate Hazards Center
@@ -163,9 +154,6 @@
     kind: static
   units: mm/d
   source: Derived (climate_anomaly workflow)
-  # Inherited from CHIRPS3: a derived product is a derivative work, so it cannot be more
-  # permissive than its input. CC0 is already maximally permissive, so this is a formality
-  # here — but stating it keeps the rule visible rather than implicit.
   license: CC0-1.0
   providers:
     - name: UCSB Climate Hazards Center
@@ -184,9 +172,6 @@
     kind: static
   units: mm/d
   source: Derived (climate_anomaly workflow)
-  # Inherited from CHIRPS3: a derived product is a derivative work, so it cannot be more
-  # permissive than its input. CC0 is already maximally permissive, so this is a formality
-  # here — but stating it keeps the rule visible rather than implicit.
   license: CC0-1.0
   providers:
     - name: UCSB Climate Hazards Center
@@ -208,9 +193,6 @@
     kind: static
   units: "%"
   source: Derived (climate_anomaly workflow, method=relative)
-  # Inherited from CHIRPS3: a derived product is a derivative work, so it cannot be more
-  # permissive than its input. CC0 is already maximally permissive, so this is a formality
-  # here — but stating it keeps the rule visible rather than implicit.
   license: CC0-1.0
   providers:
     - name: UCSB Climate Hazards Center

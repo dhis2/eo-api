@@ -23,9 +23,6 @@
   source: ERA5-Land Reanalysis
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/era5-land-daily
   license:
-    # No SPDX identifier exists for this, which is why the field accepts a name and URL.
-    # Commercial use resolves from the licence name — see _KNOWN_NAMED_LICENCES, where the
-    # terms are recorded once rather than re-asserted in every template.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -62,9 +59,6 @@
   source: ERA5-Land Reanalysis
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land
   license:
-    # No SPDX identifier exists for this, which is why the field accepts a name and URL.
-    # Commercial use resolves from the licence name — see _KNOWN_NAMED_LICENCES, where the
-    # terms are recorded once rather than re-asserted in every template.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -100,9 +94,6 @@
   source: ERA5-Land Reanalysis
   source_url: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means
   license:
-    # No SPDX identifier exists for this, which is why the field accepts a name and URL.
-    # Commercial use resolves from the licence name — see _KNOWN_NAMED_LICENCES, where the
-    # terms are recorded once rather than re-asserted in every template.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -139,9 +130,6 @@
   source: ERA5-Land Reanalysis
   source_url: https://cds.climate.copernicus.eu/datasets/reanalysis-era5-land-monthly-means
   license:
-    # No SPDX identifier exists for this, which is why the field accepts a name and URL.
-    # Commercial use resolves from the licence name — see _KNOWN_NAMED_LICENCES, where the
-    # terms are recorded once rather than re-asserted in every template.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -176,9 +164,6 @@
   source: ERA5-Land Reanalysis
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land
   license:
-    # No SPDX identifier exists for this, which is why the field accepts a name and URL.
-    # Commercial use resolves from the licence name — see _KNOWN_NAMED_LICENCES, where the
-    # terms are recorded once rather than re-asserted in every template.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -213,9 +198,6 @@
   source: ERA5-Land Reanalysis
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-land
   license:
-    # No SPDX identifier exists for this, which is why the field accepts a name and URL.
-    # Commercial use resolves from the licence name — see _KNOWN_NAMED_LICENCES, where the
-    # terms are recorded once rather than re-asserted in every template.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -249,9 +231,6 @@
   source: ERA5-Land Reanalysis (Earth Data Hub)
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/era5-land-daily
   license:
-    # No SPDX identifier exists for this, which is why the field accepts a name and URL.
-    # Commercial use resolves from the licence name — see _KNOWN_NAMED_LICENCES, where the
-    # terms are recorded once rather than re-asserted in every template.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -284,9 +263,6 @@
   source: ERA5-Land Reanalysis (Earth Data Hub)
   source_url: https://earthdatahub.destine.eu/collections/era5/datasets/era5-land-daily
   license:
-    # No SPDX identifier exists for this, which is why the field accepts a name and URL.
-    # Commercial use resolves from the licence name — see _KNOWN_NAMED_LICENCES, where the
-    # terms are recorded once rather than re-asserted in every template.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -317,8 +293,6 @@
   units: degC
   source: Derived (climate_normal workflow)
   license:
-    # Inherited from ERA5-Land: this is a derived product and a derivative work, so it cannot
-    # be more permissive than its input. No SPDX identifier exists for the Copernicus licence.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -340,8 +314,6 @@
   units: mm/d
   source: Derived (climate_normal workflow)
   license:
-    # Inherited from ERA5-Land: this is a derived product and a derivative work, so it cannot
-    # be more permissive than its input. No SPDX identifier exists for the Copernicus licence.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -369,8 +341,6 @@
   units: degC
   source: Derived (climate_anomaly workflow)
   license:
-    # Inherited from ERA5-Land: this is a derived product and a derivative work, so it cannot
-    # be more permissive than its input. No SPDX identifier exists for the Copernicus licence.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -390,8 +360,6 @@
   units: "%"
   source: Derived (climate_anomaly workflow, method=relative)
   license:
-    # Inherited from ERA5-Land: this is a derived product and a derivative work, so it cannot
-    # be more permissive than its input. No SPDX identifier exists for the Copernicus licence.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -411,8 +379,6 @@
   units: mm/d
   source: Derived (climate_anomaly workflow)
   license:
-    # Inherited from ERA5-Land: this is a derived product and a derivative work, so it cannot
-    # be more permissive than its input. No SPDX identifier exists for the Copernicus licence.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -438,8 +404,6 @@
   units: degC
   source: Derived (climate_anomaly workflow)
   license:
-    # Inherited from ERA5-Land: this is a derived product and a derivative work, so it cannot
-    # be more permissive than its input. No SPDX identifier exists for the Copernicus licence.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -459,8 +423,6 @@
   units: mm/d
   source: Derived (climate_anomaly workflow)
   license:
-    # Inherited from ERA5-Land: this is a derived product and a derivative work, so it cannot
-    # be more permissive than its input. No SPDX identifier exists for the Copernicus licence.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
@@ -480,8 +442,6 @@
   units: "%"
   source: Derived (climate_anomaly workflow, method=relative)
   license:
-    # Inherited from ERA5-Land: this is a derived product and a derivative work, so it cannot
-    # be more permissive than its input. No SPDX identifier exists for the Copernicus licence.
     name: Licence to Use Copernicus Products
     url: https://apps.ecmwf.int/datasets/licences/copernicus/
   providers:
