@@ -9,6 +9,7 @@ paths produced four rounds of contradictory fixes.
 """
 
 import glob
+import logging
 import pathlib
 import re
 
@@ -261,3 +262,60 @@ def test_an_identifier_with_a_consistent_name_and_url_is_kept() -> None:
     )
     assert licence.stac_license == "CC-BY-4.0"
     assert licence.url == "https://creativecommons.org/licenses/by/4.0/"
+
+
+# -- parsing is silent; the validator does the complaining ---------------------------------
+
+
+def test_parsing_a_contradictory_licence_logs_nothing() -> None:
+    """`parse_licence` runs on every STAC and /datasets request, and instance templates are
+    re-read each time, so a warning here would log for as long as the template existed — the
+    behaviour `_warn_once` exists to stop (CLIM-904). Asserted by call count, because a
+    "warns once" claim about a per-request function is only true until the second request."""
+    from open_climate_service.shared import licences
+
+    records: list[logging.LogRecord] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = Collect()
+    licences.logger.addHandler(handler)
+    try:
+        for _ in range(3):
+            parse_licence({"id": "CC0-1.0", "name": "Licence to Use Copernicus Products", "url": "https://x"})
+            parse_licence({"id": "CC-BY-NC-4.0", "obligations": []})
+    finally:
+        licences.logger.removeHandler(handler)
+
+    assert records == []
+
+
+def test_the_validator_names_the_contradiction_rather_than_calling_it_unreadable() -> None:
+    """ "Unreadable" sends the author hunting for a typo when the declaration parses fine and
+    simply says two different things."""
+    from open_climate_service.shared.licences import licence_declaration_problem
+
+    problem = licence_declaration_problem(
+        {"id": "CC0-1.0", "name": "Licence to Use Copernicus Products", "url": "https://x"}
+    )
+    assert problem is not None
+    assert "CC0-1.0" in problem
+    assert "attribution" in problem
+
+
+def test_explicit_obligations_beside_an_identifier_are_reported_once() -> None:
+    from open_climate_service.shared.licences import licence_declaration_problem
+
+    problem = licence_declaration_problem({"id": "CC-BY-NC-4.0", "obligations": []})
+    assert problem is not None
+    assert "ignored" in problem
+
+
+def test_a_sound_declaration_has_nothing_to_report() -> None:
+    from open_climate_service.shared.licences import licence_declaration_problem
+
+    assert licence_declaration_problem("CC-BY-4.0") is None
+    assert licence_declaration_problem({"id": "CC-BY-4.0", "url": "https://x"}) is None
+    assert licence_declaration_problem({"name": "Vendor Terms", "url": "https://x"}) is None

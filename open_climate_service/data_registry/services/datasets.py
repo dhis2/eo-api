@@ -444,9 +444,18 @@ def _validate_dataset_template(dataset: object, *, source: str) -> None:
             "identifier (license: CC-BY-4.0) or a name and URL for a licence that has none.",
         )
     else:
-        from open_climate_service.shared.licences import UNDECLARED, parse_licence
+        from open_climate_service.shared.licences import (
+            UNDECLARED,
+            licence_declaration_problem,
+            parse_licence,
+        )
 
-        if parse_licence(dataset.get("license")) is UNDECLARED:
+        # A specific complaint where there is one — a contradictory id/name pair reads as
+        # "unreadable" otherwise, which sends the author looking for a typo.
+        problem = licence_declaration_problem(dataset.get("license"))
+        if problem is not None:
+            _warn_once(dataset_id, source, problem)
+        elif parse_licence(dataset.get("license")) is UNDECLARED:
             _warn_once(
                 dataset_id,
                 source,

@@ -210,6 +210,64 @@ def _canonical_spdx(value: str) -> str | None:
     return _SPDX_BY_LOWER.get(value.strip().lower())
 
 
+def _contradiction(identifier: str | None, name: str | None) -> str | None:
+    """Why an identifier and a name cannot both describe this licence, or None.
+
+    An identifier and a name that require different things is a contradiction, not a
+    redundancy. `{id: CC0-1.0, name: <a licence requiring attribution>, url: ...}` would
+    publish `license: CC0-1.0` while the `rel: license` link points at terms that demand
+    credit, and a STAC client reads the field far more often than it fetches the link. There
+    is no basis for picking a winner, so neither is used.
+
+    Only a *recognised* name can be shown to disagree. An unrecognised one is left alone: it
+    is a label and a link, the identifier stays authoritative for the terms, and the common
+    `{id, name, url}` spelling of a single licence has to keep working.
+    """
+    if identifier is None or identifier not in _SPDX_OBLIGATIONS:
+        return None
+    named = _obligations_for_name(name)
+    if named is None or named == _SPDX_OBLIGATIONS[identifier]:
+        return None
+    return (
+        f"declares SPDX identifier {identifier} together with the name {name!r}, which OCS "
+        f"knows to require {sorted(named) or 'nothing'} rather than "
+        f"{sorted(_SPDX_OBLIGATIONS[identifier]) or 'nothing'}; treating the licence as "
+        f"undeclared. Declare whichever one describes the terms, not both."
+    )
+
+
+def licence_declaration_problem(declared: Any) -> str | None:
+    """A specific complaint about a `license` declaration, for the template validator.
+
+    Kept out of `parse_licence` on purpose. That function runs on every STAC and `/datasets`
+    request, and an instance's templates are deliberately re-read each time, so a warning
+    raised there would log on every request for as long as the template existed — the exact
+    behaviour `_warn_once` was added to stop (CLIM-904). Parsing stays silent and pure; this
+    is called once, at the validation boundary, and routed through that deduplicating logger.
+
+    Returns None when there is nothing specific to say. A declaration that is merely
+    unreadable is already reported by the validator's generic message.
+    """
+    if not isinstance(declared, dict):
+        return None
+    raw_id = declared.get("id") or declared.get("spdx")
+    identifier = _canonical_spdx(str(raw_id)) if isinstance(raw_id, str) and raw_id.strip() else None
+    raw_name = declared.get("name")
+    name = str(raw_name).strip() if isinstance(raw_name, str) and raw_name.strip() else None
+
+    contradiction = _contradiction(identifier, name)
+    if contradiction is not None:
+        return contradiction
+
+    if identifier is not None and identifier in _SPDX_OBLIGATIONS and isinstance(declared.get("obligations"), list):
+        return (
+            f"declares explicit 'obligations' alongside the SPDX identifier {identifier}, which "
+            f"already defines its terms; the list is ignored. Remove it, or drop the identifier "
+            f"if the terms genuinely differ."
+        )
+    return None
+
+
 def parse_licence(declared: Any) -> DatasetLicence:
     """Parse a template's `license` field.
 
@@ -269,19 +327,8 @@ def parse_licence(declared: Any) -> DatasetLicence:
         # Only a *recognised* name can be shown to disagree. An unrecognised one is left alone:
         # it is a label and a link, the identifier stays authoritative for the terms, and the
         # common `{id, name, url}` spelling of a single licence has to keep working.
-        if identifier is not None and identifier in _SPDX_OBLIGATIONS:
-            named_obligations = _obligations_for_name(name)
-            if named_obligations is not None and named_obligations != _SPDX_OBLIGATIONS[identifier]:
-                logger.warning(
-                    "Licence declares SPDX identifier %s together with the name %r, which OCS "
-                    "knows to require %s rather than %s. Treating the licence as undeclared: "
-                    "declare whichever one describes the terms, not both.",
-                    identifier,
-                    name,
-                    sorted(named_obligations) or "nothing",
-                    sorted(_SPDX_OBLIGATIONS[identifier]) or "nothing",
-                )
-                return UNDECLARED
+        if _contradiction(identifier, name) is not None:
+            return UNDECLARED
 
         # Order matters. A recognised identifier or name is authoritative, and an explicit
         # `obligations` list is consulted only when neither supplies semantics. Letting the
@@ -291,12 +338,6 @@ def parse_licence(declared: Any) -> DatasetLicence:
         raw_obligations = declared.get("obligations")
         if identifier is not None and identifier in _SPDX_OBLIGATIONS:
             obligations, known = _SPDX_OBLIGATIONS[identifier], True
-            if isinstance(raw_obligations, list):
-                logger.warning(
-                    "Licence %s declares explicit obligations; ignoring them because the SPDX "
-                    "identifier already defines its terms",
-                    identifier,
-                )
         else:
             named = _obligations_for_name(name)
             if named is not None:
