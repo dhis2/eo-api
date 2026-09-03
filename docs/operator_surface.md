@@ -31,6 +31,12 @@ This separation is part of the CLIM-921 decision. The follow-up ticket changes t
 page's information architecture and presentation; it does not reconsider ownership or move
 operator actions onto the public page.
 
+The redesign must keep its navigation hierarchical. Persistent primary navigation selects
+the active product area; any top bar is subordinate to that selection and contains only the
+current area's views, filters, and actions. Only the active area is presented in the main
+content panel, and growing collections use bounded, paginated views instead of one continuous
+page containing every area and record.
+
 ## Placement and access
 
 | Operator task | OCS surface | Access class | Climate App role |
