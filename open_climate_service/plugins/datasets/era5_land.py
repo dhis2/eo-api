@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import calendar
+import json
+import logging
+import netrc
 import os
 import tempfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from threading import Lock
+from time import monotonic
 from typing import Any, cast
+from urllib.error import HTTPError
 from urllib.parse import urlparse, urlunparse
+from urllib.request import Request, urlopen
 
 import numpy as np
 import xarray as xr
@@ -25,6 +32,8 @@ from open_climate_service.shared.time import (
 from open_climate_service.streaming import BaseDatasetPlugin, monthly_period_ids
 from open_climate_service.transforms.climatology import circular_rolling_mean
 from open_climate_service.transforms.unit_conversion import kelvin_to_celsius, metres_to_mm
+
+logger = logging.getLogger(__name__)
 
 # CDS API long-name variables for reanalysis-era5-land-monthly-means
 _CDS_VARIABLE_NAMES: dict[str, str] = {
@@ -351,38 +360,164 @@ def _deaccumulate_tp(tp: xr.DataArray, time_dim: str = "valid_time") -> xr.DataA
 # Earth Data Hub (EDH) plugins — lazy Zarr access, no per-period downloads
 # ---------------------------------------------------------------------------
 
-# Hourly ERA5-Land: Zarr v2
-_EDH_HOURLY_URL = "https://api.earthdatahub.destine.eu/era5/reanalysis-era5-land-no-antartica-v0.zarr"
+# Hourly ERA5-Land, Zarr v3. The store this replaced stopped advancing at 2026-05-31 while the
+# daily store kept moving, because EDH applies updates only to its v3 stores (CLIM-955).
+# Verified identical in every respect that matters to the plugins below: 0-360 longitude, the
+# same latitude range, a `valid_time` axis and the same 50 variables including t2m and tp.
+_EDH_HOURLY_URL = "https://api.earthdatahub.destine.eu/era5/era5-land-v0.zarr"
 # Daily ERA5-Land: new DestinE API, Zarr v3, requires an additional subscription
 _EDH_DAILY_URL = "https://api.earthdatahub.destine.eu/era5/era5-land-daily-utc-v1.zarr"
 _EDH_API_KEY_ENV = "EDH_API_KEY"
 
 
-def _edh_open_zarr(url: str, *, consolidated: bool | None = None) -> xr.Dataset:
+# A confirmed verdict never changes for a given URL, so it is cached for the process.
+_edh_is_v3_cache: dict[str, bool] = {}
+# An *undeterminable* verdict is cached only briefly — a deliberate middle course. Memoising it
+# permanently would let one transient timeout disable the check for the process. Not caching it
+# at all is worse: `_latest_available` reopens the store for every period, so a store fsspec can
+# read while this separate request times out would cost a 15 s probe *per period*. A short TTL
+# bounds the cost and still recovers on its own.
+_EDH_UNKNOWN_TTL_SECONDS = 300.0
+_edh_unknown_until: dict[str, float] = {}
+
+
+def _edh_is_zarr_v3(url: str) -> bool | None:
+    """Whether an EDH store is Zarr v3. None when the question cannot be answered.
+
+    A v3 store answers ``zarr.json``; anything else does not. That single probe is the whole
+    test — OCS reads only v3, so there is nothing to learn from identifying *which* older
+    format a store uses.
+
+    The three-way result matters. A definite 404 means the store is not v3 and the caller
+    should refuse. A timeout or a 5xx means we do not know, and a transient network fault must
+    never be turned into a refusal of a store that reads perfectly well.
+    """
+    cached = _edh_is_v3_cache.get(url)
+    if cached is not None:
+        return cached
+    if monotonic() < _edh_unknown_until.get(url, 0.0):
+        return None  # probed recently and could not tell; do not re-probe per period
+    verdict: bool | None = None
+    try:
+        # The credential-free URL plus an explicit header: `urlopen` does not turn
+        # `user:pass@host` userinfo into Basic Auth the way fsspec does, so probing the
+        # authenticated URL fails for anyone using EDH_API_KEY.
+        request = Request(f"{url}/zarr.json", headers=_edh_auth_header(url))
+        with urlopen(request, timeout=15) as response:  # noqa: S310  # fixed https EDH host
+            document = json.loads(response.read())
+        # Only a document that actually states its format is evidence. A 200 of an unexpected
+        # shape — `[]`, or a proxy's JSON error page — says nothing about the store, so it is
+        # unknown rather than non-v3: refusing on it would break a store that reads fine.
+        declared = document.get("zarr_format") if isinstance(document, dict) else None
+        verdict = declared >= 3 if isinstance(declared, int) else None
+    except HTTPError as error:
+        # 404 is an answer: there is no v3 metadata document here. Any other status is not.
+        verdict = False if error.code == 404 else None
+    except Exception:  # noqa: BLE001 — an unreachable store is unknown, not non-v3
+        verdict = None
+    if verdict is None:
+        _edh_unknown_until[url] = monotonic() + _EDH_UNKNOWN_TTL_SECONDS
+        return None
+    _edh_is_v3_cache[url] = verdict
+    _edh_unknown_until.pop(url, None)
+    return verdict
+
+
+def _require_zarr_v3(url: str, ds: xr.Dataset) -> None:
+    """Refuse a store that is not Zarr v3, closing it first.
+
+    OCS reads only Zarr v3. EDH keeps superseded stores readable and applies updates only to
+    the v3 ones, so an older store does not fail — it silently stops advancing, and an ingest
+    against it reports no new periods, which is indistinguishable from "nothing has been
+    published yet" (the same shape as CLIM-952). Refusing is what makes that visible.
+
+    Only a *confirmed* non-v3 store is refused. An undeterminable probe leaves the store
+    usable, because a network fault is not evidence about the store's format.
+    """
+    if _edh_is_zarr_v3(url) is not False:
+        return
+    latest = ""
+    time_dim = next((name for name in ("valid_time", "time") if name in ds.coords), None)
+    if time_dim and ds.sizes.get(time_dim):
+        try:
+            # A lazy remote read, which can fail on its own. It only sharpens the message.
+            latest = f" Its latest timestamp is {str(ds[time_dim].isel({time_dim: -1}).values)[:16]}."
+        except Exception:  # noqa: BLE001 — enrichment is optional, the refusal is not
+            logger.debug("Could not read the latest timestamp of %s", url, exc_info=True)
+    ds.close()
+    raise RuntimeError(
+        f"Earth Data Hub store {url} is not Zarr v3, and OCS reads only v3 stores. EDH applies "
+        f"updates only to its Zarr v3 stores, so this one no longer advances.{latest} "
+        f"Repoint it at the v3 store for this dataset. See CLIM-955."
+    )
+
+
+def _edh_open_zarr(url: str) -> xr.Dataset:
     """Open an Earth Data Hub Zarr store.
 
     Injects the ``EDH_API_KEY`` environment variable as HTTP Basic Auth
     (username ``edh``, password = key).  Falls back to netrc when the
     variable is not set.
 
-    Pass ``consolidated=True`` for Zarr v2 stores (the hourly ERA5-Land store).
+    Every store OCS pins is Zarr v3, which carries its metadata inline, so nothing here has to
+    say how to find it — the `consolidated` switch that older stores needed is gone with them.
+    `_require_zarr_v3` is what keeps that assumption honest: EDH leaves superseded stores
+    readable, and they fail by going quiet rather than by erroring (CLIM-955).
+    """
+    opened = xr.open_zarr(
+        _edh_authenticated_url(url),
+        storage_options={"client_kwargs": {"trust_env": True}},
+    )
+    _require_zarr_v3(url, opened)
+    return opened  # type: ignore[no-any-return]
+
+
+def _edh_authenticated_url(url: str) -> str:
+    """Inject ``EDH_API_KEY`` as HTTP Basic Auth, leaving netrc to handle it when unset."""
+    token = os.environ.get(_EDH_API_KEY_ENV, "")
+    if not token:
+        return url
+    parts = urlparse(url)
+    return urlunparse(parts._replace(netloc=f"edh:{token}@{parts.netloc}"))
+
+
+def _edh_auth_header(url: str) -> dict[str, str]:
+    """Basic Auth for the plain ``urlopen`` probe, from either credential source.
+
+    Needed because ``urlopen`` authenticates like neither of the paths that work elsewhere:
+    it does not read netrc (fsspec does, via ``trust_env=True``) and it does not turn
+    ``user:pass@host`` userinfo into an Authorization header (fsspec does that too). So both
+    of the documented ways to give OCS an EDH credential leave the probe unauthenticated, it
+    takes a 401, returns None, and the superseded-store warning silently never fires — the
+    exact failure it exists to prevent.
     """
     token = os.environ.get(_EDH_API_KEY_ENV, "")
     if token:
-        parts = urlparse(url)
-        url = urlunparse(parts._replace(netloc=f"edh:{token}@{parts.netloc}"))
-    return xr.open_zarr(  # type: ignore[no-any-return]
-        url,
-        consolidated=consolidated,
-        storage_options={"client_kwargs": {"trust_env": True}},
-    )
+        return _basic_auth("edh", token)
+    try:
+        host = urlparse(url).hostname or ""
+        credentials = netrc.netrc().authenticators(host)
+    except (OSError, netrc.NetrcParseError):
+        return {}
+    if not credentials:
+        return {}
+    login, _, password = credentials
+    # `or "edh"`: the netrc entry EDH documents carries only a password, and Python then
+    # reports an empty login — which would build `:key` here while the EDH_API_KEY path builds
+    # `edh:key`. EDH happens to accept both today, so this is not a live failure, but two auth
+    # paths disagreeing means one of them works only by the service's tolerance.
+    return _basic_auth(login or "edh", password or "")
+
+
+def _basic_auth(login: str, password: str) -> dict[str, str]:
+    encoded = base64.b64encode(f"{login}:{password}".encode()).decode()
+    return {"Authorization": f"Basic {encoded}"}
 
 
 class _ERA5LandEDHBase(BaseDatasetPlugin):
     """Shared cache and region logic for EDH Zarr plugins."""
 
     _edh_url: str  # set by subclass
-    _edh_consolidated: bool | None = None  # True for Zarr v2 stores
     _edh_lon_360: bool = False  # True when longitude is stored 0–360
 
     def __init__(self, variable: str) -> None:
@@ -402,7 +537,7 @@ class _ERA5LandEDHBase(BaseDatasetPlugin):
                 return self._cached_region
             self._close_cached_locked()
             xmin, ymin, xmax, ymax = bbox_tuple
-            ds = _edh_open_zarr(self._edh_url, consolidated=self._edh_consolidated)
+            ds = _edh_open_zarr(self._edh_url)
             # Extend bbox by half a grid step (0.05°) to avoid floating-point
             # boundary exclusion (e.g. 360 - 10.1 = 349.8999... misses the 349.9
             # grid point). CDS API is inclusive of boundary points; this aligns
@@ -439,7 +574,7 @@ class _ERA5LandEDHBase(BaseDatasetPlugin):
 
     def _latest_available(self) -> str:
         """Return the latest available timestamp from the EDH Zarr store."""
-        ds = _edh_open_zarr(self._edh_url, consolidated=self._edh_consolidated)
+        ds = _edh_open_zarr(self._edh_url)
         try:
             return str(np.datetime64(ds.valid_time.isel(valid_time=-1).values, "h"))
         finally:
@@ -582,7 +717,6 @@ class ERA5LandEDHPrecipitationDailyPlugin(_ERA5LandEDHBase):
     """
 
     _edh_url = _EDH_HOURLY_URL
-    _edh_consolidated = True
     _edh_lon_360 = True
     max_concurrency = 4
     commit_batch_size = 30
@@ -712,7 +846,6 @@ class ERA5LandTempDailyFromHourlyPlugin(_ERA5LandEDHBase):
     """
 
     _edh_url = _EDH_HOURLY_URL
-    _edh_consolidated = True
     _edh_lon_360 = True
     max_concurrency = 4
     commit_batch_size = 30
