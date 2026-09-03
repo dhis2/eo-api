@@ -208,9 +208,21 @@ class ERA5LandDailyTemperaturePlugin(BaseDatasetPlugin):
 class ERA5LandMonthlyPlugin(BaseDatasetPlugin):
     """Streaming plugin for monthly ERA5-Land means from the Copernicus CDS.
 
-    Fetches one calendar month at a time from the ``reanalysis-era5-land-monthly-means``
-    dataset via the CDS API (``ecmwf-datastores``). Credentials are read from
-    ``~/.cdsapirc`` or the ``CDSAPI_URL`` / ``CDSAPI_KEY`` environment variables.
+    Fetches a **calendar year** per CDS API call from ``reanalysis-era5-land-monthly-means``
+    and caches it, so the twelve ``fetch_period`` calls for that year share one remote
+    request. Credentials are read from ``~/.cdsapirc`` or the ``CDSAPI_URL`` / ``CDSAPI_KEY``
+    environment variables.
+
+    A CDS request costs almost entirely queue and dispatch rather than data — one month over
+    a country extent is about 30 KB — so twelve months cost barely more than one. Measured
+    against the live API: 28.7 s for a single month against 34.4 s for a year, which is 2.9 s
+    per month rather than 28.7 (CLIM-956). Over a 30-year ingest that is roughly 21 minutes
+    instead of 204.
+
+    ``max_concurrency = 1`` is what keeps the cache safe from concurrent fetches, the same
+    reason it is pinned on :class:`ERA5LandCDSHourlyPlugin`. It is not a throughput limit to
+    raise: batching cuts the request count outright, which is both faster and lighter on CDS
+    than running the same number of requests in parallel.
     """
 
     max_concurrency = 1
@@ -222,6 +234,13 @@ class ERA5LandMonthlyPlugin(BaseDatasetPlugin):
                 f"ERA5LandMonthlyPlugin: unsupported variable {variable!r}; expected one of {list(_CDS_VARIABLE_NAMES)}"
             )
         self.variable = variable
+        self._cache_lock = Lock()
+        self._cached_year: int | None = None
+        self._cached_bbox: tuple[float, float, float, float] | None = None
+        self._cached_ds: xr.Dataset | None = None
+        # Resolved once per plugin, not once per year: it is a catalogue round-trip, and the
+        # answer cannot move backwards during a single ingest.
+        self._cutoff: date | None = None
 
     async def periods(self, start: str, end: str) -> list[str]:
         cutoff = await asyncio.to_thread(_monthly_availability_cutoff)
@@ -229,13 +248,60 @@ class ERA5LandMonthlyPlugin(BaseDatasetPlugin):
 
     def fetch_period(self, period_id: str, bbox: list[float], **_: Any) -> xr.Dataset:
         year, month = int(period_id[:4]), int(period_id[5:7])
-        xmin, ymin, xmax, ymax = map(float, bbox)
+        bbox_tuple = cast(tuple[float, float, float, float], tuple(map(float, bbox)))
 
+        with self._cache_lock:
+            if self._cached_year != year or self._cached_bbox != bbox_tuple:
+                self._cached_ds = self._fetch_year(year, bbox_tuple)
+                self._cached_year = year
+                self._cached_bbox = bbox_tuple
+            yearly = self._cached_ds
+
+        assert yearly is not None
+        # Selected by calendar month rather than by an exact timestamp: the store's own
+        # convention for where in the month the stamp sits is CDS's to decide, and matching on
+        # it would break quietly if that ever changed.
+        stamps = yearly["t"].dt
+        wanted = np.flatnonzero(((stamps.year == year) & (stamps.month == month)).values)
+        if wanted.size == 0:
+            raise ValueError(f"CDS returned no ERA5-Land monthly mean for {period_id}")
+        return _drop_auxiliary_variables(yearly.isel(t=wanted), self.variable)
+
+    def _fetch_year(self, year: int, bbox: tuple[float, float, float, float]) -> xr.Dataset:
+        """Fetch every published month of *year* in as few CDS requests as possible.
+
+        Usually one. Months are grouped by product type first, because
+        :func:`_era5land_monthly_product_type` switches product mid-year for accumulated
+        variables between September 2022 and February 2024 — asking for a whole year in one
+        request there would silently return the buggy product for part of it, which is the
+        very thing that workaround exists to avoid.
+        """
+        if self._cutoff is None:
+            self._cutoff = _monthly_availability_cutoff()
+        cutoff = self._cutoff
+        last_month = cutoff.month if year == cutoff.year else 12
+        if year > cutoff.year:
+            raise ValueError(f"ERA5-Land monthly means are not published for {year}")
+
+        by_product: dict[str, list[int]] = {}
+        for month in range(1, last_month + 1):
+            product = _era5land_monthly_product_type(year, month, self.variable)
+            by_product.setdefault(product, []).append(month)
+
+        parts = [self._fetch_months(year, months, product, bbox) for product, months in by_product.items()]
+        if len(parts) == 1:
+            return parts[0]
+        return xr.concat(parts, dim="t").sortby("t")
+
+    def _fetch_months(
+        self, year: int, months: list[int], product_type: str, bbox: tuple[float, float, float, float]
+    ) -> xr.Dataset:
+        xmin, ymin, xmax, ymax = bbox
         params = {
-            "product_type": [_era5land_monthly_product_type(year, month, self.variable)],
+            "product_type": [product_type],
             "variable": [_CDS_VARIABLE_NAMES[self.variable]],
             "year": [str(year)],
-            "month": [str(month).zfill(2)],
+            "month": [str(month).zfill(2) for month in months],
             "time": ["00:00"],
             "area": [ymax, xmin, ymin, xmax],  # N, W, S, E
             "data_format": "netcdf",
@@ -246,6 +312,8 @@ class ERA5LandMonthlyPlugin(BaseDatasetPlugin):
             target = Path(tmp) / "era5land_monthly.nc"
             remote = _CdsClient().submit("reanalysis-era5-land-monthly-means", params)
             remote.download(str(target))
+            # Loaded, not lazy: the framework closes what `fetch_period` returns, and every
+            # month of the year is served from this one object.
             ds = xr.open_dataset(target, engine="netcdf4").load()
 
         ds = _collapse_expver(ds[[self.variable]])
@@ -255,7 +323,7 @@ class ERA5LandMonthlyPlugin(BaseDatasetPlugin):
 
         if self.variable == "t2m":
             ds = kelvin_to_celsius(ds, {"variable": self.variable})
-        return _drop_auxiliary_variables(ds, self.variable)
+        return ds
 
 
 class ERA5LandMonthlyPrecipitationPlugin(ERA5LandMonthlyPlugin):
