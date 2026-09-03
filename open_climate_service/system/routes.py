@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 import sys
 import urllib.parse
 from collections.abc import AsyncIterator
@@ -14,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from starlette.responses import RedirectResponse, StreamingResponse
 
 from open_climate_service import config as api_config
+from open_climate_service.shared.urls import absolute_base
 
 from .schemas import AppInfo, HealthStatus, Status
 from .templates import (
@@ -39,10 +39,7 @@ async def _sse_events(queue: asyncio.Queue[dict[str, Any] | None]) -> AsyncItera
 @router.get("/", response_class=Response, responses=ROOT_RESPONSES)
 def read_index(request: Request) -> Response:
     """Return openEO capabilities (JSON) or the landing page (HTML)."""
-    import os
-
-    # Use CLIMATE_SERVICE_BASE_URL when set so links are correct behind a reverse proxy.
-    base = os.getenv("CLIMATE_SERVICE_BASE_URL", "").rstrip("/") or str(request.base_url).rstrip("/")
+    base = absolute_base(request)
     if wants_json(request):
         from open_climate_service.openeo.capabilities import build_capabilities
 
@@ -54,14 +51,14 @@ def read_index(request: Request) -> Response:
 @router.get("/map", response_class=HTMLResponse, include_in_schema=False)
 def maps(request: Request) -> HTMLResponse:
     """Return the interactive map viewer."""
-    base = str(request.base_url).rstrip("/")
+    base = absolute_base(request)
     return HTMLResponse(render_maps(base))
 
 
 @router.get("/openeo", response_class=HTMLResponse, include_in_schema=False)
 def openeo_editor(request: Request) -> RedirectResponse:
     """Redirect to the openEO Web Editor pre-connected to this backend."""
-    base = os.getenv("CLIMATE_SERVICE_BASE_URL", "").rstrip("/") or str(request.base_url).rstrip("/")
+    base = absolute_base(request)
     params = urllib.parse.urlencode({"server": base, "server-title": api_config.get_name()})
     return RedirectResponse(f"https://editor.openeo.org/?{params}", status_code=302)
 
@@ -73,7 +70,7 @@ def manage(
     error: str | None = None,
 ) -> HTMLResponse:
     """Return the management interface for ingestion and sync operations."""
-    base = str(request.base_url).rstrip("/")
+    base = absolute_base(request)
     return HTMLResponse(render_manage(app_version, base, message=message, error=error))
 
 
@@ -87,7 +84,7 @@ async def manage_ingest(request: Request) -> Response:
     from open_climate_service.extents.services import get_extent_or_404
     from open_climate_service.ingestions.services import create_artifact
 
-    base = str(request.base_url).rstrip("/")
+    base = absolute_base(request)
     try:
         form = await request.form()
         dataset_id = str(form.get("dataset_id", "")).strip()
@@ -174,7 +171,7 @@ async def manage_sync(request: Request) -> Response:
 
     from open_climate_service.ingestions.services import sync_dataset
 
-    base = str(request.base_url).rstrip("/")
+    base = absolute_base(request)
     try:
         form = await request.form()
         dataset_id = str(form.get("dataset_id", "")).strip()
