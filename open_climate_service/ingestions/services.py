@@ -1335,6 +1335,7 @@ def _build_dataset_record(dataset_id: str, artifacts: list[ArtifactRecord]) -> D
         source_dataset_id=latest.source_dataset_id or latest.dataset_id,
         dataset_name=latest.dataset_name,
         short_name=_as_optional_str(source_dataset.get("short_name")),
+        description=_as_optional_text(source_dataset.get("description")),
         variable=latest.variable,
         period_type=_as_optional_str(source_dataset.get("period_type")) or latest.period_type or "unknown",
         units=_as_optional_str(source_dataset.get("units")),
@@ -1392,6 +1393,24 @@ def _dataset_links(dataset_id: str, latest: ArtifactRecord) -> list[DatasetAcces
 
 def _as_optional_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _as_optional_text(value: object) -> str | None:
+    """A prose field, normalised the way the STAC path normalises it.
+
+    `_as_optional_str` passes a string through untouched, which is right for an identifier but
+    wrong for prose: `description: >-` folded YAML leaves a trailing newline, and a
+    whitespace-only value is a mistake rather than a description. Without this, `/datasets`
+    would publish "   " where the STAC collection falls back to the generated sentence — two
+    public catalogue surfaces disagreeing about the same template field.
+
+    Deliberately not applied to `short_name`, `units` and the rest: widening the change would
+    alter fields this ticket has no reason to touch.
+    """
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
 def _upgrade_legacy_record(item: dict[str, object]) -> dict[str, object]:

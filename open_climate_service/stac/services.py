@@ -44,6 +44,35 @@ DEFAULT_STAC_LICENSE = "various"
 # `cell_methods` is passed through as the CF string ("time: mean"); the CF extension also
 # defines a per-dimension array form, but permits the plain string for methods that span axes.
 _CF_VARIABLE_ATTRS = ("standard_name", "cell_methods")
+# CF section 2.6.2 "Description of file contents". Of the six attributes there, these four are
+# the ones CF permits on a variable: "We wish to allow the newly defined attributes, i.e.,
+# institution, source, references, and comment, to be either global or assigned to individual
+# variables." (`title` and `history` are global-only, so they have no place on cube:variables.)
+# Checked against both CF 1.10 and current, which agree.
+#
+# CF is formally the *netCDF* Climate and Forecast Metadata Conventions, and GeoZarr does not
+# require it — "CF in Zarr" is listed there as a convention still under consideration. So this
+# is not inherited: it is OCS choosing CF and applying it consistently, which it already does
+# via `shared/cf.py` and by emitting `cf:standard_name` / `cf:cell_methods` through the STAC CF
+# extension. xarray writes the same attribute names to Zarr as to netCDF, so CF is the de facto
+# vocabulary here regardless of which container the bytes land in. Given that choice, 2.6.2 is
+# the right authority for which of these are legitimate at variable scope rather than global.
+#
+# Passed through UNPREFIXED, unlike `_CF_VARIABLE_ATTRS` above. The STAC CF extension v1.0.0
+# defines only `cf:standard_name` and `cf:cell_methods` — checked against the published schema
+# — so emitting `cf:comment` or `cf:references` would invent fields and then declare
+# conformance to an extension that does not define them, and a validating client would reject
+# the collection. `attrs` is documented as a passthrough of the store's own CF attribute names,
+# which is precisely what these are.
+#
+# This is an allowlist, not a passthrough of everything: WorldPop rasters arrive carrying
+# TIFFTAG_*, STATISTICS_* and AREA_OR_POINT, none of which belongs in a catalogue.
+#
+# `comment` is the caveat about what the values mean, and the per-variable counterpart to the
+# collection description (CLIM-973). `references` is the standard home for attribution, so a
+# plugin should use it rather than inventing one. Licensing is deliberately absent: CF has no
+# licence attribute, and CLIM-946 is designing proper fields for it.
+_CF_CONTENT_ATTRS = ("comment", "references", "institution", "source")
 SPATIAL_STEP_DECIMALS = 8
 ARTIFACT_CACHE_MAXSIZE = 128
 logger = logging.getLogger(__name__)
@@ -106,6 +135,7 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
         dataset_href=dataset_href,
         zarr_href=zarr_href,
         source_dataset=source_dataset,
+        description=_collection_description(dataset_id, artifact, source_dataset),
     )
     template_links = [_link_to_dict(link) for link in template.links]
     period_type = source_dataset.get("period_type")
@@ -169,6 +199,27 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
     return collection_payload
 
 
+def _collection_description(dataset_id: str, artifact: ArtifactRecord, source_dataset: dict[str, Any]) -> str:
+    """The collection description: the template's own text when it has one (CLIM-973).
+
+    A dataset template can carry a `description`, and until this it had no reader anywhere —
+    the collection always published a generated sentence, so a template author wrote a
+    description, saw it accepted, and it went nowhere. That matters most for datasets whose
+    values mislead without a caveat: Meta RWI ranks micro-regions *within one country*, MODIS
+    LST is surface rather than 2 m air temperature, CHIRPS3 monthly is a mean daily rate and
+    not a monthly total. Each is a trap that produces plausible-looking output when missed, and
+    the published collection is the only place an API consumer would look.
+
+    The generated fallback stays for templates without one, and notably for openEO
+    `save_result` outputs, which have no template block at all.
+    """
+    description = source_dataset.get("description")
+    if isinstance(description, str) and description.strip():
+        return description.strip()
+    logger.debug("Dataset %s declares no description; using the generated one", dataset_id)
+    return f"Published GeoZarr dataset for {artifact.dataset_name}"
+
+
 def _eligible_artifacts_by_dataset() -> dict[str, ArtifactRecord]:
     return ingestion_services.latest_published_zarr_artifacts_by_dataset()
 
@@ -182,12 +233,13 @@ def _build_collection_template(
     dataset_href: str,
     zarr_href: str,
     source_dataset: dict[str, Any],
+    description: str,
 ) -> pystac.Collection:
     spatial = artifact.coverage.spatial_wgs84 or artifact.coverage.spatial
     temporal = artifact.coverage.temporal
     template = pystac.Collection(
         id=dataset_id,
-        description=f"Published GeoZarr dataset for {artifact.dataset_name}",
+        description=description,
         extent=pystac.Extent(
             spatial=pystac.SpatialExtent([[spatial.xmin, spatial.ymin, spatial.xmax, spatial.ymax]]),
             temporal=pystac.TemporalExtent(
@@ -641,6 +693,11 @@ def _build_cube_variables(ds: xr.Dataset) -> dict[str, Any]:
             "dimensions": [str(d) for d in var.dims],
             "unit": var.attrs.get("units"),
         }
+        # See `_CF_CONTENT_ATTRS`. Both builders must agree or these appear on one path only.
+        for key in _CF_CONTENT_ATTRS:
+            value = var.attrs.get(key)
+            if isinstance(value, str):
+                entry.setdefault("attrs", {})[key] = value
         # Surface the CF semantics stamped onto the store so catalog clients can identify the
         # quantity, not just its unit (CLIM-828). Named per the STAC CF extension, which lists
         # `cube:variables` among the places its fields may be used — an unprefixed
@@ -721,6 +778,10 @@ def _sanitize_variable_attrs(collection: dict[str, Any]) -> None:
         if isinstance(units, str):
             kept_attrs["units"] = units
             variable["unit"] = units
+        for key in _CF_CONTENT_ATTRS:
+            value = attrs.get(key)
+            if isinstance(value, str):
+                kept_attrs[key] = value
         # Same CF semantics as _build_cube_variables, for the xstac-produced path. Prefixed at
         # the cube:variable level (a defined STAC CF extension field); unprefixed inside
         # `attrs`, which is a passthrough of the store's own CF attribute names.
