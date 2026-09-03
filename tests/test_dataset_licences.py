@@ -359,3 +359,115 @@ def test_a_sound_declaration_has_nothing_to_report() -> None:
     assert licence_declaration_problem("CC-BY-4.0") is None
     assert licence_declaration_problem({"id": "CC-BY-4.0", "url": "https://x"}) is None
     assert licence_declaration_problem({"name": "Vendor Terms", "url": "https://x"}) is None
+
+
+# -- the declaration surface, exhaustively -------------------------------------------------
+#
+# Five rounds of review each found one more way for two parts of a `license` mapping to
+# disagree while OCS silently picked one: a prefix-matched name, an id contradicted by a name,
+# an obligations list beside a recognised name, and `id` beside a conflicting `spdx`. They are
+# the same defect four times, and finding them one at a time has no end.
+#
+# The mapping form accepts exactly five keys, so the ways they can disagree is a finite set.
+# This enumerates it. A pair that is not listed here is one nobody has decided, which is the
+# only way this converges: the table is the review, rather than the reviewer being the review.
+
+_ACCEPTED = "accepted"
+_UNDECLARED = "undeclared"
+_IGNORED = "ignored-with-warning"
+
+_DECLARATION_MATRIX = [
+    # (declaration, outcome, why)
+    ({"id": "CC-BY-4.0"}, _ACCEPTED, "an identifier alone"),
+    ({"spdx": "CC-BY-4.0"}, _ACCEPTED, "the spdx alias alone"),
+    ({"id": "CC-BY-4.0", "spdx": "cc-by-4.0"}, _ACCEPTED, "both aliases, same licence"),
+    ({"id": "CC0-1.0", "spdx": "CC-BY-NC-4.0"}, _UNDECLARED, "both aliases, different licences"),
+    ({"name": "Licence to Use Copernicus Products", "url": "https://x"}, _ACCEPTED, "a known name"),
+    ({"name": "Vendor Terms", "url": "https://x"}, _ACCEPTED, "an unknown name, obligations unknown"),
+    (
+        {"id": "CC-BY-4.0", "name": "Creative Commons Attribution 4.0", "url": "https://x"},
+        _ACCEPTED,
+        "id plus a consistent label",
+    ),
+    ({"id": "CC0-1.0", "name": "Licence to Use Copernicus Products"}, _UNDECLARED, "id contradicted by a known name"),
+    ({"id": "CC-BY-4.0", "obligations": ["non-commercial"]}, _IGNORED, "obligations beside an identifier"),
+    (
+        {"name": "Licence to Use Copernicus Products", "obligations": ["non-commercial"]},
+        _IGNORED,
+        "obligations beside a known name",
+    ),
+    (
+        {"name": "Vendor Terms", "url": "https://x", "obligations": ["attribution"]},
+        _ACCEPTED,
+        "obligations describing an unknown name",
+    ),
+    ({"url": "https://x"}, _UNDECLARED, "a url with no licence identity"),
+    ({"obligations": ["attribution"]}, _UNDECLARED, "obligations with no licence identity"),
+    ({}, _UNDECLARED, "an empty mapping"),
+]
+
+
+@pytest.mark.parametrize(("declaration", "outcome", "why"), _DECLARATION_MATRIX, ids=lambda v: str(v)[:44])
+def test_every_way_a_declaration_can_disagree_with_itself_is_decided(declaration: dict, outcome: str, why: str) -> None:
+    """One row per combination of the five accepted keys, so a new contradiction is a missing
+    row rather than a production defect found in review."""
+    from open_climate_service.shared.licences import licence_declaration_problem
+
+    licence = parse_licence(declaration)
+    problem = licence_declaration_problem(declaration)
+
+    if outcome == _UNDECLARED:
+        assert licence is UNDECLARED, f"{why}: expected undeclared, got {licence}"
+    elif outcome == _ACCEPTED:
+        assert licence is not UNDECLARED, f"{why}: expected a usable licence"
+        assert problem is None, f"{why}: accepted declarations should not warn, got {problem!r}"
+    elif outcome == _IGNORED:
+        assert licence is not UNDECLARED, f"{why}: the known terms still apply"
+        assert problem is not None, f"{why}: a discarded field must be reported"
+    else:  # pragma: no cover - guards a typo in the table
+        raise AssertionError(f"unknown outcome {outcome!r}")
+
+
+def test_the_matrix_covers_every_key_the_mapping_form_accepts() -> None:
+    """Guards the guard. A new key added to `parse_licence` without a row here would leave its
+    interactions undecided, which is the state the matrix exists to end."""
+    accepted_keys = {"id", "spdx", "name", "url", "obligations"}
+    covered = {key for declaration, _, _ in _DECLARATION_MATRIX for key in declaration}
+    assert covered == accepted_keys, f"keys with no row: {accepted_keys - covered}"
+
+
+def test_no_undeclared_outcome_is_silent() -> None:
+    """An unusable declaration must either be reported specifically or caught by the
+    validator's generic unreadable-licence message. Silence is how the earlier defects hid."""
+    from open_climate_service.shared.licences import licence_declaration_problem
+
+    for declaration, outcome, why in _DECLARATION_MATRIX:
+        if outcome != _UNDECLARED:
+            continue
+        specific = licence_declaration_problem(declaration)
+        generic = parse_licence(declaration) is UNDECLARED
+        assert specific is not None or generic, f"{why}: neither reported nor caught"
+
+
+def test_conflicting_identifier_aliases_are_named_not_merely_undeclared() -> None:
+    """`id` and `spdx` are aliases, and `declared.get("id") or declared.get("spdx")` picked the
+    first silently: `{id: CC0-1.0, spdx: CC-BY-NC-4.0}` published as CC0 with commercial use
+    allowed.
+
+    Asserted on the *report*, not on the parse result. Resolving a conflict to "no identifier"
+    already reaches UNDECLARED through the no-licence-identity path, so a test that only checked
+    the parse outcome passes with the fix removed — which the matrix row above does, and which
+    is why this exists separately.
+    """
+    from open_climate_service.shared.licences import licence_declaration_problem
+
+    problem = licence_declaration_problem({"id": "CC0-1.0", "spdx": "CC-BY-NC-4.0"})
+    assert problem is not None
+    assert "CC0-1.0" in problem
+    assert "CC-BY-NC-4.0" in problem
+    assert "aliases" in problem
+
+
+def test_the_same_licence_under_both_aliases_is_not_a_conflict() -> None:
+    """Case and spelling differences resolve to one canonical identifier."""
+    assert parse_licence({"id": "CC-BY-4.0", "spdx": "cc-by-4.0"}).stac_license == "CC-BY-4.0"

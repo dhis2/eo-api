@@ -210,6 +210,34 @@ def _canonical_spdx(value: str) -> str | None:
     return _SPDX_BY_LOWER.get(value.strip().lower())
 
 
+def _resolve_identifier(declared: dict[str, Any]) -> tuple[str | None, str | None]:
+    """The SPDX identifier a mapping declares, and why it cannot be resolved, if so.
+
+    `id` and `spdx` are accepted as aliases for one field. When both are given and disagree
+    there is no basis for preferring either, and `declared.get("id") or declared.get("spdx")`
+    picked the first silently: `{id: CC0-1.0, spdx: CC-BY-NC-4.0}` published as CC0 with
+    commercial use allowed.
+
+    Compared on the canonical form, so `CC0-1.0` and `cc0-1.0` are one identifier rather than
+    a conflict. Two unrecognised strings are compared case-folded; they resolve to no
+    identifier either way, but saying which two disagreed is more useful than silence.
+    """
+    given = [
+        (key, str(raw).strip()) for key in ("id", "spdx") if isinstance(raw := declared.get(key), str) and raw.strip()
+    ]
+    if not given:
+        return None, None
+    if len(given) == 2:
+        (first_key, first), (second_key, second) = given
+        if (_canonical_spdx(first) or first.lower()) != (_canonical_spdx(second) or second.lower()):
+            return None, (
+                f"declares conflicting licence identifiers: {first_key} {first!r} and "
+                f"{second_key} {second!r}. They are aliases for one field, so there is no basis "
+                f"for choosing between them; the licence is treated as undeclared. Give only one."
+            )
+    return _canonical_spdx(given[0][1]), None
+
+
 def _contradiction(identifier: str | None, name: str | None) -> str | None:
     """Why an identifier and a name cannot both describe this licence, or None.
 
@@ -269,8 +297,9 @@ def licence_declaration_problem(declared: Any) -> str | None:
     """
     if not isinstance(declared, dict):
         return None
-    raw_id = declared.get("id") or declared.get("spdx")
-    identifier = _canonical_spdx(str(raw_id)) if isinstance(raw_id, str) and raw_id.strip() else None
+    identifier, conflict = _resolve_identifier(declared)
+    if conflict is not None:
+        return conflict
     raw_name = declared.get("name")
     name = str(raw_name).strip() if isinstance(raw_name, str) and raw_name.strip() else None
 
@@ -331,8 +360,9 @@ def parse_licence(declared: Any) -> DatasetLicence:
         )
 
     if isinstance(declared, dict):
-        raw_id = declared.get("id") or declared.get("spdx")
-        identifier = _canonical_spdx(str(raw_id)) if isinstance(raw_id, str) and raw_id.strip() else None
+        identifier, conflict = _resolve_identifier(declared)
+        if conflict is not None:
+            return UNDECLARED
         raw_name = declared.get("name")
         name = str(raw_name).strip() if isinstance(raw_name, str) and raw_name.strip() else None
         raw_url = declared.get("url")
