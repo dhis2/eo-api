@@ -6,6 +6,7 @@ restriction — on the default path, with nothing to catch it.
 """
 
 import glob
+import logging
 import pathlib
 import re
 from typing import TYPE_CHECKING
@@ -345,6 +346,48 @@ def test_nothing_may_be_derived_from_an_nd_input_not_even_under_the_same_licence
     assert "prohibits derivative works" in refusal
 
 
+_ND_SOURCE = {
+    "id": "nd_imagery",
+    "name": "Restricted imagery",
+    "variable": "rgb",
+    "license": "CC-BY-ND-4.0",
+}
+
+
+def test_saying_nothing_does_not_publish_what_naming_the_licence_would_refuse() -> None:
+    """The implicit-inheritance path has to clear the ND bar too.
+
+    `license: CC-BY-ND-4.0` was refused while omitting `license` inherited the same licence
+    and published — so the check was reachable only by declaring what it would reject. The
+    unit test above passed throughout: it drove `refuses_publication` directly, and this path
+    never called it.
+    """
+    with pytest.raises(ValueError, match="prohibits derivative works"):
+        _derive({"dataset_id": "mask", "variable": "water", "source_dataset_id": "nd_imagery"}, _ND_SOURCE)
+
+
+def test_a_preregistered_template_cannot_receive_nd_data_by_declaring_nothing() -> None:
+    """The same hole on the loaded-template path."""
+    from open_climate_service.openeo import jobs
+
+    with pytest.raises(ValueError, match="prohibits derivative works"):
+        jobs._enforce_licence_on_loaded_template("mask", {"id": "mask"}, _ND_SOURCE)
+
+
+def test_inheriting_an_unparseable_source_licence_is_not_refused() -> None:
+    """`refuses_derivation` must not fail closed the way `refuses_publication` does.
+
+    Carrying a licence forward verbatim cannot launder it, so refusing here would block every
+    derived product whose source licence OCS cannot parse — a licence-metadata gap turned into
+    an ingest failure. Template validation warns about the gap instead.
+    """
+    template = _derive(
+        {"dataset_id": "derived", "variable": "value", "source_dataset_id": "vendor"},
+        {"id": "vendor", "variable": "value", "license": "Some Vendor Terms"},
+    )
+    assert template["license"] == "Some Vendor Terms"
+
+
 # -- the SPDX table is authoritative ------------------------------------------------------
 
 
@@ -493,11 +536,95 @@ def test_a_preregistered_undeclared_template_inherits_rather_than_staying_undecl
     assert [p["name"] for p in updated["providers"]] == ["Vantor"]
 
 
-def test_a_preregistered_matching_template_is_left_alone() -> None:
+def test_a_matching_preregistered_licence_still_has_to_credit_the_licensor() -> None:
+    """A compatible licence identifier is not the whole licence.
+
+    `CC-BY-NC-4.0` on both sides passes the obligation check, so this template used to be
+    returned untouched — and it names nobody, so the derived product published without the
+    attribution CC-BY-NC requires. The check compared identifiers while the condition it was
+    enforcing lives in the providers.
+    """
     from open_climate_service.openeo import jobs
 
-    template = {"id": "flood_water_mask", "license": "CC-BY-NC-4.0"}
+    updated = jobs._enforce_licence_on_loaded_template(
+        "flood_water_mask", {"id": "flood_water_mask", "license": "CC-BY-NC-4.0"}, _NC_SOURCE
+    )
+    assert [p["name"] for p in updated["providers"]] == ["Vantor"]
+
+
+def test_a_preregistered_templates_own_providers_are_kept_alongside_the_sources() -> None:
+    from open_climate_service.openeo import jobs
+
+    updated = jobs._enforce_licence_on_loaded_template(
+        "flood_water_mask",
+        {"id": "flood_water_mask", "license": "CC-BY-NC-4.0", "providers": [{"name": "DHIS2"}]},
+        _NC_SOURCE,
+    )
+    assert [p["name"] for p in updated["providers"]] == ["Vantor", "DHIS2"]
+
+
+def test_a_template_needing_no_change_is_returned_untouched() -> None:
+    """No write, no copy: nothing to persist when the registered metadata is already right."""
+    from open_climate_service.openeo import jobs
+
+    template = {
+        "id": "flood_water_mask",
+        "license": "CC-BY-NC-4.0",
+        "providers": [{"name": "Vantor", "roles": ["producer"]}],
+    }
     assert jobs._enforce_licence_on_loaded_template("flood_water_mask", template, _NC_SOURCE) is template
+
+
+def test_the_enforced_licence_reaches_the_registry_not_just_this_publish(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """STAC builds the collection from the on-disk template, so an in-memory fix publishes the
+    same wrong licence it did before. `build_collection` reads the registry by dataset id and
+    never sees the object this function returns."""
+    from open_climate_service.data_registry.services import datasets as reg
+    from open_climate_service.openeo import jobs
+
+    monkeypatch.setattr(reg, "CONFIGS_DIR", tmp_path)
+    # Shaped like a real pre-registered workflow output, so it survives template validation.
+    jobs._enforce_licence_on_loaded_template(
+        "flood_water_mask",
+        {"id": "flood_water_mask", "variable": "water", "sync": {"kind": "static"}},
+        _NC_SOURCE,
+    )
+
+    written = yaml.safe_load((tmp_path / "flood_water_mask.yaml").read_text())[0]
+    assert written["license"] == "CC-BY-NC-4.0"
+    assert [p["name"] for p in written["providers"]] == ["Vantor"]
+
+
+def test_a_registry_that_cannot_be_written_does_not_fail_the_publish(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The licence is already correct on the returned template, so a read-only templates
+    directory should not abort an otherwise valid publish."""
+    from open_climate_service.data_registry.services import datasets as reg
+    from open_climate_service.openeo import jobs
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(reg, "write_dataset_template", refuse)
+
+    # Attached to the module logger directly: `open_climate_service` does not propagate to
+    # root, so caplog never sees the record, and its handler holds the pre-capture stderr.
+    records: list[logging.LogRecord] = []
+
+    class Collect(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = Collect()
+    jobs.logger.addHandler(handler)
+    try:
+        updated = jobs._enforce_licence_on_loaded_template("flood_water_mask", {"id": "flood_water_mask"}, _NC_SOURCE)
+    finally:
+        jobs.logger.removeHandler(handler)
+
+    assert updated["license"] == "CC-BY-NC-4.0"
+    assert any("Could not persist licence metadata" in r.getMessage() for r in records)
 
 
 def test_no_source_means_a_preregistered_template_is_untouched() -> None:

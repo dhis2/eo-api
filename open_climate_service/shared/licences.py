@@ -287,6 +287,39 @@ def parse_licence(declared: Any) -> DatasetLicence:
     return UNDECLARED
 
 
+def _no_derivatives_refusal(candidate: DatasetLicence) -> str | None:
+    """Why `candidate` forbids any derived product, or None."""
+    if NO_DERIVATIVES not in candidate.obligations:
+        return None
+    return (
+        f"Input {candidate.label!r} prohibits derivative works, so no derived product "
+        f"may be published from it under any licence — including the same one. "
+        f"ND licences forbid distributing adapted material."
+    )
+
+
+def refuses_derivation(inputs: list[DatasetLicence]) -> str | None:
+    """Why no derived product may be published from `inputs` at all, or None.
+
+    Narrower than `refuses_publication`, which compares a *declared output* licence against
+    its inputs. This asks only whether the derivation itself is permitted, so it is the right
+    check when the output carries its input's licence verbatim: relicensing is impossible
+    there, but a no-derivatives input still forbids the derivative work.
+
+    Deliberately does NOT fail closed on an unknown input licence, unlike
+    `refuses_publication`. Copying a licence forward preserves whatever terms it carries, so
+    there is nothing to launder, and refusing would block every derived product whose source
+    licence OCS cannot parse — which template validation already warns about. The residual
+    gap is an unparseable licence that is ND in substance; that is unknowable here, and the
+    output at least carries the same terms as its input.
+    """
+    for candidate in inputs:
+        refusal = _no_derivatives_refusal(candidate)
+        if refusal:
+            return refusal
+    return None
+
+
 def refuses_publication(declared: DatasetLicence, inputs: list[DatasetLicence]) -> str | None:
     """Why publishing `declared` for a product derived from `inputs` must be refused, or None.
 
@@ -311,12 +344,9 @@ def refuses_publication(declared: DatasetLicence, inputs: list[DatasetLicence]) 
                 f"understand, so it cannot be checked against its input {candidate.label!r}. "
                 f"Use an SPDX identifier, or a licence name OCS knows, or list `obligations`."
             )
-        if NO_DERIVATIVES in candidate.obligations:
-            return (
-                f"Input {candidate.label!r} prohibits derivative works, so no derived product "
-                f"may be published from it under any licence — including the same one. "
-                f"ND licences forbid distributing adapted material."
-            )
+        no_derivatives = _no_derivatives_refusal(candidate)
+        if no_derivatives:
+            return no_derivatives
         if SHARE_ALIKE in candidate.obligations:
             compatible = _SHARE_ALIKE_COMPATIBLE.get(candidate.identifier or "", frozenset())
             if declared.identifier not in compatible:
