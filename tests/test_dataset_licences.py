@@ -9,6 +9,7 @@ paths produced four rounds of contradictory fixes.
 """
 
 import glob
+import itertools
 import logging
 import pathlib
 import re
@@ -361,94 +362,6 @@ def test_a_sound_declaration_has_nothing_to_report() -> None:
     assert licence_declaration_problem({"name": "Vendor Terms", "url": "https://x"}) is None
 
 
-# -- the declaration surface, exhaustively -------------------------------------------------
-#
-# Five rounds of review each found one more way for two parts of a `license` mapping to
-# disagree while OCS silently picked one: a prefix-matched name, an id contradicted by a name,
-# an obligations list beside a recognised name, and `id` beside a conflicting `spdx`. They are
-# the same defect four times, and finding them one at a time has no end.
-#
-# The mapping form accepts exactly five keys, so the ways they can disagree is a finite set.
-# This enumerates it. A pair that is not listed here is one nobody has decided, which is the
-# only way this converges: the table is the review, rather than the reviewer being the review.
-
-_ACCEPTED = "accepted"
-_UNDECLARED = "undeclared"
-_IGNORED = "ignored-with-warning"
-
-_DECLARATION_MATRIX = [
-    # (declaration, outcome, why)
-    ({"id": "CC-BY-4.0"}, _ACCEPTED, "an identifier alone"),
-    ({"spdx": "CC-BY-4.0"}, _ACCEPTED, "the spdx alias alone"),
-    ({"id": "CC-BY-4.0", "spdx": "cc-by-4.0"}, _ACCEPTED, "both aliases, same licence"),
-    ({"id": "CC0-1.0", "spdx": "CC-BY-NC-4.0"}, _UNDECLARED, "both aliases, different licences"),
-    ({"name": "Licence to Use Copernicus Products", "url": "https://x"}, _ACCEPTED, "a known name"),
-    ({"name": "Vendor Terms", "url": "https://x"}, _ACCEPTED, "an unknown name, obligations unknown"),
-    (
-        {"id": "CC-BY-4.0", "name": "Creative Commons Attribution 4.0", "url": "https://x"},
-        _ACCEPTED,
-        "id plus a consistent label",
-    ),
-    ({"id": "CC0-1.0", "name": "Licence to Use Copernicus Products"}, _UNDECLARED, "id contradicted by a known name"),
-    ({"id": "CC-BY-4.0", "obligations": ["non-commercial"]}, _IGNORED, "obligations beside an identifier"),
-    (
-        {"name": "Licence to Use Copernicus Products", "obligations": ["non-commercial"]},
-        _IGNORED,
-        "obligations beside a known name",
-    ),
-    (
-        {"name": "Vendor Terms", "url": "https://x", "obligations": ["attribution"]},
-        _ACCEPTED,
-        "obligations describing an unknown name",
-    ),
-    ({"url": "https://x"}, _UNDECLARED, "a url with no licence identity"),
-    ({"obligations": ["attribution"]}, _UNDECLARED, "obligations with no licence identity"),
-    ({}, _UNDECLARED, "an empty mapping"),
-]
-
-
-@pytest.mark.parametrize(("declaration", "outcome", "why"), _DECLARATION_MATRIX, ids=lambda v: str(v)[:44])
-def test_every_way_a_declaration_can_disagree_with_itself_is_decided(declaration: dict, outcome: str, why: str) -> None:
-    """One row per combination of the five accepted keys, so a new contradiction is a missing
-    row rather than a production defect found in review."""
-    from open_climate_service.shared.licences import licence_declaration_problem
-
-    licence = parse_licence(declaration)
-    problem = licence_declaration_problem(declaration)
-
-    if outcome == _UNDECLARED:
-        assert licence is UNDECLARED, f"{why}: expected undeclared, got {licence}"
-    elif outcome == _ACCEPTED:
-        assert licence is not UNDECLARED, f"{why}: expected a usable licence"
-        assert problem is None, f"{why}: accepted declarations should not warn, got {problem!r}"
-    elif outcome == _IGNORED:
-        assert licence is not UNDECLARED, f"{why}: the known terms still apply"
-        assert problem is not None, f"{why}: a discarded field must be reported"
-    else:  # pragma: no cover - guards a typo in the table
-        raise AssertionError(f"unknown outcome {outcome!r}")
-
-
-def test_the_matrix_covers_every_key_the_mapping_form_accepts() -> None:
-    """Guards the guard. A new key added to `parse_licence` without a row here would leave its
-    interactions undecided, which is the state the matrix exists to end."""
-    accepted_keys = {"id", "spdx", "name", "url", "obligations"}
-    covered = {key for declaration, _, _ in _DECLARATION_MATRIX for key in declaration}
-    assert covered == accepted_keys, f"keys with no row: {accepted_keys - covered}"
-
-
-def test_no_undeclared_outcome_is_silent() -> None:
-    """An unusable declaration must either be reported specifically or caught by the
-    validator's generic unreadable-licence message. Silence is how the earlier defects hid."""
-    from open_climate_service.shared.licences import licence_declaration_problem
-
-    for declaration, outcome, why in _DECLARATION_MATRIX:
-        if outcome != _UNDECLARED:
-            continue
-        specific = licence_declaration_problem(declaration)
-        generic = parse_licence(declaration) is UNDECLARED
-        assert specific is not None or generic, f"{why}: neither reported nor caught"
-
-
 def test_conflicting_identifier_aliases_are_named_not_merely_undeclared() -> None:
     """`id` and `spdx` are aliases, and `declared.get("id") or declared.get("spdx")` picked the
     first silently: `{id: CC0-1.0, spdx: CC-BY-NC-4.0}` published as CC0 with commercial use
@@ -471,3 +384,147 @@ def test_conflicting_identifier_aliases_are_named_not_merely_undeclared() -> Non
 def test_the_same_licence_under_both_aliases_is_not_a_conflict() -> None:
     """Case and spelling differences resolve to one canonical identifier."""
     assert parse_licence({"id": "CC-BY-4.0", "spdx": "cc-by-4.0"}).stac_license == "CC-BY-4.0"
+
+
+# -- the declaration surface -----------------------------------------------------------------
+#
+# Four review rounds each found one more way for two parts of a `license` mapping to disagree
+# while OCS silently picked one: a prefix-matched name, an identifier contradicted by a name,
+# an obligations list beside a recognised name, and an identifier beside a conflicting alias.
+# One defect found four times. Finding them individually does not terminate, so the surface is
+# enumerated instead.
+#
+# The dimensions are semantic, not raw keys. What decides the outcome is the *kind* of value in
+# each of three positions; `url` is carried through and never affects it, which
+# `test_the_url_never_changes_the_outcome` pins rather than assumes.
+
+_IDENTIFIER_CASES: dict[str, dict] = {
+    "absent": {},
+    "recognised": {"id": "CC-BY-4.0"},
+    "unrecognised": {"id": "NotAnSpdx"},
+    "aliases-agree": {"id": "CC-BY-4.0", "spdx": "cc-by-4.0"},
+    "aliases-conflict": {"id": "CC0-1.0", "spdx": "CC-BY-NC-4.0"},
+}
+# "agrees"/"conflicts" are relative to CC-BY-4.0's {attribution}: the Copernicus licence
+# requires the same, NASA's requires nothing.
+_NAME_CASES: dict[str, dict] = {
+    "absent": {},
+    "known-agrees": {"name": "Licence to Use Copernicus Products"},
+    "known-conflicts": {"name": "NASA Earth Science Data"},
+    "unknown": {"name": "Vendor Terms"},
+}
+_OBLIGATION_CASES: dict[str, dict] = {"absent": {}, "present": {"obligations": ["non-commercial"]}}
+
+_ACCEPTED = "accepted"  # a usable licence, nothing to report
+_IGNORED = "ignored"  # usable, but a field was discarded and must be reported
+_UNDECLARED = "undeclared"  # not usable; publishes as `other`
+
+# One entry per (identifier, name, obligations) shape. A shape with no entry fails the
+# completeness guard below, so a new key or value kind cannot be added without deciding what
+# every combination of it does.
+_EXPECTED: dict[tuple[str, str, str], str] = {
+    # No identifier: the name governs, and an explicit list is used only when nothing else
+    # supplies the terms.
+    ("absent", "absent", "absent"): _UNDECLARED,
+    ("absent", "absent", "present"): _UNDECLARED,  # obligations without a licence identity
+    ("absent", "known-agrees", "absent"): _ACCEPTED,
+    ("absent", "known-agrees", "present"): _IGNORED,
+    ("absent", "known-conflicts", "absent"): _ACCEPTED,
+    ("absent", "known-conflicts", "present"): _IGNORED,
+    ("absent", "unknown", "absent"): _ACCEPTED,
+    ("absent", "unknown", "present"): _ACCEPTED,  # the legitimate use of an explicit list
+    # A recognised identifier is authoritative, and a known name that disagrees with it is a
+    # contradiction rather than a redundancy.
+    ("recognised", "absent", "absent"): _ACCEPTED,
+    ("recognised", "absent", "present"): _IGNORED,
+    ("recognised", "known-agrees", "absent"): _ACCEPTED,
+    ("recognised", "known-agrees", "present"): _IGNORED,
+    ("recognised", "known-conflicts", "absent"): _UNDECLARED,
+    ("recognised", "known-conflicts", "present"): _UNDECLARED,
+    ("recognised", "unknown", "absent"): _ACCEPTED,
+    ("recognised", "unknown", "present"): _IGNORED,
+    # An unrecognised identifier supplies nothing, so the name decides. The string itself is
+    # dropped rather than kept as a name, unlike the plain-string form — a known asymmetry, and
+    # the safe direction, since the result is `other` rather than a guess.
+    ("unrecognised", "absent", "absent"): _UNDECLARED,
+    ("unrecognised", "absent", "present"): _UNDECLARED,
+    ("unrecognised", "known-agrees", "absent"): _ACCEPTED,
+    ("unrecognised", "known-agrees", "present"): _IGNORED,
+    ("unrecognised", "known-conflicts", "absent"): _ACCEPTED,
+    ("unrecognised", "known-conflicts", "present"): _IGNORED,
+    ("unrecognised", "unknown", "absent"): _ACCEPTED,
+    ("unrecognised", "unknown", "present"): _ACCEPTED,
+    # Both aliases naming one licence behaves exactly as one identifier.
+    ("aliases-agree", "absent", "absent"): _ACCEPTED,
+    ("aliases-agree", "absent", "present"): _IGNORED,
+    ("aliases-agree", "known-agrees", "absent"): _ACCEPTED,
+    ("aliases-agree", "known-agrees", "present"): _IGNORED,
+    ("aliases-agree", "known-conflicts", "absent"): _UNDECLARED,
+    ("aliases-agree", "known-conflicts", "present"): _UNDECLARED,
+    ("aliases-agree", "unknown", "absent"): _ACCEPTED,
+    ("aliases-agree", "unknown", "present"): _IGNORED,
+    # Aliases naming different licences: undeclared whatever else is present, because there is
+    # no basis for choosing and the wrong choice publishes NC data as permissive.
+    ("aliases-conflict", "absent", "absent"): _UNDECLARED,
+    ("aliases-conflict", "absent", "present"): _UNDECLARED,
+    ("aliases-conflict", "known-agrees", "absent"): _UNDECLARED,
+    ("aliases-conflict", "known-agrees", "present"): _UNDECLARED,
+    ("aliases-conflict", "known-conflicts", "absent"): _UNDECLARED,
+    ("aliases-conflict", "known-conflicts", "present"): _UNDECLARED,
+    ("aliases-conflict", "unknown", "absent"): _UNDECLARED,
+    ("aliases-conflict", "unknown", "present"): _UNDECLARED,
+}
+
+_SHAPES = list(itertools.product(_IDENTIFIER_CASES, _NAME_CASES, _OBLIGATION_CASES))
+
+
+def _declaration(identifier: str, name: str, obligations: str, url: bool = True) -> dict:
+    return {
+        **_IDENTIFIER_CASES[identifier],
+        **_NAME_CASES[name],
+        **_OBLIGATION_CASES[obligations],
+        **({"url": "https://x"} if url else {}),
+    }
+
+
+def _outcome(declaration: dict) -> str:
+    from open_climate_service.shared.licences import licence_declaration_problem
+
+    if parse_licence(declaration) is UNDECLARED:
+        return _UNDECLARED
+    return _IGNORED if licence_declaration_problem(declaration) else _ACCEPTED
+
+
+@pytest.mark.parametrize(("identifier", "name", "obligations"), _SHAPES, ids=lambda v: v)
+def test_every_declaration_shape_has_the_decided_outcome(identifier: str, name: str, obligations: str) -> None:
+    expected = _EXPECTED.get((identifier, name, obligations))
+    assert expected is not None, (
+        f"undecided declaration shape: identifier={identifier}, name={name}, obligations={obligations}. "
+        "Decide what it should do and add it to _EXPECTED."
+    )
+    assert _outcome(_declaration(identifier, name, obligations)) == expected
+
+
+def test_the_expectation_table_matches_the_shapes_that_exist() -> None:
+    """Both directions. A missing entry leaves a combination undecided; a stale one describes a
+    shape that can no longer occur, which reads as coverage that is not there."""
+    assert set(_EXPECTED) == set(_SHAPES)
+
+
+def test_the_url_never_changes_the_outcome() -> None:
+    """`url` is carried into the licence link and has no bearing on the terms. Pinned because
+    the enumeration above omits it as a dimension, and that omission is only sound while this
+    holds."""
+    for identifier, name, obligations in _SHAPES:
+        with_url = _outcome(_declaration(identifier, name, obligations, url=True))
+        without = _outcome(_declaration(identifier, name, obligations, url=False))
+        assert with_url == without, f"url changed the outcome for {identifier}/{name}/{obligations}"
+
+
+def test_the_enumerated_keys_are_the_keys_the_parser_accepts() -> None:
+    """Guards the guard. A new key in `parse_licence` with no dimension here would leave its
+    interactions untested while the enumeration still claims to be complete."""
+    accepted_keys = {"id", "spdx", "name", "url", "obligations"}
+    dimensions = (*_IDENTIFIER_CASES.values(), *_NAME_CASES.values(), *_OBLIGATION_CASES.values())
+    covered = {key for case in dimensions for key in case}
+    assert covered | {"url"} == accepted_keys, f"keys with no dimension: {accepted_keys - covered - {'url'}}"
