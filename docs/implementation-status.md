@@ -155,7 +155,7 @@ Current STAC details:
 - STAC collection `license` publishes the dataset template's declared licence — an SPDX
   identifier, or `other` for a licence that has none, with a `rel: license` link and
   `providers` for attribution (CLIM-946). An undeclared licence warns at template load
-  and publishes `other`, never `various`.
+  and publishes `other`.
 - spatial `step` values are rounded for readability while preserving axis direction
 - an opt-in live interoperability smoke test exists at `tests/integration/test_stac_interop.py`
 

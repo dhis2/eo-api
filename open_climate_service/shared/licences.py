@@ -78,7 +78,42 @@ _SPDX_OBLIGATIONS: dict[str, frozenset[str]] = {
     "CC-BY-NC-ND-4.0": frozenset({ATTRIBUTION, NON_COMMERCIAL, NO_DERIVATIVES}),
     "CC-BY-ND-4.0": frozenset({ATTRIBUTION, NO_DERIVATIVES}),
 }
-_SPDX_BY_LOWER = {identifier.lower(): identifier for identifier in _SPDX_OBLIGATIONS}
+# SPDX identifiers that are valid but whose propagation semantics have not been reviewed.
+# Kept separate from `_SPDX_OBLIGATIONS` on purpose: a valid identifier belongs in the STAC
+# `license` field even when OCS cannot yet reason about deriving from it. Downgrading
+# BSD-3-Clause to a free-form name and publishing `other` threw away information the catalogue
+# had — while `known=False` still makes propagation fail closed, which is the safe half.
+_SPDX_UNREVIEWED = frozenset(
+    {
+        "BSD-2-Clause",
+        "BSD-3-Clause",
+        "GPL-3.0-only",
+        "GPL-3.0-or-later",
+        "LGPL-3.0-only",
+        "MPL-2.0",
+        "Unlicense",
+        "CC-BY-2.0",
+        "CC-BY-2.5",
+        "OGL-Canada-2.0",
+    }
+)
+_SPDX_BY_LOWER = {identifier.lower(): identifier for identifier in (*_SPDX_OBLIGATIONS, *_SPDX_UNREVIEWED)}
+
+# Share-alike is not satisfied by carrying "a share-alike obligation" — it requires the same
+# licence, or one the licence itself names as compatible. Without this, ODbL-1.0 and
+# CC-BY-SA-4.0 both reduce to {attribution, share-alike} and each would be accepted in place
+# of the other, and CC-BY-NC-SA-4.0 would be accepted over CC-BY-SA-4.0 because its obligation
+# set is a superset. Both are relicensing that share-alike forbids.
+#
+# Only same-family upgrades are listed. Cross-licence compatibility (CC-BY-SA to GPL, say) is
+# a legal judgement, not a lookup, so it is absent and therefore refused.
+_SHARE_ALIKE_COMPATIBLE: dict[str, frozenset[str]] = {
+    "CC-BY-SA-3.0": frozenset({"CC-BY-SA-3.0", "CC-BY-SA-4.0"}),
+    "CC-BY-SA-4.0": frozenset({"CC-BY-SA-4.0"}),
+    "CC-BY-NC-SA-3.0": frozenset({"CC-BY-NC-SA-3.0", "CC-BY-NC-SA-4.0"}),
+    "CC-BY-NC-SA-4.0": frozenset({"CC-BY-NC-SA-4.0"}),
+    "ODbL-1.0": frozenset({"ODbL-1.0"}),
+}
 
 # Licences with no SPDX identifier, whose terms have been read. Without this a template author
 # has to restate the obligations by hand for every one, and an assertion repeated in five
@@ -194,7 +229,15 @@ def parse_licence(declared: Any) -> DatasetLicence:
             return UNDECLARED
         spdx = _canonical_spdx(text)
         if spdx is not None:
-            return DatasetLicence(identifier=spdx, name=None, url=None, obligations=_SPDX_OBLIGATIONS[spdx], known=True)
+            return DatasetLicence(
+                identifier=spdx,
+                name=None,
+                url=None,
+                obligations=_SPDX_OBLIGATIONS.get(spdx, frozenset()),
+                # A valid-but-unreviewed identifier is still published as SPDX, but propagation
+                # must fail closed until someone records what it requires.
+                known=spdx in _SPDX_OBLIGATIONS,
+            )
         named = _obligations_for_name(text)
         return DatasetLicence(
             identifier=None,
@@ -221,7 +264,7 @@ def parse_licence(declared: Any) -> DatasetLicence:
         # every compatibility check saw no restrictions — laundering by configuration, which is
         # worse than the silence this module replaced.
         raw_obligations = declared.get("obligations")
-        if identifier is not None:
+        if identifier is not None and identifier in _SPDX_OBLIGATIONS:
             obligations, known = _SPDX_OBLIGATIONS[identifier], True
             if isinstance(raw_obligations, list):
                 logger.warning(
@@ -274,6 +317,15 @@ def refuses_publication(declared: DatasetLicence, inputs: list[DatasetLicence]) 
                 f"may be published from it under any licence — including the same one. "
                 f"ND licences forbid distributing adapted material."
             )
+        if SHARE_ALIKE in candidate.obligations:
+            compatible = _SHARE_ALIKE_COMPATIBLE.get(candidate.identifier or "", frozenset())
+            if declared.identifier not in compatible:
+                return (
+                    f"Input {candidate.label!r} is share-alike, so a derived product must carry "
+                    f"that licence or one it names as compatible ({sorted(compatible) or 'none'}), "
+                    f"not {declared.label!r}. Carrying some other share-alike licence is still "
+                    f"relicensing."
+                )
         dropped = declared.drops_obligations_of(candidate)
         if dropped:
             return (

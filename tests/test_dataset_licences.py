@@ -407,3 +407,101 @@ def test_duplicate_providers_are_not_doubled() -> None:
         _NC_SOURCE,
     )
     assert len(template["providers"]) == 1
+
+
+# -- valid SPDX identifiers OCS has not reviewed -------------------------------------------
+
+
+def test_a_valid_spdx_identifier_is_preserved_even_when_unreviewed() -> None:
+    """Downgrading BSD-3-Clause to a free-form name and publishing `other` threw away
+    information the catalogue already had. The identifier is kept; only the propagation
+    semantics are marked unknown."""
+    licence = parse_licence("BSD-3-Clause")
+    assert licence.stac_license == "BSD-3-Clause"
+    assert licence.known is False
+
+
+def test_deriving_from_an_unreviewed_spdx_licence_fails_closed() -> None:
+    """Publishing the identifier is safe; reasoning about derivation from it is not."""
+    bsd = parse_licence("BSD-3-Clause")
+    assert refuses_publication(bsd, [bsd]) is not None
+
+
+# -- share-alike is licence identity, not an obligation flag --------------------------------
+
+
+def test_another_share_alike_licence_is_not_an_acceptable_substitute() -> None:
+    """ODbL-1.0 and CC-BY-SA-4.0 both reduce to {attribution, share-alike}, so a subset check
+    accepts each in place of the other. That is relicensing, which share-alike forbids."""
+    refusal = refuses_publication(parse_licence("ODbL-1.0"), [parse_licence("CC-BY-SA-4.0")])
+    assert refusal is not None
+    assert "share-alike" in refusal
+
+
+def test_adding_non_commercial_to_a_share_alike_input_is_still_relicensing() -> None:
+    """CC-BY-NC-SA's obligations are a superset of CC-BY-SA's, so the subset check passed it."""
+    assert refuses_publication(parse_licence("CC-BY-NC-SA-4.0"), [parse_licence("CC-BY-SA-4.0")]) is not None
+
+
+def test_the_same_share_alike_licence_is_accepted() -> None:
+    sa = parse_licence("CC-BY-SA-4.0")
+    assert refuses_publication(sa, [sa]) is None
+
+
+def test_a_share_alike_version_upgrade_the_licence_permits_is_accepted() -> None:
+    """CC-BY-SA-3.0 explicitly allows relicensing under 4.0."""
+    assert refuses_publication(parse_licence("CC-BY-SA-4.0"), [parse_licence("CC-BY-SA-3.0")]) is None
+
+
+# -- lineage that does not resolve ----------------------------------------------------------
+
+
+def test_an_unresolvable_source_dataset_id_is_an_error_not_absent_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A typo would otherwise mean "not derived from anything", disabling propagation and
+    letting a permissive output through with no error anywhere."""
+    from open_climate_service.data_registry.services import datasets as reg
+    from open_climate_service.openeo import jobs
+
+    monkeypatch.setattr(reg, "get_dataset", lambda _: None)
+    with pytest.raises(ValueError, match="not a registered dataset template"):
+        jobs._resolve_source_template({"source_dataset_id": "chirps3_typooo"})
+
+
+# -- an already-registered output template --------------------------------------------------
+
+
+def test_a_preregistered_permissive_template_cannot_receive_restricted_data() -> None:
+    """The path CLIM-946 recommends. The licence rule ran only while *synthesising* a template,
+    so pre-registering one — which the ticket advises, to control the display — skipped the
+    check entirely and a CC0 template could publish CC-BY-NC-derived data."""
+    from open_climate_service.openeo import jobs
+
+    with pytest.raises(ValueError, match="cannot receive data derived from"):
+        jobs._enforce_licence_on_loaded_template(
+            "flood_water_mask", {"id": "flood_water_mask", "license": "CC0-1.0"}, _NC_SOURCE
+        )
+
+
+def test_a_preregistered_undeclared_template_inherits_rather_than_staying_undeclared() -> None:
+    """Migrates a template left by an older run, instead of leaving it unlabelled forever."""
+    from open_climate_service.openeo import jobs
+
+    updated = jobs._enforce_licence_on_loaded_template("flood_water_mask", {"id": "flood_water_mask"}, _NC_SOURCE)
+    assert updated["license"] == "CC-BY-NC-4.0"
+    assert [p["name"] for p in updated["providers"]] == ["Vantor"]
+
+
+def test_a_preregistered_matching_template_is_left_alone() -> None:
+    from open_climate_service.openeo import jobs
+
+    template = {"id": "flood_water_mask", "license": "CC-BY-NC-4.0"}
+    assert jobs._enforce_licence_on_loaded_template("flood_water_mask", template, _NC_SOURCE) is template
+
+
+def test_no_source_means_a_preregistered_template_is_untouched() -> None:
+    from open_climate_service.openeo import jobs
+
+    template = {"id": "standalone", "license": "CC0-1.0"}
+    assert jobs._enforce_licence_on_loaded_template("standalone", template, None) is template

@@ -680,6 +680,13 @@ def _write_managed_zarr(ds: Any, options: dict[str, Any]) -> None:
     if template is None:
         raise ValueError(f"Auto-registered dataset template for '{dataset_id}' could not be reloaded")
 
+    # Also check a template that already existed. The licence rule used to run only while
+    # *synthesising* one, and CLIM-946 recommends pre-registering workflow outputs to control
+    # their display — so the recommended path skipped the check entirely, and a pre-registered
+    # CC0 template could publish data derived from CC-BY-NC. An undeclared template left by an
+    # older run is also migrated here rather than staying undeclared forever.
+    template = _enforce_licence_on_loaded_template(dataset_id, template, source_template)
+
     # Prefer an explicit option, then the registered template's display name, and
     # only fall back to the raw id so published collections read as e.g.
     # "Mosquito hotspots (Rwanda 2018 Q1)" rather than "mosquito_hotspots".
@@ -845,14 +852,70 @@ def _apply_derived_licence(
         template["providers"] = merged
 
 
+def _enforce_licence_on_loaded_template(
+    dataset_id: str, template: dict[str, Any], source_template: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Check an already-registered output template against the source it is derived from.
+
+    Returns the template, with an inherited licence filled in when it had none. Refuses when
+    the registered licence would drop an obligation of the source, because a pre-registered
+    template is not a licence decision the source can be overruled by.
+    """
+    if not isinstance(source_template, dict):
+        return template
+
+    from open_climate_service.shared.licences import parse_licence, refuses_publication
+
+    source_licence = parse_licence(source_template.get("license"))
+    declared_raw = template.get("license")
+
+    if declared_raw is None:
+        inherited = source_template.get("license")
+        if inherited is None:
+            return template
+        logger.info(
+            "Output template %s declares no licence; inheriting %s from %s",
+            dataset_id,
+            source_licence.label,
+            source_template.get("id"),
+        )
+        updated = {**template, "license": inherited}
+        providers = source_template.get("providers")
+        if template.get("providers") is None and isinstance(providers, list) and providers:
+            updated["providers"] = providers
+        return updated
+
+    refusal = refuses_publication(parse_licence(declared_raw), [source_licence])
+    if refusal:
+        raise ValueError(
+            f"Registered output template {dataset_id!r} cannot receive data derived from "
+            f"{source_template.get('id')!r}: {refusal}"
+        )
+    return template
+
+
 def _resolve_source_template(options: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the source dataset template referenced in save_result options, if any."""
+    """Return the source dataset template referenced in save_result options, if any.
+
+    Raises when a `source_dataset_id` is given but does not resolve. Returning None there
+    would silently mean "not derived from anything", which disables licence propagation
+    entirely — so a typo in the id would let a permissive output be published from a
+    restrictive source, with no error anywhere (CLIM-946).
+    """
     source_dataset_id = options.get("source_dataset_id")
     if not isinstance(source_dataset_id, str) or not source_dataset_id:
         return None
     from open_climate_service.data_registry.services import datasets as _reg
 
-    return _reg.get_dataset(source_dataset_id)
+    template = _reg.get_dataset(source_dataset_id)
+    if template is None:
+        raise ValueError(
+            f"save_result declares source_dataset_id {source_dataset_id!r}, which is not a "
+            f"registered dataset template. Fix the id, or omit it if this output is not "
+            f"derived from another dataset — it governs which licence and attribution the "
+            f"output inherits."
+        )
+    return template
 
 
 def _derive_period_type(
