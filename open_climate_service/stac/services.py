@@ -286,29 +286,20 @@ def _build_collection_template(
 def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_crs: str) -> None:
     """Surface CRS render hints on the collection for projected (non-built-in) stores.
 
-    Map clients reproject Zarr on the fly with proj4js, which resolves only the
-    built-in ``EPSG:4326`` / ``EPSG:3857`` from their code — any other CRS (e.g.
-    seNorge's UTM33, ``EPSG:32633``) needs a full definition, or the client has to
-    fetch one at render time (an external epsg.io lookup). Publishing the definition
-    in STAC removes that runtime dependency.
+    A client reprojecting Zarr on the fly needs to resolve the store's CRS. We used to hand
+    it a proj4 string under ``open_climate_service:proj4`` because zarr-layer 0.6.1 accepted
+    only its two built-in codes or an explicit proj4 definition. From 0.8.0 it resolves a
+    code through proj4's own registry, so that non-standard field and the viewer's epsg.io
+    fallback are both retired (CLIM-833) and only standard fields remain.
 
-    Four fields are emitted:
+    Three fields are emitted:
 
     * ``proj:wkt2`` — the STAC Projection-extension standard, lossless CRS
       representation. It is the same information GeoZarr already carries in the CF
       ``spatial_ref`` grid-mapping's ``crs_wkt`` attribute.
     * ``proj:projjson`` — the same CRS as PROJJSON. Also a STAC Projection-extension
       standard (and the GeoZarr ``proj:`` convention), but a JSON object a JS/STAC
-      client can consume directly instead of parsing WKT2 — the convention-aligned
-      sibling of the namespaced proj4 hint below.
-    * ``open_climate_service:proj4`` — a proj4 string for direct consumption by
-      proj4js. proj4 is intentionally *not* a STAC-standard field (PROJ treats proj4
-      strings as lossy), so it lives under our namespace rather than ``proj:``.
-      No longer required by the viewer, which now runs zarr-layer 0.9.0: carbonplan/zarr-layer#61
-      (auto-resolving any EPSG code through proj4's own registry) landed in 0.8.0. Dropping
-      this hint and the viewer's epsg.io fallback with it is CLIM-833, kept separate because
-      it wants the map checked by eye rather than riding along with a version bump. Other
-      STAC clients may still consume it, so it stays published either way.
+      client can consume directly instead of parsing WKT2.
     * ``proj:bbox`` — the data extent in the store's native CRS, as an optional hint for
       STAC clients. It is *not* how our own viewer places a layer, and not the primary
       record of a store's geometry: both write paths already write the GeoZarr
@@ -330,8 +321,6 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
     if is_builtin_crs(store_crs):
         return
     try:
-        import warnings
-
         from pyproj import CRS
 
         # Prefer the CRS the data was actually written with (the CF grid-mapping WKT)
@@ -348,12 +337,6 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
         # PROJJSON alongside it — the same CRS as a JSON object, cheaper for JS/STAC
         # clients than parsing WKT2. Cheap to emit next to the WKT2 above.
         template.extra_fields["proj:projjson"] = crs.to_json_dict()
-        with warnings.catch_warnings():
-            # to_proj4() warns that proj4 is lossy; that's acceptable for a render hint.
-            warnings.simplefilter("ignore")
-            proj4 = crs.to_proj4()
-        if proj4:
-            template.extra_fields["open_climate_service:proj4"] = proj4.strip()
     except Exception:
         logger.warning("Could not derive CRS render hints for '%s'", store_crs, exc_info=True)
 

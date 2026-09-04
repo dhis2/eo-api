@@ -686,7 +686,7 @@ def test_build_collection_with_xstac_reads_normalised_zarr_coordinates(tmp_path:
 
 
 def test_build_collection_emits_crs_render_hints_for_projected_store(tmp_path: Path) -> None:
-    """Projected (non-built-in) stores get proj:wkt2 + open_climate_service:proj4 so map
+    """Projected (non-built-in) stores get proj:wkt2 + proj:projjson so map
     clients can reproject without a runtime epsg.io lookup."""
     zarr_path = tmp_path / "senorge_temperature_daily.zarr"
     ds = xr.Dataset(
@@ -713,8 +713,9 @@ def test_build_collection_emits_crs_render_hints_for_projected_store(tmp_path: P
     payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
 
     assert payload["proj:code"] == "EPSG:32633"
-    proj4 = payload["open_climate_service:proj4"]
-    assert "proj=utm" in proj4 and "zone=33" in proj4
+    # The non-standard proj4 hint is retired (CLIM-833): zarr-layer resolves the code
+    # through proj4's own registry, so only standard fields are published now.
+    assert "open_climate_service:proj4" not in payload
     assert payload["proj:wkt2"].startswith("PROJCRS")  # WKT2, not WKT1 (PROJCS)
     # proj:projjson — same CRS as a PROJJSON object (EPSG:32633 = UTM zone 33N)
     assert payload["proj:projjson"]["type"] == "ProjectedCRS"
@@ -910,8 +911,7 @@ def test_build_collection_crs_render_hints_use_store_wkt(tmp_path: Path) -> None
 
     payload = stac_services._build_collection_with_xstac(artifact=artifact, template=template)
 
-    proj4 = payload["open_climate_service:proj4"]
-    assert "proj=utm" in proj4 and "zone=33" in proj4
+    assert "open_climate_service:proj4" not in payload
     assert payload["proj:wkt2"].startswith("PROJCRS")
 
 

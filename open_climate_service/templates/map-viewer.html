@@ -576,39 +576,25 @@
         selector = {};
         for (const d of dimStates) selector[d.key] = d.index;
 
-        // ZarrLayer resolves only its built-in CRSes (EPSG:4326 / EPSG:3857) from the
-        // code alone; every other CRS — e.g. seNorge's UTM33 (EPSG:32633) — needs an
-        // explicit proj4 definition, or it is treated as WGS84 degrees and lands in the
-        // wrong place. See ZarrLayerOptions `crs` docs: "built-in projections (EPSG:4326
-        // or EPSG:3857). For any other CRS, provide a matching proj4 definition."
+        // The CRS code alone is enough now. From 0.8.0 ZarrLayer resolves a code through
+        // proj4's own registry, which carries every UTM zone among others, so a projected
+        // store no longer needs a proj4 definition handed to it. That retires both the
+        // `open_climate_service:proj4` hint we used to publish and the epsg.io fetch that
+        // backed it up (CLIM-833) — one fewer non-standard field, and no third-party
+        // request on the render path.
         //
-        // Prefer the proj4 string published in the STAC collection
-        // (open_climate_service:proj4) so we don't depend on an external epsg.io lookup at
-        // render time; fall back to epsg.io only for older stores that predate the field.
+        // What this does *not* rely on is carbonplan/zarr-layer#61, which would bundle a
+        // full EPSG database and is still open. So the guarantee is "any code proj4 ships a
+        // definition for", not "any EPSG code". That covers all four CRSes in use across our
+        // instances — EPSG:4326, EPSG:3857, EPSG:32633, EPSG:32645 — but a store in, say, a
+        // national grid outside proj4's defs would fall back to an inferred CRS and land in
+        // the wrong place. ZarrLayer warns when that happens; #61 is what would remove the
+        // caveat entirely.
         let nativeCrs = collection["proj:code"] ?? "EPSG:4326";
-        // CRS84 aliases (CRS84, OGC:CRS84, CRS:84, or a CRS84 URI) are geographic WGS84;
-        // ZarrLayer only recognizes EPSG:4326 / EPSG:3857 by code, so normalize to EPSG:4326
-        // before both the built-in check and passing `crs` into new ZarrLayer. Separators
-        // are stripped first so the short OGC form CRS:84 is matched too.
+        // CRS84 aliases (CRS84, OGC:CRS84, CRS:84, or a CRS84 URI) are geographic WGS84,
+        // normalised so `crs` is a code ZarrLayer recognises directly. Separators are
+        // stripped first so the short OGC form CRS:84 is matched too.
         if (nativeCrs.toUpperCase().replace(/[^A-Z0-9]/g, "").endsWith("CRS84")) nativeCrs = "EPSG:4326";
-        const BUILTIN_CRS = new Set(["EPSG:4326", "EPSG:3857"]);
-        const isBuiltinCrs = BUILTIN_CRS.has(nativeCrs.toUpperCase());
-        let proj4String = collection["open_climate_service:proj4"] ?? null;
-        if (!isBuiltinCrs && !proj4String) {
-          try {
-            const match = nativeCrs.match(/(\d+)$/);
-            const epsgId = match?.[1];
-            if (epsgId) {
-              const p4res = await fetch(`https://epsg.io/${epsgId}.proj4`);
-              if (p4res.ok) proj4String = (await p4res.text()).trim();
-              else console.warn(`[map] Could not fetch proj4 for ${nativeCrs} (HTTP ${p4res.status})`);
-            } else {
-              console.warn(`[map] Cannot extract EPSG id from CRS "${nativeCrs}" — rendering may be incorrect`);
-            }
-          } catch (err) {
-            console.warn(`[map] Failed to fetch proj4 string for "${nativeCrs}":`, err);
-          }
-        }
 
         // No `bounds` is passed, deliberately: the store carries its own placement in the
         // GeoZarr `spatial:*` attributes, and from 0.8.0 ZarrLayer reads them. Handing it a
@@ -636,7 +622,6 @@
             ...(zarrVersion !== null && { zarrVersion }),
             ...(fillValue !== null && { fillValue }),
             crs: nativeCrs,
-            ...(proj4String !== null && { proj4: proj4String }),
           });
           map.addLayer(activeLayer);
           for (const layer of map.getStyle().layers) {

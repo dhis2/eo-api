@@ -243,7 +243,7 @@ def write_geozarr_attrs(store: Any, *, spec: GridSpec, bbox: list[float]) -> Non
     # (GDAL/QGIS, zarr-layer) read the CRS from the CF grid-mapping (`crs_wkt`) / `proj:`
     # convention that create_geozarr_attrs already writes, and the extent from here or the
     # coordinate arrays — no non-standard `proj4`/`bounds` attrs required. The STAC hints
-    # (open_climate_service:proj4, proj:bbox) in stac/services.py serve the map viewer.
+    # (proj:wkt2, proj:projjson, proj:bbox) in stac/services.py serve other STAC clients.
     attrs["spatial:bbox"] = bbox
     if geometry is not None:
         # The affine is what a client actually places the raster with. Without it, viewers

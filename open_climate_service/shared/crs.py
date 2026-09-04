@@ -46,34 +46,6 @@ def is_builtin_crs(code: str | int) -> bool:
     return canonical_crs_code(code).upper() in _BUILTIN_CRS_CODES
 
 
-def crs_to_proj4(crs_input: object) -> str | None:
-    """Derive a proj4 string from a CRS code, WKT, or proj4 input.
-
-    Returns ``None`` for built-in CRSes (EPSG:4326 / EPSG:3857 — clients resolve those
-    from the code) and for anything pyproj cannot parse. proj4 is lossy (PROJ warns), so
-    it is only a client render hint; ``proj:code`` / WKT stay the canonical CRS.
-    """
-    import warnings
-
-    # A CRS84 alias passed as a code/int is built-in even though pyproj's to_epsg()
-    # may return None for it, so short-circuit on is_builtin_crs before parsing.
-    if isinstance(crs_input, (str, int)) and is_builtin_crs(crs_input):
-        return None
-
-    try:
-        from pyproj import CRS
-
-        crs = CRS.from_user_input(crs_input)
-        if crs.to_epsg() in (4326, 3857):
-            return None
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # proj4 is lossy; accepted for a render hint
-            proj4 = crs.to_proj4()
-        return proj4.strip() if proj4 else None
-    except Exception:
-        return None
-
-
 def dataset_crs(ds: "xr.Dataset", default: str = "EPSG:4326") -> str:
     """Return *ds*'s own CRS as an ``EPSG:xxxx`` string.
 

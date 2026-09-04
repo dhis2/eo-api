@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 import zarr
 
-from open_climate_service.shared.crs import crs_to_proj4, is_builtin_crs
+from open_climate_service.shared.crs import is_builtin_crs
 from open_climate_service.streaming.protocol import GridSpec
 from open_climate_service.streaming.store import write_geozarr_attrs
 
@@ -70,12 +70,3 @@ def test_write_geozarr_attrs_wgs84_extent(tmp_path: Path) -> None:
 )
 def test_is_builtin_crs(code: str | int, is_builtin: bool) -> None:
     assert is_builtin_crs(code) is is_builtin
-
-
-def test_crs_to_proj4() -> None:
-    assert crs_to_proj4("EPSG:4326") is None  # built-in → no proj4 hint
-    assert crs_to_proj4(4326) is None  # int form too
-    assert crs_to_proj4("OGC:CRS84") is None  # CRS84 alias is built-in despite to_epsg()==None
-    proj4 = crs_to_proj4("EPSG:32633")
-    assert proj4 is not None and "proj=utm" in proj4 and "zone=33" in proj4
-    assert crs_to_proj4("not-a-crs") is None
