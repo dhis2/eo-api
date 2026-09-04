@@ -368,6 +368,20 @@
         return { lazy: true, start, inc, count };
       }
 
+      // Select a step by *index*, explicitly. ZarrLayer resolves a bare value against the
+      // dimension's coordinate array first, and a CF time axis holds raw offsets (hours since
+      // epoch) that never match a slider position — so it logged a resolution failure on every
+      // layer load, then fell through to treating a numeric value as the index. That fallback
+      // happened to be what we meant, so this worked by accident (CLIM-1003).
+      //
+      // Saying it outright drops the wasted coordinate read and the logged failure, and stops
+      // depending on a fallback the library is actively changing: carbonplan/zarr-layer#87
+      // tightens the same resolver, rejecting unresolvable *string* selectors while keeping
+      // numeric ones. Every write to `selector` goes through here so they cannot drift apart.
+      function indexSelection(index) {
+        return { selected: index, type: "index" };
+      }
+
       function stepCount(steps) {
         return Array.isArray(steps) ? steps.length : steps.count;
       }
@@ -574,7 +588,7 @@
           return { key, dim, steps, control, count, label: dimLabel(key, dim), index };
         });
         selector = {};
-        for (const d of dimStates) selector[d.key] = d.index;
+        for (const d of dimStates) selector[d.key] = indexSelection(d.index);
 
         // The CRS code alone is enough now. From 0.8.0 ZarrLayer resolves a code through
         // proj4's own registry, which carries every UTM zone among others, so a projected
@@ -725,7 +739,7 @@
             slider.addEventListener("input", (e) => {
               const i = parseInt(e.target.value, 10);
               d.index = i;
-              selector[d.key] = i;
+              selector[d.key] = indexSelection(i);
               valueEl.textContent = stepDisplay(d.key, d.steps, i) ?? "—";
               count.textContent = `${i + 1} / ${d.count}`;
               applySelector();
@@ -743,7 +757,7 @@
             select.addEventListener("change", (e) => {
               const i = parseInt(e.target.value, 10);
               d.index = i;
-              selector[d.key] = i;
+              selector[d.key] = indexSelection(i);
               applySelector();
             });
             block.append(select);
