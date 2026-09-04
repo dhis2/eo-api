@@ -630,18 +630,46 @@
         // skipped for built-in CRSes — so a built-in-CRS store keeps deriving bounds from
         // its coordinate arrays exactly as before.
         const nativeBbox = collection["proj:bbox"] ?? null;
-        let bounds = null;
+        let centreBbox = null;
         if (Array.isArray(nativeBbox) && nativeBbox.every((n) => Number.isFinite(n))) {
           // proj:bbox is [xmin, ymin, xmax, ymax] when 2D and
           // [xmin, ymin, zmin, xmax, ymax, zmax] when 3D; ZarrLayer wants the 2D form.
-          if (nativeBbox.length === 4) bounds = nativeBbox;
+          if (nativeBbox.length === 4) centreBbox = nativeBbox;
           else if (nativeBbox.length === 6)
-            bounds = [nativeBbox[0], nativeBbox[1], nativeBbox[3], nativeBbox[4]];
+            centreBbox = [nativeBbox[0], nativeBbox[1], nativeBbox[3], nativeBbox[4]];
+        }
+
+        // `proj:bbox` is the min/max of the coordinate arrays, so it spans cell *centres*,
+        // while ZarrLayer documents `bounds` as "edge bounds (not center-to-center)".
+        // Passing it raw is half a cell out on every side — invisible at country zoom,
+        // wrong nonetheless, and increasingly visible as you zoom in. So grow it by half a
+        // cell, taking the pitch from the published `cube:dimensions` step.
+        //
+        // Without a usable step there is no way to convert, and half-wrong bounds are worse
+        // than none: the library's own derivation at least applies whatever registration it
+        // assumes consistently. So in that case pass nothing and let it derive.
+        const dimsForStep = collection["cube:dimensions"] ?? {};
+        const stepFor = (axis) => {
+          const dim = Object.values(dimsForStep).find((d) => d?.axis === axis);
+          const step = Math.abs(Number(dim?.step));
+          return Number.isFinite(step) && step > 0 ? step : null;
+        };
+        const xStep = stepFor("x");
+        const yStep = stepFor("y");
+
+        let bounds = null;
+        if (centreBbox !== null && xStep !== null && yStep !== null) {
+          bounds = [
+            centreBbox[0] - xStep / 2,
+            centreBbox[1] - yStep / 2,
+            centreBbox[2] + xStep / 2,
+            centreBbox[3] + yStep / 2,
+          ];
         }
         if (bounds === null && !isBuiltinCrs) {
           console.warn(
-            `[map] No usable proj:bbox for projected store "${collection.id}" — bounds will be ` +
-              `inferred from coordinate arrays and the layer may be misplaced`
+            `[map] No usable proj:bbox and cube:dimensions step for projected store ` +
+              `"${collection.id}" — bounds will be derived from coordinate arrays`
           );
         }
 
