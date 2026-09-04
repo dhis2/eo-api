@@ -1035,3 +1035,82 @@ def test_cf_extension_is_not_declared_when_no_cf_attrs_are_present(
 
     assert not any(key.startswith("cf:") for key in payload["cube:variables"]["precip"])
     assert stac_services.CF_EXTENSION not in payload["stac_extensions"]
+
+
+# --- reference_system (CLIM-1004) -------------------------------------------------------
+#
+# The defect was a hardcoded `reference_system=4326` at the xstac call site, so a projected
+# store published its UTM metres as degrees. Testing `reference_system_for` alone would not
+# catch that returning: the constant has to be gone from the *caller*, so the call-site test
+# below asserts on what xstac actually receives.
+
+
+@pytest.mark.parametrize(
+    ("store_crs", "expected"),
+    [
+        (None, 4326),
+        ("", 4326),
+        ("EPSG:4326", 4326),
+        ("EPSG:32633", 32633),
+        ("EPSG:3857", 3857),
+        ("OGC:CRS84", 4326),  # a CRS84 alias is geographic WGS84
+        ("CRS:84", 4326),
+        (4326, 4326),  # a bare number, as canonical_crs_code accepts
+        ("+proj=utm +zone=33 +datum=WGS84", "+proj=utm +zone=33 +datum=WGS84"),
+    ],
+)
+def test_reference_system_for_resolves_the_stores_own_crs(store_crs: str | int | None, expected: int | str) -> None:
+    assert stac_services.reference_system_for(store_crs) == expected
+
+
+def test_xstac_is_given_the_stores_crs_not_a_constant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A projected store's axes must be published in that CRS, not as degrees."""
+    ds = xr.Dataset(
+        {"tg": (("time", "y", "x"), np.zeros((2, 3, 4), dtype="float32"))},
+        coords={
+            "time": pd.date_range("2026-01-01", periods=2, freq="D"),
+            "y": [7000000.0, 6999000.0, 6998000.0],
+            "x": [-74500.0, -73500.0, -72500.0, -71500.0],
+        },
+        attrs={"proj:code": "EPSG:32633"},
+    )
+
+    seen: dict[str, object] = {}
+
+    def _capture(dataset: xr.Dataset, template: pystac.Collection, **kwargs: object) -> pystac.Collection:
+        seen.update(kwargs)
+        return template
+
+    monkeypatch.setattr(stac_services, "_open_published_store", lambda _: ds)
+    monkeypatch.setattr(stac_services, "xarray_to_stac", _capture)
+    monkeypatch.setattr(stac_services, "_add_crs_render_hints", lambda **_: None)
+
+    template = pystac.Collection(
+        id="senorge_temperature_daily",
+        description="test",
+        extent=pystac.Extent(
+            pystac.SpatialExtent([[0, 0, 0, 0]]),
+            pystac.TemporalExtent([[None, None]]),
+        ),
+    )
+    stac_services._build_collection_with_xstac(
+        artifact=_artifact(artifact_id="a1", dataset_id="senorge_temperature_daily"),
+        template=template,
+    )
+
+    assert seen["reference_system"] == 32633, (
+        "the xstac call must pass the store's CRS; 4326 here means the constant is back"
+    )
+
+
+def test_both_cube_paths_agree_on_reference_system() -> None:
+    """The static (no time axis) path must resolve the CRS the same way as the temporal one."""
+    ds = xr.Dataset(
+        {"tg": (("y", "x"), np.zeros((3, 4), dtype="float32"))},
+        coords={"y": [7000000.0, 6999000.0, 6998000.0], "x": [-74500.0, -73500.0, -72500.0, -71500.0]},
+        attrs={"proj:code": "EPSG:32633"},
+    )
+    dims = stac_services._build_static_cube_dimensions(ds, "x", "y")
+    expected = stac_services.reference_system_for("EPSG:32633")
+    assert dims["x"]["reference_system"] == expected
+    assert dims["y"]["reference_system"] == expected

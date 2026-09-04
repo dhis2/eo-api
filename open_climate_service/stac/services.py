@@ -428,7 +428,9 @@ def _build_collection_with_xstac(
                 temporal_dimension=time_dimension,
                 x_dimension=x_dimension,
                 y_dimension=y_dimension,
-                reference_system=4326,
+                # The store's own CRS, not a constant: these axes are in whatever the store
+                # uses, and seNorge's are UTM33 metres. See reference_system_for.
+                reference_system=reference_system_for(store_crs),
                 # Schema validation can trigger outbound fetches for STAC extension schemas.
                 validate=False,
             )
@@ -629,9 +631,32 @@ def _add_temporal_values(collection: dict[str, Any], ds: xr.Dataset, time_dimens
     dim["values"] = [f"{s.isoformat()}Z" for s in stamps.tz_localize(None)]
 
 
+def reference_system_for(store_crs: str | int | None) -> int | str:
+    """The datacube ``reference_system`` describing a store's spatial axes.
+
+    The datacube extension accepts an EPSG code as a number, or a WKT2/PROJJSON string, and
+    defaults to 4326 when absent. An EPSG code is published as the number because that is
+    the unambiguous form, and because it is what a client comparing against a numeric code
+    expects; anything not shaped like ``EPSG:<digits>`` is passed through as its string.
+
+    Both cube-building paths must resolve this the same way. They previously did not: the
+    temporal path hardcoded ``4326`` for every dataset, so a projected store published its
+    UTM metres as degrees, while the static path read the store's own ``proj:code`` and
+    published a string. A client reading the field got a different answer, of a different
+    type, depending on whether the dataset happened to have a time axis (CLIM-1004).
+    """
+    if not store_crs:
+        return 4326
+    code = canonical_crs_code(store_crs)
+    prefix, _, tail = code.partition(":")
+    if prefix.upper() == "EPSG" and tail.isdigit():
+        return int(tail)
+    return code
+
+
 def _build_static_cube_dimensions(ds: xr.Dataset, x_dim: str, y_dim: str) -> dict[str, Any]:
     """Build minimal cube:dimensions for a dataset with no time axis."""
-    crs = ds.attrs.get("proj:code", "EPSG:4326")
+    crs = reference_system_for(ds.attrs.get("proj:code"))
     x_vals = ds[x_dim].values
     y_vals = ds[y_dim].values
     x_step = float(x_vals[1] - x_vals[0]) if len(x_vals) > 1 else None
