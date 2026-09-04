@@ -250,32 +250,28 @@
       // import.meta.url, and esm.sh's transformed build doesn't serve it (404), which
       // blanks the map. unpkg serves the worker + shared chunk siblings with CORS.
       import * as maplibregl from "https://unpkg.com/maplibre-gl@6.0.0/dist/maplibre-gl.mjs";
-      // Held below 0.8.0 deliberately. From 0.8.0 on, our projected stores misrender:
-      // seNorge's UTM33 grid comes out as diagonal streaks in offset blocks instead of a
-      // map. Bisected by changing only this URL against a live instance —
+      // Held at 0.6.1 because of our own stores, not because of the library.
       //
-      //   0.6.1 correct | 0.7.0 correct | 0.8.0 STREAKS | 0.9.0 streaks
+      // 0.8.0 began reading the GeoZarr `spatial:*` attributes (`spatial:dimensions`,
+      // `spatial:shape`, `spatial:transform`) instead of inferring geometry from the
+      // coordinate arrays. Stores we wrote before the CLIM-852 fix (2026-08-05) declare
+      // those transposed — `["x","y"]` with a shape of `[x, y]` on a `(t, y, x)` array,
+      // and no affine — so from 0.8.0 on they render as diagonal streaks in offset blocks.
+      // The library is doing what it is told; the metadata is wrong.
       //
-      // so 0.8.0 is the first bad version and 0.7.0 the last good one. That is the release
-      // which added the `spatial:transform`/`spatial:shape`/`spatial:registration`
-      // handling (absent from the 0.7.0 bundle, ~30 references in 0.8.0). Our stores write
-      // none of those attributes, so 0.8.0 takes its coordinate-array fallback and places
-      // the chunks wrongly. Passing explicit `bounds` does not help, so this is not the
-      // missing georeferencing hint it first looks like.
+      // Proven by two stores on the same grid, same CRS, same 388x299 chunking over
+      // 1550x1195, differing only in when they were written:
       //
-      // The stores that break are the ones whose chunks do not divide their shape evenly —
-      // seNorge is 1550x1195 in 388x299 chunks, a 4x4 grid with partial edges, matching
-      // the blocks on screen — but our projected and unevenly-chunked stores are the same
-      // set, so that is a suspicion rather than a proven trigger. Single-chunk stores
-      // (CHIRPS3, ERA5-Land) render fine on 0.9.0.
+      //   senorge_temperature_daily  (2026-06-26, dimensions ["x","y"])  -> streaks on 0.9.0
+      //   senorge_precipitation_daily (2026-08-06, dimensions ["y","x"]) -> correct on 0.9.0
       //
-      // Upstream: carbonplan/zarr-layer#88. CLIM-833 (dropping the proj4 hint) needs
-      // 0.8.0+, so it waits on this being fixed rather than on a version bump.
+      // So this is not a chunking problem and not a zarr-layer bug (retracted upstream:
+      // carbonplan/zarr-layer#88). The blocker is that instances still hold stores written
+      // by the old writer, which 0.6.1 tolerates because it ignores `spatial:*` entirely.
       //
-      // 0.6.1 is not known-good, only better here. CLIM-1006 (CHIRPS3 drawing as streaks
-      // on the Rwanda instance) was reported against 0.6.1 and is still open; upgrading
-      // was the proposed fix for it, which is what this pin rules out. 0.7.0 is also clear
-      // of the 0.8.0 bug, but moving there buys nothing on its own.
+      // Lift this pin once those stores are reingested — CLIM-1008 — which also unblocks
+      // CLIM-833. Note CLIM-1006 (CHIRPS3 streaks on the Rwanda instance) was reported
+      // against 0.6.1, which never reads these attributes, so it is a separate fault.
       //
       // 0.6.1 is not known-good, only better here. CLIM-1006 (CHIRPS3 drawing as streaks
       // on the Rwanda instance) was reported against 0.6.1 and is still open; upgrading
@@ -629,49 +625,17 @@
         // Only projected stores publish `proj:bbox` — the STAC CRS render hints are
         // skipped for built-in CRSes — so a built-in-CRS store keeps deriving bounds from
         // its coordinate arrays exactly as before.
-        const nativeBbox = collection["proj:bbox"] ?? null;
-        let centreBbox = null;
-        if (Array.isArray(nativeBbox) && nativeBbox.every((n) => Number.isFinite(n))) {
-          // proj:bbox is [xmin, ymin, xmax, ymax] when 2D and
-          // [xmin, ymin, zmin, xmax, ymax, zmax] when 3D; ZarrLayer wants the 2D form.
-          if (nativeBbox.length === 4) centreBbox = nativeBbox;
-          else if (nativeBbox.length === 6)
-            centreBbox = [nativeBbox[0], nativeBbox[1], nativeBbox[3], nativeBbox[4]];
-        }
-
-        // `proj:bbox` is the min/max of the coordinate arrays, so it spans cell *centres*,
-        // while ZarrLayer documents `bounds` as "edge bounds (not center-to-center)".
-        // Passing it raw is half a cell out on every side — invisible at country zoom,
-        // wrong nonetheless, and increasingly visible as you zoom in. So grow it by half a
-        // cell, taking the pitch from the published `cube:dimensions` step.
+        // Deliberately not passing `bounds`. It looked like the fix for the misplaced
+        // projected stores and is not: the cause is transposed `spatial:*` metadata in
+        // stores written before CLIM-852 (see the note at the import), and `bounds`
+        // overrides the extent, not the axis order, so it changes nothing either way.
         //
-        // Without a usable step there is no way to convert, and half-wrong bounds are worse
-        // than none: the library's own derivation at least applies whatever registration it
-        // assumes consistently. So in that case pass nothing and let it derive.
-        const dimsForStep = collection["cube:dimensions"] ?? {};
-        const stepFor = (axis) => {
-          const dim = Object.values(dimsForStep).find((d) => d?.axis === axis);
-          const step = Math.abs(Number(dim?.step));
-          return Number.isFinite(step) && step > 0 ? step : null;
-        };
-        const xStep = stepFor("x");
-        const yStep = stepFor("y");
-
-        let bounds = null;
-        if (centreBbox !== null && xStep !== null && yStep !== null) {
-          bounds = [
-            centreBbox[0] - xStep / 2,
-            centreBbox[1] - yStep / 2,
-            centreBbox[2] + xStep / 2,
-            centreBbox[3] + yStep / 2,
-          ];
-        }
-        if (bounds === null && !isBuiltinCrs) {
-          console.warn(
-            `[map] No usable proj:bbox and cube:dimensions step for projected store ` +
-              `"${collection.id}" — bounds will be derived from coordinate arrays`
-          );
-        }
+        // It is also not a safe thing to pass blind. ZarrLayer documents `bounds` as edge
+        // bounds, while `proj:bbox` is edge-based only when the store declares
+        // `spatial:bbox` for the STAC builder to prefer; where that is absent it falls back
+        // to the coordinate min/max, which spans cell centres. Passing one as the other is
+        // half a cell out — invisible at country zoom, wrong up close. The store knows
+        // which it has and we do not, so let the library read the store.
 
         let cm;
         try {
@@ -689,7 +653,6 @@
             ...(fillValue !== null && { fillValue }),
             crs: nativeCrs,
             ...(proj4String !== null && { proj4: proj4String }),
-            ...(bounds !== null && { bounds }),
           });
           map.addLayer(activeLayer);
           for (const layer of map.getStyle().layers) {
