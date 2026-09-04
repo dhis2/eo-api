@@ -48,9 +48,17 @@ class _ManageHtmlParser(HTMLParser):
 
 
 class _FakeRequest:
-    def __init__(self, form_data: dict[str, str]) -> None:
+    """Enough of a Request for the /manage form handlers.
+
+    `scope` is part of that surface, not an extra: the handlers read `root_path` from it to
+    build mount-relative redirects, so a double without it passes tests the real object would
+    fail. Defaults to an unmounted instance; pass `root_path` for a prefixed deployment.
+    """
+
+    def __init__(self, form_data: dict[str, str], root_path: str = "") -> None:
         self._form_data = form_data
         self.base_url = URL("http://testserver/")
+        self.scope = {"root_path": root_path}
 
     async def form(self) -> dict[str, str]:
         return self._form_data
@@ -160,7 +168,9 @@ async def test_manage_sync_rejects_blank_dataset_id() -> None:
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "http://testserver/manage?error=Dataset%20ID%20is%20required"
+    # Relative on purpose: a redirect back to the console must land on the origin the operator
+    # actually reached, not on the configured public one (CLIM-974 review).
+    assert response.headers["location"] == "/manage?error=Dataset%20ID%20is%20required"
 
 
 @pytest.mark.anyio  # pyright: ignore[reportUntypedFunctionDecorator]
@@ -386,3 +396,17 @@ def test_map_viewer_initializes_at_latest_timestep(client: TestClient) -> None:
     assert "function renderDimControls()" in response.text
     # ...and a slider-type dimension (e.g. time) defaults to its last index (latest step).
     assert 'control === "slider" ? Math.max(0, count - 1) : 0' in response.text
+
+
+@pytest.mark.anyio  # pyright: ignore[reportUntypedFunctionDecorator]
+async def test_manage_redirects_keep_the_mount_prefix() -> None:
+    """A POST to `/ocs/manage/sync` that redirects to `/manage` drops the prefix and the proxy
+    returns 404. The Location has to be mount-relative — and still carry no origin, so it
+    lands on the host the operator actually reached."""
+    response = await system_routes.manage_sync(
+        cast("Request", _FakeRequest({"dataset_id": "  "}, root_path="/ocs")),
+    )
+
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/ocs/manage?error=")
+    assert "://" not in response.headers["location"]
