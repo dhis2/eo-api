@@ -250,17 +250,32 @@
       // import.meta.url, and esm.sh's transformed build doesn't serve it (404), which
       // blanks the map. unpkg serves the worker + shared chunk siblings with CORS.
       import * as maplibregl from "https://unpkg.com/maplibre-gl@6.0.0/dist/maplibre-gl.mjs";
-      // Held at 0.6.1 deliberately. 0.9.0 (the current latest) misrenders our projected
-      // stores: seNorge's UTM33 grid comes out as diagonal streaks in offset blocks
-      // instead of a map, while 0.6.1 renders the same store correctly from the same
-      // server. Passing explicit `bounds` does not fix it, so this is not the missing
-      // georeferencing hint it first looks like. The stores that break are the ones whose
-      // chunks do not divide their shape evenly — seNorge is 1550x1195 in 388x299 chunks,
-      // a 4x4 grid with partial edges, and 16 blocks is what appears on screen — but our
-      // projected and unevenly-chunked stores are the same set, so that is a strong
-      // suspicion rather than a proven trigger. Single-chunk stores (CHIRPS3, ERA5-Land)
-      // render fine on 0.9.0. Re-check on the next release before bumping; CLIM-833
-      // (dropping the proj4 hint) also waits on this, since it needs 0.8.0+.
+      // Held below 0.8.0 deliberately. From 0.8.0 on, our projected stores misrender:
+      // seNorge's UTM33 grid comes out as diagonal streaks in offset blocks instead of a
+      // map. Bisected by changing only this URL against a live instance —
+      //
+      //   0.6.1 correct | 0.7.0 correct | 0.8.0 STREAKS | 0.9.0 streaks
+      //
+      // so 0.8.0 is the first bad version and 0.7.0 the last good one. That is the release
+      // which added the `spatial:transform`/`spatial:shape`/`spatial:registration`
+      // handling (absent from the 0.7.0 bundle, ~30 references in 0.8.0). Our stores write
+      // none of those attributes, so 0.8.0 takes its coordinate-array fallback and places
+      // the chunks wrongly. Passing explicit `bounds` does not help, so this is not the
+      // missing georeferencing hint it first looks like.
+      //
+      // The stores that break are the ones whose chunks do not divide their shape evenly —
+      // seNorge is 1550x1195 in 388x299 chunks, a 4x4 grid with partial edges, matching
+      // the blocks on screen — but our projected and unevenly-chunked stores are the same
+      // set, so that is a suspicion rather than a proven trigger. Single-chunk stores
+      // (CHIRPS3, ERA5-Land) render fine on 0.9.0.
+      //
+      // Upstream: carbonplan/zarr-layer#88. CLIM-833 (dropping the proj4 hint) needs
+      // 0.8.0+, so it waits on this being fixed rather than on a version bump.
+      //
+      // 0.6.1 is not known-good, only better here. CLIM-1006 (CHIRPS3 drawing as streaks
+      // on the Rwanda instance) was reported against 0.6.1 and is still open; upgrading
+      // was the proposed fix for it, which is what this pin rules out. 0.7.0 is also clear
+      // of the 0.8.0 bug, but moving there buys nothing on its own.
       //
       // 0.6.1 is not known-good, only better here. CLIM-1006 (CHIRPS3 drawing as streaks
       // on the Rwanda instance) was reported against 0.6.1 and is still open; upgrading
