@@ -309,15 +309,23 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
       this hint and the viewer's epsg.io fallback with it is CLIM-833, kept separate because
       it wants the map checked by eye rather than riding along with a version bump. Other
       STAC clients may still consume it, so it stays published either way.
-    * ``proj:bbox`` — the data extent in the store's native CRS. Without it, a client
-      reprojecting the Zarr must fetch the x/y coordinate arrays at render time to
-      derive bounds (zarr-layer's "proj4 provided without explicit bounds" warning);
-      publishing it lets the client pass explicit bounds and skip that round-trip, which
-      the viewer now does. zarr-layer 0.8.0 can instead read ``spatial:transform``/
-      ``spatial:bbox`` from the store, but we do not write those attributes, so for that
-      client this hint stays the only route. Writing the ``spatial:`` conventions into the
-      store, so placement travels with the data rather than only with our catalogue, would
-      be the better fix and is not done here.
+    * ``proj:bbox`` — the data extent in the store's native CRS, as an optional hint for
+      STAC clients. It is *not* how our own viewer places a layer, and not the primary
+      record of a store's geometry: both write paths already write the GeoZarr
+      ``spatial:bbox`` — and ``spatial:transform`` whenever the cell size is derivable from
+      the coordinates, so all but a degenerate single-cell axis — into the store itself
+      (``shared/geozarr.py``, via ``data_manager/services/downloader.py`` and
+      ``streaming/store.py``), and from 0.8.0 zarr-layer reads those directly. The viewer
+      therefore passes no ``bounds`` and lets the library read the store.
+
+      Publishing the extent here still helps a STAC client that has the catalogue but has
+      not opened the store, and spares a reprojecting client the coordinate-array read it
+      would otherwise need. Note the two describe the extent differently: ``spatial:bbox``
+      is edge-based under ``pixel`` registration, whereas this falls back to the coordinate
+      min/max — cell centres — when the store declares no ``spatial:bbox``.
+
+      Stores written before CLIM-852 declare their ``spatial:*`` axes transposed, which now
+      misplaces them for any client that trusts the convention; see CLIM-1008.
     """
     if is_builtin_crs(store_crs):
         return

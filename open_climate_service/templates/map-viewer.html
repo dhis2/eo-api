@@ -609,29 +609,16 @@
           }
         }
 
-        // Without explicit bounds ZarrLayer fetches the x/y coordinate arrays to derive
-        // them, and says so ("proj4 provided without explicit bounds"). `proj:bbox` is the
-        // extent in the store's native CRS, which is the unit `bounds` expects when
-        // `proj4` is given ("source CRS units (e.g. meters) when proj4 is provided"), so
-        // passing it skips that round-trip on every layer load.
+        // No `bounds` is passed, deliberately: the store carries its own placement in the
+        // GeoZarr `spatial:*` attributes, and from 0.8.0 ZarrLayer reads them. Handing it a
+        // catalogue-derived extent as well would only add a second source of truth.
         //
-        // This is the round-trip, not the streaks: 0.6.1 places the store correctly either
-        // way, and 0.9.0 streaks either way. See the pin comment at the import.
-        //
-        // Only projected stores publish `proj:bbox` — the STAC CRS render hints are
-        // skipped for built-in CRSes — so a built-in-CRS store keeps deriving bounds from
-        // its coordinate arrays exactly as before.
-        // Deliberately not passing `bounds`. It looked like the fix for the misplaced
-        // projected stores and is not: the cause is transposed `spatial:*` metadata in
-        // stores written before CLIM-852 (see the note at the import), and `bounds`
-        // overrides the extent, not the axis order, so it changes nothing either way.
-        //
-        // It is also not a safe thing to pass blind. ZarrLayer documents `bounds` as edge
-        // bounds, while `proj:bbox` is edge-based only when the store declares
-        // `spatial:bbox` for the STAC builder to prefer; where that is absent it falls back
-        // to the coordinate min/max, which spans cell centres. Passing one as the other is
-        // half a cell out — invisible at country zoom, wrong up close. The store knows
-        // which it has and we do not, so let the library read the store.
+        // It is also not safe to pass blind. ZarrLayer documents `bounds` as *edge* bounds,
+        // while `proj:bbox` is edge-based only when the store declares `spatial:bbox` for
+        // the STAC builder to prefer; without that it falls back to the coordinate min/max,
+        // which spans cell *centres*. Passing one as the other is half a cell out —
+        // invisible at country zoom, wrong as you zoom in. The store knows which it holds
+        // and the viewer does not, so let the library read the store.
 
         let cm;
         try {
