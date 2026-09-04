@@ -304,16 +304,20 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
     * ``open_climate_service:proj4`` — a proj4 string for direct consumption by
       proj4js. proj4 is intentionally *not* a STAC-standard field (PROJ treats proj4
       strings as lossy), so it lives under our namespace rather than ``proj:``.
-      Kept for now, but no longer required by the viewer: zarr-layer 0.8.0 resolves a
-      ``crs`` code through proj4's own registry, which is what carbonplan/zarr-layer#61
-      asked for. Dropping this hint, and the viewer's epsg.io fallback with it, is
-      CLIM-833 — a change that needs the map checked by eye, not a version bump.
+      Still required by the viewer: zarr-layer only accepts a built-in ``crs`` code or a
+      ``proj4`` string at the version we pin. carbonplan/zarr-layer#61 (auto-resolving any
+      EPSG code) landed in 0.8.0, so dropping this hint and the viewer's epsg.io fallback
+      with it — CLIM-833 — becomes possible only once we can move off 0.6.1. See the pin
+      comment in ``templates/map-viewer.html`` for what blocks that.
     * ``proj:bbox`` — the data extent in the store's native CRS. Without it, a client
       reprojecting the Zarr must fetch the x/y coordinate arrays at render time to
       derive bounds (zarr-layer's "proj4 provided without explicit bounds" warning);
-      publishing it lets the client pass explicit bounds and skip that round-trip.
-      zarr-layer 0.8.0 reads ``spatial:transform``/``spatial:bbox`` from the store
-      instead, so for that client this is now a fallback rather than the only route.
+      publishing it lets the client pass explicit bounds and skip that round-trip, which
+      the viewer now does. zarr-layer 0.8.0 can instead read ``spatial:transform``/
+      ``spatial:bbox`` from the store, but we do not write those attributes, so for that
+      client this hint stays the only route. Writing the ``spatial:`` conventions into the
+      store, so placement travels with the data rather than only with our catalogue, would
+      be the better fix and is not done here.
     """
     if is_builtin_crs(store_crs):
         return

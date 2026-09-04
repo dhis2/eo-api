@@ -250,7 +250,18 @@
       // import.meta.url, and esm.sh's transformed build doesn't serve it (404), which
       // blanks the map. unpkg serves the worker + shared chunk siblings with CORS.
       import * as maplibregl from "https://unpkg.com/maplibre-gl@6.0.0/dist/maplibre-gl.mjs";
-      import { ZarrLayer } from "https://esm.sh/@carbonplan/zarr-layer@0.9.0";
+      // Held at 0.6.1 deliberately. 0.9.0 (the current latest) misrenders our projected
+      // stores: seNorge's UTM33 grid comes out as diagonal streaks in offset blocks
+      // instead of a map, while 0.6.1 renders the same store correctly from the same
+      // server. Passing explicit `bounds` does not fix it, so this is not the missing
+      // georeferencing hint it first looks like. The stores that break are the ones whose
+      // chunks do not divide their shape evenly — seNorge is 1550x1195 in 388x299 chunks,
+      // a 4x4 grid with partial edges, and 16 blocks is what appears on screen — but our
+      // projected and unevenly-chunked stores are the same set, so that is a strong
+      // suspicion rather than a proven trigger. Single-chunk stores (CHIRPS3, ERA5-Land)
+      // render fine on 0.9.0. Re-check on the next release before bumping; CLIM-833
+      // (dropping the proj4 hint) also waits on this, since it needs 0.8.0+.
+      import { ZarrLayer } from "https://esm.sh/@carbonplan/zarr-layer@0.6.1";
       import chroma from "https://esm.sh/chroma-js@3.2.0";
 
       // Suffix _r means the scale is reversed (matplotlib convention).
@@ -587,6 +598,34 @@
           }
         }
 
+        // Without explicit bounds ZarrLayer fetches the x/y coordinate arrays to derive
+        // them, and says so ("proj4 provided without explicit bounds"). `proj:bbox` is the
+        // extent in the store's native CRS, which is the unit `bounds` expects when
+        // `proj4` is given ("source CRS units (e.g. meters) when proj4 is provided"), so
+        // passing it skips that round-trip on every layer load.
+        //
+        // This is the round-trip, not the streaks: 0.6.1 places the store correctly either
+        // way, and 0.9.0 streaks either way. See the pin comment at the import.
+        //
+        // Only projected stores publish `proj:bbox` — the STAC CRS render hints are
+        // skipped for built-in CRSes — so a built-in-CRS store keeps deriving bounds from
+        // its coordinate arrays exactly as before.
+        const nativeBbox = collection["proj:bbox"] ?? null;
+        let bounds = null;
+        if (Array.isArray(nativeBbox) && nativeBbox.every((n) => Number.isFinite(n))) {
+          // proj:bbox is [xmin, ymin, xmax, ymax] when 2D and
+          // [xmin, ymin, zmin, xmax, ymax, zmax] when 3D; ZarrLayer wants the 2D form.
+          if (nativeBbox.length === 4) bounds = nativeBbox;
+          else if (nativeBbox.length === 6)
+            bounds = [nativeBbox[0], nativeBbox[1], nativeBbox[3], nativeBbox[4]];
+        }
+        if (bounds === null && !isBuiltinCrs) {
+          console.warn(
+            `[map] No usable proj:bbox for projected store "${collection.id}" — bounds will be ` +
+              `inferred from coordinate arrays and the layer may be misplaced`
+          );
+        }
+
         let cm;
         try {
           cm = buildColormap(colormapName);
@@ -603,6 +642,7 @@
             ...(fillValue !== null && { fillValue }),
             crs: nativeCrs,
             ...(proj4String !== null && { proj4: proj4String }),
+            ...(bounds !== null && { bounds }),
           });
           map.addLayer(activeLayer);
           for (const layer of map.getStyle().layers) {
