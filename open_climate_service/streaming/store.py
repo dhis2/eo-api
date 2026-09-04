@@ -18,7 +18,7 @@ from typing import Any
 
 from geozarr_toolkit import create_geozarr_attrs
 
-from open_climate_service.shared.geozarr import grid_geometry, write_gdal_geotransform
+from open_climate_service.shared.geozarr import check_grid_description, grid_geometry, write_gdal_geotransform
 from open_climate_service.stac.media_types import is_multiscales_convention
 from open_climate_service.streaming.protocol import GridSpec
 
@@ -253,6 +253,16 @@ def write_geozarr_attrs(store: Any, *, spec: GridSpec, bbox: list[float]) -> Non
         attrs["spatial:shape"] = geometry["shape"]
         attrs["spatial:bbox"] = geometry["bbox"]
     attrs.update(spec.attrs)
+
+    # Checked after `spec.attrs` is merged, not before: a plugin's own attrs land last and
+    # could otherwise reintroduce a bad description past the guard. `spec.shape` is (y, x).
+    check_grid_description(
+        attrs,
+        y_dim=spec.y_dim,
+        x_dim=spec.x_dim,
+        y_size=int(spec.shape[0]),
+        x_size=int(spec.shape[1]),
+    )
 
     # An append to a pyramided store must not un-declare its pyramid. `create_geozarr_attrs`
     # builds `zarr_conventions` for a *flat* store, and the `update` below replaces the list

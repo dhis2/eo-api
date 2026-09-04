@@ -642,10 +642,16 @@ def _add_temporal_values(collection: dict[str, Any], ds: xr.Dataset, time_dimens
 def reference_system_for(store_crs: str | int | None) -> int | str:
     """The datacube ``reference_system`` describing a store's spatial axes.
 
-    The datacube extension accepts an EPSG code as a number, or a WKT2/PROJJSON string, and
-    defaults to 4326 when absent. An EPSG code is published as the number because that is
-    the unambiguous form, and because it is what a client comparing against a numeric code
-    expects; anything not shaped like ``EPSG:<digits>`` is passed through as its string.
+    The datacube extension accepts an EPSG code as a number, or a WKT2 (ISO 19162) or
+    PROJJSON string, and defaults to 4326 when absent. An EPSG code is published as the
+    number because that is the unambiguous form, and because it is what a client comparing
+    against a numeric code expects.
+
+    Anything else is converted to WKT2 rather than passed through: a proj4 string is neither
+    WKT2 nor PROJJSON, so publishing one verbatim puts an invalid value in a standard field.
+    A CRS we cannot interpret at all leaves nothing honest to publish — the field has no
+    "unknown", and omitting it means the same 4326 default — so it falls back to 4326 and
+    says so in the log, loudly enough to be found.
 
     Both cube-building paths must resolve this the same way. They previously did not: the
     temporal path hardcoded ``4326`` for every dataset, so a projected store published its
@@ -659,7 +665,24 @@ def reference_system_for(store_crs: str | int | None) -> int | str:
     prefix, _, tail = code.partition(":")
     if prefix.upper() == "EPSG" and tail.isdigit():
         return int(tail)
-    return code
+
+    from pyproj import CRS
+    from pyproj.exceptions import CRSError
+
+    try:
+        parsed = CRS.from_user_input(code)
+    except (CRSError, TypeError, ValueError):
+        logger.warning(
+            "Could not interpret CRS %r as a coordinate reference system; publishing "
+            "cube:dimensions reference_system as 4326, which is wrong if the store is "
+            "projected. Fix the store's proj:code.",
+            code,
+        )
+        return 4326
+    epsg = parsed.to_epsg()
+    if epsg is not None:
+        return int(epsg)
+    return parsed.to_wkt()
 
 
 def _build_static_cube_dimensions(ds: xr.Dataset, x_dim: str, y_dim: str) -> dict[str, Any]:

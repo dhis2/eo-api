@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -1056,11 +1057,44 @@ def test_cf_extension_is_not_declared_when_no_cf_attrs_are_present(
         ("OGC:CRS84", 4326),  # a CRS84 alias is geographic WGS84
         ("CRS:84", 4326),
         (4326, 4326),  # a bare number, as canonical_crs_code accepts
-        ("+proj=utm +zone=33 +datum=WGS84", "+proj=utm +zone=33 +datum=WGS84"),
+        # A proj4 string that names a known CRS resolves to its EPSG code rather than being
+        # published verbatim: proj4 is neither WKT2 nor PROJJSON, so the string form of the
+        # field cannot carry it.
+        ("+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs +type=crs", 32633),
     ],
 )
 def test_reference_system_for_resolves_the_stores_own_crs(store_crs: str | int | None, expected: int | str) -> None:
     assert stac_services.reference_system_for(store_crs) == expected
+
+
+def test_reference_system_for_emits_wkt2_when_there_is_no_epsg_code() -> None:
+    """A CRS with no EPSG equivalent must be published as WKT2, never as proj4."""
+    # A rotated pole grid has no EPSG code, so this exercises the WKT2 branch.
+    proj4 = "+proj=ob_tran +o_proj=longlat +o_lat_p=90 +o_lon_p=0 +lon_0=0 +datum=WGS84 +no_defs +type=crs"
+    result = stac_services.reference_system_for(proj4)
+
+    assert isinstance(result, str)
+    assert not result.startswith("+proj="), "a proj4 string is not a valid reference_system"
+    # WKT2 opens with a CRS keyword; good enough to tell WKT from proj4 without parsing it.
+    assert result.split("[")[0].endswith("CRS") or result.startswith("GEOGCRS"), result[:60]
+
+
+def test_reference_system_for_falls_back_to_4326_and_warns_on_an_uninterpretable_crs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Nothing honest can be published for a CRS we cannot parse, so say so in the log."""
+    # `startup.py` sets `propagate = False` on the `open_climate_service` logger, so caplog's
+    # root handler never sees these records and `caplog.text` stays empty. Attaching its
+    # handler to the emitting logger works whatever the propagation policy is.
+    emitting = logging.getLogger(stac_services.__name__)
+    emitting.addHandler(caplog.handler)
+    try:
+        with caplog.at_level("WARNING", logger=emitting.name):
+            assert stac_services.reference_system_for("not a coordinate reference system") == 4326
+    finally:
+        emitting.removeHandler(caplog.handler)
+
+    assert "Could not interpret CRS" in caplog.text
 
 
 def test_xstac_is_given_the_stores_crs_not_a_constant(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -12,7 +12,7 @@ from topozarr import CoarseningMethod
 from topozarr.coarsen import create_pyramid
 
 from open_climate_service import config as api_config
-from open_climate_service.shared.geozarr import grid_geometry, write_gdal_geotransform
+from open_climate_service.shared.geozarr import check_grid_description, grid_geometry, write_gdal_geotransform
 from open_climate_service.shared.raster_contract import prepare_for_publication
 
 logger = logging.getLogger(__name__)
@@ -383,6 +383,17 @@ def write_to_icechunk_store(
         # projected store off the map. topozarr writes the same affine for pyramid level 0,
         # and this matches it exactly (pixel registration, so the origin is the cell edge).
         geozarr_attrs["spatial:transform"] = geometry["transform"]
+
+    # Refuse to write a grid description that contradicts the grid. Getting the positional
+    # order wrong is silent otherwise — see check_grid_description.
+    check_grid_description(
+        geozarr_attrs,
+        y_dim=y_dim,
+        x_dim=x_dim,
+        y_size=int(ds.sizes[y_dim]),
+        x_size=int(ds.sizes[x_dim]),
+        store=store_path.name,
+    )
 
     ds = ds.proj.assign_crs(spatial_ref=crs)
     ds = ds.rio.write_crs(crs)
