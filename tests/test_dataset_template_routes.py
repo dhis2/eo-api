@@ -10,6 +10,7 @@ not — which is precisely the state of a fresh or demo instance. So the coverag
 with a whole-catalogue check rather than a single case.
 """
 
+import pathlib
 from typing import Any
 
 import pytest
@@ -17,6 +18,24 @@ import xarray as xr
 from fastapi.testclient import TestClient
 
 from open_climate_service.data_accessor.services import accessor
+from open_climate_service.data_manager.services import downloader
+
+
+@pytest.fixture(autouse=True)
+def _empty_store_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:
+    """Point the data directory at an empty temp dir, so "fresh instance" is what it says.
+
+    `DOWNLOAD_DIR` is resolved at module import, and `conftest.py` imports the app before its
+    session fixture installs a temporary config — so without this the tests read the developer's
+    real XDG stores. That made the whole-catalogue check host-dependent: slow, and passing or
+    failing on which datasets happen to be ingested locally, with a corrupt local store failing
+    it for a reason unrelated to the code.
+
+    Redirecting the directory rather than stubbing the absent-data result keeps the real
+    three-source fall-through in play — icechunk miss, zarr miss, empty glob — so the code under
+    test still runs. Stubbing it would assert that a stub returns stubs.
+    """
+    monkeypatch.setattr(downloader, "DOWNLOAD_DIR", tmp_path)
 
 
 def _cube() -> xr.Dataset:
@@ -41,12 +60,13 @@ def test_every_listed_template_is_individually_fetchable(client: TestClient) -> 
     listed = client.get("/dataset-templates/").json()
     assert listed, "no templates to check"
 
-    failures = {
-        t["id"]: client.get(f"/dataset-templates/{t['id']}").status_code
-        for t in listed
-        if client.get(f"/dataset-templates/{t['id']}").status_code != 200
-    }
+    responses = {t["id"]: client.get(f"/dataset-templates/{t['id']}") for t in listed}
+
+    failures = {name: r.status_code for name, r in responses.items() if r.status_code != 200}
     assert not failures, f"templates not individually fetchable: {failures}"
+    # Every one of them is un-ingested here, which is the state the bug was specific to, so the
+    # answer is uniform rather than dependent on what this machine happens to hold.
+    assert all(r.json()["has_data"] is False for r in responses.values())
 
 
 # -- the three states of one template ------------------------------------------------------
