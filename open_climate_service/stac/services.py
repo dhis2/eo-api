@@ -304,11 +304,11 @@ def _add_crs_render_hints(*, template: pystac.Collection, ds: xr.Dataset, store_
     * ``open_climate_service:proj4`` — a proj4 string for direct consumption by
       proj4js. proj4 is intentionally *not* a STAC-standard field (PROJ treats proj4
       strings as lossy), so it lives under our namespace rather than ``proj:``.
-      Still required by the viewer: zarr-layer only accepts a built-in ``crs`` code or a
-      ``proj4`` string at the version we pin. carbonplan/zarr-layer#61 (auto-resolving any
-      EPSG code) landed in 0.8.0, so dropping this hint and the viewer's epsg.io fallback
-      with it — CLIM-833 — becomes possible only once we can move off 0.6.1. See the pin
-      comment in ``templates/map-viewer.html`` for what blocks that.
+      No longer required by the viewer, which now runs zarr-layer 0.9.0: carbonplan/zarr-layer#61
+      (auto-resolving any EPSG code through proj4's own registry) landed in 0.8.0. Dropping
+      this hint and the viewer's epsg.io fallback with it is CLIM-833, kept separate because
+      it wants the map checked by eye rather than riding along with a version bump. Other
+      STAC clients may still consume it, so it stays published either way.
     * ``proj:bbox`` — the data extent in the store's native CRS. Without it, a client
       reprojecting the Zarr must fetch the x/y coordinate arrays at render time to
       derive bounds (zarr-layer's "proj4 provided without explicit bounds" warning);

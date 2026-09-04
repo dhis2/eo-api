@@ -250,33 +250,29 @@
       // import.meta.url, and esm.sh's transformed build doesn't serve it (404), which
       // blanks the map. unpkg serves the worker + shared chunk siblings with CORS.
       import * as maplibregl from "https://unpkg.com/maplibre-gl@6.0.0/dist/maplibre-gl.mjs";
-      // Held at 0.6.1 because of our own stores, not because of the library.
+      // 0.8.0 onwards reads the GeoZarr `spatial:*` attributes (`spatial:dimensions`,
+      // `spatial:shape`, `spatial:transform`) rather than inferring geometry from the
+      // coordinate arrays. That is the behaviour we want: placement comes from the store,
+      // not from a guess, and not from our own catalogue passed in by hand.
       //
-      // 0.8.0 began reading the GeoZarr `spatial:*` attributes (`spatial:dimensions`,
-      // `spatial:shape`, `spatial:transform`) instead of inferring geometry from the
-      // coordinate arrays. Stores we wrote before the CLIM-852 fix (2026-08-05) declare
-      // those transposed — `["x","y"]` with a shape of `[x, y]` on a `(t, y, x)` array,
-      // and no affine — so from 0.8.0 on they render as diagonal streaks in offset blocks.
-      // The library is doing what it is told; the metadata is wrong.
+      // It also means the store has to be right. One that declares its axes transposed —
+      // `["x","y"]` with a shape of `[x, y]` on a `(t, y, x)` array — renders as diagonal
+      // streaks in offset blocks, because that is what it asked for. Stores written before
+      // the CLIM-852 fix (2026-08-05) do exactly that, and 0.6.1 concealed it by ignoring
+      // these attributes altogether. Those stores need reingesting or migrating: CLIM-1008.
       //
-      // Proven by two stores on the same grid, same CRS, same 388x299 chunking over
-      // 1550x1195, differing only in when they were written:
+      // Two stores on the same grid and CRS, same 388x299 chunking over 1550x1195,
+      // differing only in when they were written, are what establish this is metadata
+      // rather than the library:
       //
-      //   senorge_temperature_daily  (2026-06-26, dimensions ["x","y"])  -> streaks on 0.9.0
-      //   senorge_precipitation_daily (2026-08-06, dimensions ["y","x"]) -> correct on 0.9.0
+      //   senorge_temperature_daily   (2026-06-26, ["x","y"]) -> streaks
+      //   senorge_precipitation_daily (2026-08-06, ["y","x"]) -> correct
       //
-      // So this is not a chunking problem and not a zarr-layer bug (retracted upstream:
-      // carbonplan/zarr-layer#88). The blocker is that instances still hold stores written
-      // by the old writer, which 0.6.1 tolerates because it ignores `spatial:*` entirely.
-      //
-      // Lift this pin once those stores are reingested — CLIM-1008 — which also unblocks
-      // CLIM-833. Note CLIM-1006 (CHIRPS3 streaks on the Rwanda instance) was reported
-      // against 0.6.1, which never reads these attributes, so it is a separate fault.
-      //
-      // 0.6.1 is not known-good, only better here. CLIM-1006 (CHIRPS3 drawing as streaks
-      // on the Rwanda instance) was reported against 0.6.1 and is still open; upgrading
-      // was the proposed fix for it, which is what this pin rules out.
-      import { ZarrLayer } from "https://esm.sh/@carbonplan/zarr-layer@0.6.1";
+      // No upstream bug is involved; an earlier report of one was withdrawn
+      // (carbonplan/zarr-layer#88). CLIM-1006 (CHIRPS3 streaks on the Rwanda instance) was
+      // reported against 0.6.1, which never read these attributes, so it is a separate
+      // fault and still open.
+      import { ZarrLayer } from "https://esm.sh/@carbonplan/zarr-layer@0.9.0";
       import chroma from "https://esm.sh/chroma-js@3.2.0";
 
       // Suffix _r means the scale is reversed (matplotlib convention).
