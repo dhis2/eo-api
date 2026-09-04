@@ -30,19 +30,21 @@ BASE_URL_ENV = "CLIMATE_SERVICE_BASE_URL"
 
 
 def absolute_base(request: Request) -> str:
-    """The configured public origin, or the request's own, without a trailing slash."""
-    configured = os.getenv(BASE_URL_ENV, "").strip()
+    """The configured public origin, or the request's own, without a trailing slash.
+
+    Trailing slashes are stripped *before* the value is judged usable. Testing truthiness
+    first accepted `CLIMATE_SERVICE_BASE_URL="/"`, stripped it to the empty string and
+    returned that, so every href in every served document lost its origin.
+    """
+    configured = os.getenv(BASE_URL_ENV, "").strip().rstrip("/")
     if configured:
-        return configured.rstrip("/")
+        return configured
     return str(request.base_url).rstrip("/")
 
 
 def absolute_url(request: Request, path: str) -> str:
     """`path` resolved against the public origin."""
-    base = absolute_base(request)
-    if not path:
-        return base
-    return f"{base}/{path.lstrip('/')}"
+    return f"{absolute_base(request)}/{path.lstrip('/')}"
 
 
 def self_url(request: Request) -> str:
@@ -52,5 +54,15 @@ def self_url(request: Request) -> str:
     and each must name itself — while the origin comes from the configuration. The query
     string is deliberately dropped: no OCS document varies by it, and reflecting arbitrary
     client input back into a served document is not worth the trouble it invites.
+
+    `root_path` is removed before the path is appended. Mounted under a prefix, the fallback
+    origin (`request.base_url`) already ends with that prefix; a server that leaves the prefix
+    on `request.url.path` as well — a non-stripping proxy in front of `--root-path` — would
+    otherwise produce `/ocs/ocs/stac` for `self` while every other link stayed correct, and a
+    STAC client following `self` would 404.
     """
-    return absolute_url(request, request.url.path)
+    path = request.url.path
+    root_path = request.scope.get("root_path", "")
+    if root_path and path.startswith(root_path):
+        path = path[len(root_path) :] or "/"
+    return absolute_url(request, path)

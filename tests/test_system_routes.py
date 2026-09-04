@@ -160,7 +160,9 @@ async def test_manage_sync_rejects_blank_dataset_id() -> None:
     )
 
     assert response.status_code == 303
-    assert response.headers["location"] == "http://testserver/manage?error=Dataset%20ID%20is%20required"
+    # Relative on purpose: a redirect back to the console must land on the origin the operator
+    # actually reached, not on the configured public one (CLIM-974 review).
+    assert response.headers["location"] == "/manage?error=Dataset%20ID%20is%20required"
 
 
 @pytest.mark.anyio  # pyright: ignore[reportUntypedFunctionDecorator]

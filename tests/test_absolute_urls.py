@@ -111,16 +111,46 @@ def _fake_request(base: str, path: str, query: str = ""):
 # -- the two reported endpoints -------------------------------------------------------------
 
 
-def test_the_map_viewer_never_emits_our_own_host_over_http(https_client: TestClient) -> None:
-    """The reported defect. Every fetch target and the header link came from the request, so
-    they carried `http` while the page itself was served over `https`."""
+def test_the_map_viewer_carries_no_origin_at_all(https_client: TestClient) -> None:
+    """The reported defect was `http://` fetch targets on an `https://` page. Root-relative
+    targets fix it without naming an origin, which also removes a hazard the first fix
+    introduced: with the configured origin baked in, opening the viewer through a port-forward
+    fetched the *public* instance's catalogue — permitted by the wildcard CORS — and the
+    operator would validate an ingest against another instance's data (CLIM-974 review).
+    """
     body = https_client.get("/map").text
 
     assert "http://testserver" not in body
-    # The specific URLs named in the report.
+    assert _CONFIGURED not in body, "the viewer should not name any origin"
     for path in ("/extent", "/collections"):
-        assert f'"{_CONFIGURED}{path}"' in body
-    assert f'href="{_CONFIGURED}/"' in body
+        assert f'fetch("{path}")' in body
+
+
+def test_the_manage_console_posts_to_the_origin_it_was_reached_on(https_client: TestClient) -> None:
+    """Form actions and redirects stay relative for the same reason: an operator on a
+    port-forward pressing Ingest must not POST to the configured public instance."""
+    body = https_client.get("/manage").text
+
+    assert _CONFIGURED not in body
+    assert 'action="/manage/ingest"' in body or "/manage/ingest" in body
+
+
+def test_the_landing_page_links_within_the_instance_it_is_served_from(https_client: TestClient) -> None:
+    """HTML explicitly: `/` content-negotiates, and the openEO capabilities on the JSON side
+    *must* carry the configured origin because other processes consume those links."""
+    body = https_client.get("/", headers={"Accept": "text/html"}).text
+
+    assert _CONFIGURED not in body
+    assert 'href="/map"' in body
+
+
+def test_the_capabilities_json_still_carries_the_configured_origin(https_client: TestClient) -> None:
+    """The other half of the split. Links in a document read by another process have to be
+    absolute and have to name the public origin."""
+    links = https_client.get("/", headers={"Accept": "application/json"}).json()["links"]
+
+    assert any(link["href"].startswith(_CONFIGURED) for link in links)
+    assert not any("testserver" in link["href"] for link in links)
 
 
 def test_the_stac_self_link_uses_the_configured_scheme(https_client: TestClient) -> None:
@@ -146,3 +176,68 @@ def test_no_served_document_leaks_the_internal_origin(https_client: TestClient) 
         response = https_client.get(path, headers={"Accept": "application/json"} if path == "/" else {})
         assert response.status_code == 200, path
         assert "http://testserver" not in response.text, path
+
+
+# -- degenerate configuration ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("configured", ["/", "///", "  /  "])
+def test_a_base_url_that_is_only_slashes_falls_back_to_the_request(
+    monkeypatch: pytest.MonkeyPatch, configured: str
+) -> None:
+    """Truthiness was tested before the trailing slashes were stripped, so `"/"` survived the
+    check, stripped to the empty string, and was returned — every href in every served
+    document lost its origin, and `/openeo` redirected to `editor.openeo.org/?server=`
+    (CLIM-974 review).
+    """
+    from open_climate_service.shared.urls import absolute_base
+
+    monkeypatch.setenv(BASE_URL_ENV, configured)
+    assert absolute_base(_fake_request("http://localhost:9000/", "/stac")) == "http://localhost:9000"
+
+
+def test_the_self_link_does_not_double_a_mount_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Behind a non-stripping proxy in front of `--root-path /ocs`, the fallback origin ends
+    with the prefix and `request.url.path` carries it again, so `self` became
+    `/ocs/ocs/stac` while every other link stayed correct — a STAC client following `self`
+    would 404 (CLIM-974 review).
+    """
+    from fastapi import Request
+
+    from open_climate_service.shared.urls import self_url
+
+    monkeypatch.delenv(BASE_URL_ENV, raising=False)
+    request = Request(
+        {
+            "type": "http",
+            "scheme": "http",
+            "server": ("host", 80),
+            "path": "/ocs/stac",
+            "root_path": "/ocs",
+            "query_string": b"",
+            "headers": [(b"host", b"host")],
+        }
+    )
+    assert self_url(request) == "http://host/ocs/stac"
+
+
+def test_a_configured_origin_is_unaffected_by_a_mount_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The prefix belongs to the deployment, so a configured public origin that already
+    includes it must not have it stripped or doubled."""
+    from fastapi import Request
+
+    from open_climate_service.shared.urls import self_url
+
+    monkeypatch.setenv(BASE_URL_ENV, "https://example.org/ocs")
+    request = Request(
+        {
+            "type": "http",
+            "scheme": "http",
+            "server": ("host", 80),
+            "path": "/ocs/stac",
+            "root_path": "/ocs",
+            "query_string": b"",
+            "headers": [(b"host", b"host")],
+        }
+    )
+    assert self_url(request) == "https://example.org/ocs/stac"

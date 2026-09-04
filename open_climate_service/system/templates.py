@@ -113,9 +113,16 @@ def wants_json(request: Request) -> bool:
     return json_q >= 0 and (html_q < 0 or json_q >= html_q)
 
 
-def render_maps(base: str) -> str:
-    """Render the map viewer page."""
-    return get_template("map-viewer.html").render(base=base, name=api_config.get_name())
+def render_maps() -> str:
+    """Render the map viewer page.
+
+    Takes no base URL: every link and fetch target in the page is same-origin, so the template
+    uses root-relative paths. Those inherit the page's scheme, which fixes the mixed-content
+    bug in CLIM-974 without the risk of substituting a *different* origin — an operator on a
+    port-forward would otherwise have the viewer fetch the configured public instance's
+    catalogue instead of the one they are looking at.
+    """
+    return get_template("map-viewer.html").render(name=api_config.get_name())
 
 
 def _load_extent() -> dict[str, Any] | None:
@@ -155,11 +162,10 @@ def _load_datasets() -> list[Any]:
         return []
 
 
-def render_landing(version: str, base: str) -> str:
+def render_landing(version: str) -> str:
     """Render the root landing page with live instance status."""
     return get_template("landing_page.html").render(
         version=version,
-        base=base,
         name=api_config.get_name(),
         extent=_load_extent(),
         datasets=_load_datasets(),
@@ -169,13 +175,12 @@ def render_landing(version: str, base: str) -> str:
     )
 
 
-def render_manage(version: str, base: str, message: str | None = None, error: str | None = None) -> str:
+def render_manage(version: str, message: str | None = None, error: str | None = None) -> str:
     """Render the management page."""
     today = date.today().isoformat()
     year_ago = date.today().replace(year=date.today().year - 1).isoformat()
     return get_template("manage.html").render(
         version=version,
-        base=base,
         name=api_config.get_name(),
         extent=_load_extent(),
         templates=_ingestable_templates(),

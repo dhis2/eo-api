@@ -125,7 +125,7 @@ def build_collection(dataset_id: str, request: Request) -> dict[str, object]:
     collection_href = absolute_url(request, f"/stac/collections/{dataset_id}")
     catalog_href = absolute_url(request, "/stac/catalog.json")
     dataset_href = absolute_url(request, f"/datasets/{dataset_id}")
-    zarr_href = _public_zarr_asset_href(request, dataset_id, artifact, source_dataset)
+    zarr_href = absolute_url(request, f"/zarr/{dataset_id}")
 
     template = _build_collection_template(
         dataset_id=dataset_id,
@@ -555,15 +555,6 @@ def _artifact_store_path(artifact: ArtifactRecord) -> str:
         status_code=500,
         detail=f"Published artifact '{artifact.artifact_id}' has no readable storage path metadata",
     )
-
-
-def _public_zarr_asset_href(
-    request: Request,
-    dataset_id: str,
-    artifact: ArtifactRecord,
-    source_dataset: dict[str, Any],
-) -> str:
-    return absolute_url(request, f"/zarr/{dataset_id}")
 
 
 def _override_time_step(collection: dict[str, Any], step: str | None, *, cadence: Cadence) -> None:
