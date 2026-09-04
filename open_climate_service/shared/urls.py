@@ -47,6 +47,28 @@ def absolute_url(request: Request, path: str) -> str:
     return f"{absolute_base(request)}/{path.lstrip('/')}"
 
 
+def mount_prefix(request: Request) -> str:
+    """The path prefix this instance is served under, or `""` when it is at the root.
+
+    For links and form actions *within* a served page, which need to be same-origin but
+    mount-correct. A path carries no scheme and no host, so it inherits both from the page —
+    which is what fixes the mixed-content defect — while still resolving under a deployment
+    prefix.
+
+    The two wrong answers this sits between, both of which shipped in this file's history:
+
+    * `absolute_base()` names an origin, so an operator reaching the console through a
+      port-forward would submit forms to the configured *public* instance. Silently, since CORS
+      is `allow_origins=["*"]`.
+    * A bare leading slash resolves from the origin root, so under `--root-path /ocs` a page at
+      `/ocs/manage` posted to `/manage` and the proxy returned 404.
+
+    Returned without a trailing slash, so `f"{mount_prefix(request)}/manage"` is right whether
+    or not there is a prefix.
+    """
+    return str(request.scope.get("root_path", "")).rstrip("/")
+
+
 def self_url(request: Request) -> str:
     """The public URL of the document being requested.
 

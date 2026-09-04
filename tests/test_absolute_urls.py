@@ -241,3 +241,69 @@ def test_a_configured_origin_is_unaffected_by_a_mount_prefix(monkeypatch: pytest
         }
     )
     assert self_url(request) == "https://example.org/ocs/stac"
+
+
+# -- mount prefix ----------------------------------------------------------------------------
+#
+# Three positions on the same links, all of which have been in this file's history. Two are
+# wrong in opposite directions, so the tests below pin all three rather than the survivor:
+#
+#   absolute, configured origin -> submits to the *public* instance from a port-forward
+#   bare leading slash          -> drops a deployment prefix, proxy 404
+#   mount-relative path         -> inherits the page's origin, resolves under the prefix
+
+
+@pytest.fixture
+def mounted_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    """Served under `/ocs`, with a configured public origin that is *not* the request's."""
+    from open_climate_service.main import app
+
+    monkeypatch.setenv(BASE_URL_ENV, _CONFIGURED)
+    return TestClient(app, root_path="/ocs")
+
+
+def test_the_manage_console_posts_under_the_mount_prefix(mounted_client: TestClient) -> None:
+    """A page served at `/ocs/manage` posting to `/manage/ingest` reached the proxy, not the
+    app, and returned 404."""
+    body = mounted_client.get("/manage").text
+
+    assert 'action="/ocs/manage/ingest"' in body
+    assert 'action="/manage/ingest"' not in body
+    # Still no origin: the prefix is a path, so the page's own scheme and host are inherited.
+    assert _CONFIGURED not in body
+
+
+def test_the_landing_page_links_under_the_mount_prefix(mounted_client: TestClient) -> None:
+    body = mounted_client.get("/", headers={"Accept": "text/html"}).text
+
+    assert 'href="/ocs/map"' in body
+    assert 'href="/map"' not in body
+    assert _CONFIGURED not in body
+
+
+def test_the_viewer_fetches_under_the_mount_prefix(mounted_client: TestClient) -> None:
+    """Without the prefix the viewer fetched `/extent` from the origin root and rendered
+    empty, which looks like missing data rather than a broken URL."""
+    body = mounted_client.get("/map").text
+
+    assert 'fetch("/ocs/extent")' in body
+    assert 'fetch("/ocs/collections")' in body
+    assert _CONFIGURED not in body
+
+
+def test_an_unmounted_instance_gains_no_prefix(https_client: TestClient) -> None:
+    """The prefix is empty at the root, so the same expression serves both deployments."""
+    body = https_client.get("/manage").text
+
+    assert 'action="/manage/ingest"' in body
+    assert "//manage" not in body, "empty prefix must not leave a doubled slash"
+
+
+def test_mount_prefix_strips_a_trailing_slash() -> None:
+    """`f"{mount_prefix(request)}/manage"` has to be right for every form the server reports."""
+    from open_climate_service.shared.urls import mount_prefix
+
+    for reported, expected in (("/ocs/", "/ocs"), ("/ocs", "/ocs"), ("/", ""), ("", "")):
+        request = _fake_request("http://host/", "/manage")
+        request.scope["root_path"] = reported
+        assert mount_prefix(request) == expected, reported
