@@ -259,7 +259,8 @@
       // `["x","y"]` with a shape of `[x, y]` on a `(t, y, x)` array — renders as diagonal
       // streaks in offset blocks, because that is what it asked for. Stores written before
       // the CLIM-852 fix (2026-08-05) do exactly that, and 0.6.1 concealed it by ignoring
-      // these attributes altogether. Those stores need reingesting or migrating: CLIM-1008.
+      // these attributes altogether. Those stores get reingested rather than patched in
+      // place — CLIM-1008 records that decision, and which stores were affected.
       //
       // Two stores on the same grid and CRS, same 388x299 chunking over 1550x1195,
       // differing only in when they were written, are what establish this is metadata
