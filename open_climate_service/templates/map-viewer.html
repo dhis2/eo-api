@@ -261,6 +261,10 @@
       // suspicion rather than a proven trigger. Single-chunk stores (CHIRPS3, ERA5-Land)
       // render fine on 0.9.0. Re-check on the next release before bumping; CLIM-833
       // (dropping the proj4 hint) also waits on this, since it needs 0.8.0+.
+      //
+      // 0.6.1 is not known-good, only better here. CLIM-1006 (CHIRPS3 drawing as streaks
+      // on the Rwanda instance) was reported against 0.6.1 and is still open; upgrading
+      // was the proposed fix for it, which is what this pin rules out.
       import { ZarrLayer } from "https://esm.sh/@carbonplan/zarr-layer@0.6.1";
       import chroma from "https://esm.sh/chroma-js@3.2.0";
 
