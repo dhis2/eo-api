@@ -376,3 +376,54 @@ def test_ownership_is_checked_before_a_writing_provider_runs(instance: Path, mon
     with pytest.raises(ValueError, match="not maintained by a provider"):
         resolver.ensure_current("big")
     assert curated.read_bytes() == original, "the curated file must be untouched, not restored after"
+
+
+def test_id_property_is_read_from_the_features_properties(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """GeoJSON keeps attributes under `properties`; only `id` is top-level.
+
+    A lookup that checked the top level alone would find nothing and fall back to the feature's own
+    id — keying the whole export on the wrong column while appearing to work. That is exactly the
+    field a DHIS2 template points at its org-unit UID column.
+    """
+    collection = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "id": "f0", "properties": {"ou_code": "MW.N"}, "geometry": _NORTH.__geo_interface__},
+            {"type": "Feature", "id": "f1", "properties": {"ou_code": "MW.S"}, "geometry": _SOUTH.__geo_interface__},
+        ],
+    }
+    _declare(monkeypatch, {"id": "districts", "provider": "coded", "id_property": "ou_code"})
+    _register(monkeypatch, "coded", lambda **_: collection)
+
+    resolver.ensure_current("districts")
+
+    assert [f["id"] for f in load_features("districts")["features"]] == ["MW.N", "MW.S"]
+
+
+def test_a_missing_id_property_is_refused_rather_than_falling_back(
+    instance: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Silently using the feature's own id would hide the template being wrong."""
+    collection = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "id": "f0", "properties": {"name": "Northern"}, "geometry": _NORTH.__geo_interface__},
+            {"type": "Feature", "id": "f1", "properties": {"name": "Southern"}, "geometry": _SOUTH.__geo_interface__},
+        ],
+    }
+    _declare(monkeypatch, {"id": "districts", "provider": "coded", "id_property": "ou_code"})
+    _register(monkeypatch, "coded", lambda **_: collection)
+
+    with pytest.raises(ValueError, match="with no 'ou_code'"):
+        resolver.ensure_current("districts")
+
+
+def test_a_template_with_no_provider_describes_a_curated_file(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The documented metadata-only case: nothing to fetch, nothing that can be stale."""
+    gpd.GeoDataFrame({"ou_code": ["MW.N", "MW.S"]}, geometry=[_NORTH, _SOUTH], crs="EPSG:4326").to_parquet(
+        instance / "features" / "districts.parquet"
+    )
+    _declare(monkeypatch, {"id": "districts", "name": "Districts", "license": "CC-BY-4.0"})
+
+    assert resolver.ensure_current("districts") == resolver.CURATED_VERSION
+    assert len(load_features("districts")["features"]) == 2

@@ -403,3 +403,38 @@ def test_a_client_supplied_feature_collection_still_works(tmp_path: Path) -> Non
     assert list(result.geometry.values) == ["north"]
     written = _write(result, tmp_path, "PARQUET")
     assert sorted(gpd.read_parquet(written).geom_type.unique()) == ["Polygon"]
+
+
+def test_a_bbox_is_expressed_in_the_collections_own_crs(features_dir: Path) -> None:
+    """The window is always lon/lat, but the filter runs before the reprojection to EPSG:4326.
+
+    Applied unchanged to a projected collection it selects a region in metres near the origin and
+    returns nothing — and above MAX_FEATURES a bbox is required, so that is the only call path such
+    a collection has.
+    """
+    _write_districts(features_dir, name="utm", crs="EPSG:32736")
+
+    payload = load_vector_cube("utm", bbox=[0, 0, 4, 4])
+
+    assert len(payload["features"]) == 2
+
+
+def test_a_bbox_still_excludes_what_it_should_on_a_projected_collection(features_dir: Path) -> None:
+    """Transforming the window must not turn it into "everything"."""
+    _write_districts(features_dir, name="utm", crs="EPSG:32736")
+
+    payload = load_vector_cube("utm", bbox=[20, 20, 24, 24])
+
+    assert payload["features"] == []
+
+
+def test_the_covering_bbox_is_not_reported_as_a_feature_property(features_dir: Path) -> None:
+    """It is a struct column, so the Parquet leaf view calls it xmin/ymin/xmax/ymax."""
+    frame = _write_districts(features_dir, name="unused")
+    (features_dir / "unused.parquet").unlink()
+    frame.to_parquet(features_dir / "covered.parquet", write_covering_bbox=True)
+
+    info = features.describe("covered")
+
+    assert info is not None
+    assert info["properties"] == ["ou_code", "district", "pop"]
