@@ -35,6 +35,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import pyarrow as pa
+
 from open_climate_service.features.provider import feature_provider
 
 logger = logging.getLogger(__name__)
@@ -57,6 +59,21 @@ def theme_types() -> dict[str, Any]:
     return dict(_THEME_TYPES)
 
 
+def _apply_filters(batch: Any, filters: dict[str, Any] | None) -> Any:
+    """Keep only the rows matching every ``{column: value-or-values}`` entry."""
+    if not filters:
+        return batch
+
+    import pyarrow.compute as pc
+
+    mask = None
+    for name, wanted in filters.items():
+        values = wanted if isinstance(wanted, (list, tuple, set)) else [wanted]
+        test = pc.is_in(batch.column(name), value_set=pa.array(list(values)))
+        mask = test if mask is None else pc.and_(mask, test)
+    return batch.filter(mask)
+
+
 @feature_provider("overture")
 def overture(
     path: Path,
@@ -65,11 +82,19 @@ def overture(
     theme: str = DEFAULT_THEME,
     type: str | None = None,  # noqa: A002 -- Overture's own field name
     columns: list[str] | None = None,
+    filters: dict[str, Any] | None = None,
     stac_catalog: bool = True,
 ) -> tuple[Path, str]:
     """Extract one Overture theme for a bounding box, writing GeoParquet to ``path``.
 
     ``bbox`` is ``[west, south, east, north]`` in lon/lat -- normally the instance extent.
+
+    ``filters`` keeps only the rows whose column matches, as ``{column: value}`` or
+    ``{column: [value, ...]}``. A bbox window returns everything overlapping it at *every* level --
+    for divisions that is neighbourhoods through whole countries -- and aggregating over a mixture
+    of levels is rarely what anyone means. ``{"subtype": "county"}`` is the usual fix, and
+    ``{"class": "residential"}`` the equivalent for buildings.
+
     Returns the path and the release id, which becomes the collection's version.
     """
     import pyarrow.parquet as pq
@@ -114,16 +139,31 @@ def overture(
 
         schema = pa.schema([schema.field(name) for name in keep], metadata=reader.schema.metadata)
 
+    if filters:
+        unknown = [name for name in filters if name not in reader.schema.names]
+        if unknown:
+            raise ValueError(f"Overture {type_!r} has no column(s) to filter on: {', '.join(unknown)}")
+
     path.parent.mkdir(parents=True, exist_ok=True)
     written = 0
     with pq.ParquetWriter(path, schema) as writer:
         for batch in reader:
             if not batch.num_rows:
                 continue
+            # Filter before projecting, so a filter may name a column the output does not keep.
+            batch = _apply_filters(batch, filters)
+            if not batch.num_rows:
+                continue
             if columns is not None:
                 batch = batch.select(schema.names)
             writer.write_batch(batch)
             written += batch.num_rows
+
+    if not written:
+        raise ValueError(
+            f"Overture {type_!r} returned no rows for bbox {bbox} in release {release!r}"
+            + (f" matching {filters}" if filters else "")
+        )
 
     logger.info("Extracted %d Overture %s features (%s) for %s to %s", written, theme, release, bbox, path.name)
     return path, release

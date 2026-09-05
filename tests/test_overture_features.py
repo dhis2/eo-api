@@ -26,11 +26,16 @@ def _building(x: float, y: float) -> Polygon:
     return Polygon([(x, y), (x + 0.5, y), (x + 0.5, y + 0.5), (x, y + 0.5)])
 
 
-def _overture_like(tmp_path: Path, ids: list[Any], name: str = "src") -> pa.Table:
+def _overture_like(tmp_path: Path, ids: list[Any], name: str = "src", subtypes: list[str] | None = None) -> pa.Table:
     """A table shaped like the client's output: a bbox struct and a declared covering."""
     path = tmp_path / f"{name}.parquet"
     gpd.GeoDataFrame(
-        {"id": ids, "height": [3.0] * len(ids), "class": ["house"] * len(ids)},
+        {
+            "id": ids,
+            "height": [3.0] * len(ids),
+            "class": ["house"] * len(ids),
+            "subtype": subtypes or ["county"] * len(ids),
+        },
         geometry=[_building(i * 5.0, i * 5.0) for i in range(len(ids))],
         crs="EPSG:4326",
     ).to_parquet(path, write_covering_bbox=True)
@@ -246,3 +251,60 @@ def test_an_extract_will_not_overwrite_a_curated_collection(
 
     with pytest.raises(ValueError, match="not maintained by a provider"):
         resolver.ensure_current("buildings")
+
+
+# --- row filters -------------------------------------------------------------------------------
+
+
+def test_a_filter_keeps_only_the_matching_rows(tmp_path: Path, client: Any) -> None:
+    """A bbox window returns every level that overlaps -- for divisions, neighbourhoods to countries.
+
+    Aggregating over a mixture of admin levels is rarely what anyone means, so a template says which
+    one it wants.
+    """
+    client.state["table"] = _overture_like(
+        tmp_path, ["a", "b", "c"], name="mixed", subtypes=["county", "country", "county"]
+    )
+    out = tmp_path / "out.parquet"
+
+    overture(path=out, release="r", bbox=[-1.0, -1.0, 30.0, 30.0], filters={"subtype": "county"})
+
+    assert list(gpd.read_parquet(out)["id"]) == ["a", "c"]
+
+
+def test_a_filter_accepts_several_values(tmp_path: Path, client: Any) -> None:
+    client.state["table"] = _overture_like(
+        tmp_path, ["a", "b", "c"], name="mixed", subtypes=["county", "region", "locality"]
+    )
+    out = tmp_path / "out.parquet"
+
+    overture(path=out, release="r", bbox=[-1.0, -1.0, 30.0, 30.0], filters={"subtype": ["county", "region"]})
+
+    assert list(gpd.read_parquet(out)["id"]) == ["a", "b"]
+
+
+def test_a_filter_may_name_a_column_the_output_drops(tmp_path: Path, client: Any) -> None:
+    """Filtering happens before projection, so selecting columns cannot break a filter."""
+    client.state["table"] = _overture_like(tmp_path, ["a", "b"], name="mixed", subtypes=["county", "country"])
+    out = tmp_path / "out.parquet"
+
+    overture(path=out, release="r", bbox=[-1.0, -1.0, 30.0, 30.0], columns=["id"], filters={"subtype": "county"})
+
+    assert pq.read_schema(out).names == ["id", "geometry", "bbox"]
+    assert list(gpd.read_parquet(out)["id"]) == ["a"]
+
+
+def test_an_unknown_filter_column_is_refused(tmp_path: Path, client: Any) -> None:
+    with pytest.raises(ValueError, match="no column\\(s\\) to filter on: nope"):
+        overture(path=tmp_path / "out.parquet", release="r", bbox=[0.0, 0.0, 1.0, 1.0], filters={"nope": "x"})
+
+
+def test_a_filter_matching_nothing_is_refused_rather_than_writing_an_empty_file(tmp_path: Path, client: Any) -> None:
+    """An empty collection would be recorded as a real one and aggregate to nothing."""
+    with pytest.raises(ValueError, match="returned no rows"):
+        overture(
+            path=tmp_path / "out.parquet",
+            release="r",
+            bbox=[-1.0, -1.0, 30.0, 30.0],
+            filters={"subtype": "nowhere"},
+        )

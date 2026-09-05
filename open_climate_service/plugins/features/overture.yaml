@@ -30,6 +30,10 @@
 #     # Measured for this extent against release 2026-08-19.0: 2,260,971 buildings, 304 MB,
 #     # 111 seconds. A windowed read of the result returns a city block in 0.07 s.
 #     columns: [id, geometry, height, class]
+#     # A bbox window returns every level that overlaps it. For divisions that is neighbourhoods
+#     # through whole countries, so say which level you mean:
+#     #   theme: divisions
+#     #   filters: {subtype: [county, region]}
 #   # A monthly cadence, so a day's TTL would re-extract gigabytes for nothing. Refresh by
 #   # bumping `release`, which changes the request and forces a new extract.
 #   ttl_seconds: 2592000                # 30 days
