@@ -1329,13 +1329,15 @@ def _write_raster(ds: Any, results_dir: Any, fmt: str) -> str | None:
     if "geometry" in getattr(ds, "dims", {}):
         if fmt in _VECTOR_FORMATS:
             try:
-                return _write_vector(_vector_frame(ds), results_dir, fmt)
+                frame = _vector_frame(ds)
             except Exception:
-                # No falling through to a raster writer: a request for GeoParquet used to come
-                # back as a Zarr directory, with the reason visible only at debug level. A
-                # silent format substitution is worse than an error.
+                # Only the geometry conversion is described this way. A failure writing the file --
+                # a full disk, a driver problem -- is a different thing and keeps its own error.
                 logger.exception("Cannot write %s: the vector datacube has no usable geometry", fmt)
                 raise
+            # Outside the try, so a write failure still cannot fall through to a raster writer: a
+            # request for GeoParquet coming back as a Zarr directory is worse than an error.
+            return _write_vector(frame, results_dir, fmt)
         # A raster or tabular format was asked for, so honour it — but the WKT companion
         # coordinate is neither wanted nor writeable there.
         ds = ds.drop_vars(GEOMETRY_WKT_COORD, errors="ignore")

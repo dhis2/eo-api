@@ -87,8 +87,10 @@ def test_aggregation_keeps_the_shapes_alongside_the_labels() -> None:
     assert list(result.geometry.values) == ["MW.N", "MW.S"]
     # ...and the shapes ride alongside as WKT.
     assert all(text.startswith("POLYGON") for text in result[GEOMETRY_WKT_COORD].values)
-    # north (30+20)/2, south (10+0)/2, for both time steps
-    assert result.t2m.values.tolist() == [[25.0, 25.0], [5.0, 5.0]]
+    # north (30+20)/2, south (10+0)/2, for both time steps. Selected by label rather than by
+    # position: the assertion should not depend on how concat happens to order the dimensions.
+    assert result.t2m.sel(geometry="MW.N").values.tolist() == [25.0, 25.0]
+    assert result.t2m.sel(geometry="MW.S").values.tolist() == [5.0, 5.0]
 
 
 # --- the requested format is honoured ----------------------------------------------------
