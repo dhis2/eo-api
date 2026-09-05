@@ -465,3 +465,85 @@ def test_a_read_only_instance_serves_a_stale_entry_rather_than_refusing(
     assert served == first
     assert len(calls) == 1, "the stale entry is served, not refetched"
     assert [f["id"] for f in load_features("zones")["features"]] == ["A", "B"]
+
+
+# --- discovery from a real plugins_dir -----------------------------------------------------------
+
+
+@pytest.fixture
+def isolated_plugin_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Forget any previously imported `features` package before and after a discovery test.
+
+    Discovery imports an instance's providers as `features.<stem>` after putting `plugins_dir` on
+    `sys.path` — the same scheme the `processes/` loader uses. That name is global and Python caches
+    it, so the first `plugins_dir` a process sees is the only one it can ever see. One process
+    serves one instance, so this never arises in production; it does arise across tests, and
+    clearing it is what lets each test observe its own directory rather than the previous one's.
+    """
+    import sys
+
+    def _forget() -> None:
+        for name in [n for n in sys.modules if n == "features" or n.startswith("features.")]:
+            del sys.modules[name]
+
+    original_path = list(sys.path)
+    _forget()
+    yield
+    _forget()
+    # Discovery appends `plugins_dir` to sys.path and never removes it, so without this a later
+    # test resolves `features` against an earlier test's directory even with the cache cleared.
+    sys.path[:] = original_path
+
+
+def _write_plugin_dir(root: Path, provider_name: str, template_id: str, module: str = "national") -> Path:
+    """A plugins_dir holding a features/ folder with both halves, as a country would ship it.
+
+    ``module`` differs per test on purpose. Discovery imports these as ``features.<stem>``, a global
+    module name that Python caches for the life of the process — the same scheme the `processes/`
+    loader uses. Reusing a stem across tests would resolve to whichever file was imported first.
+    """
+    features = root / "plugins" / "features"
+    features.mkdir(parents=True, exist_ok=True)
+    (features / "__init__.py").write_text("")
+    (features / f"{module}.py").write_text(
+        "from open_climate_service.features.provider import feature_provider\n\n\n"
+        f'@feature_provider("{provider_name}")\n'
+        "def national(**params):\n"
+        '    return {"type": "FeatureCollection", "features": []}\n'
+    )
+    (features / f"{module}.yaml").write_text(
+        f"- id: {template_id}\n  name: National districts\n  license: CC-BY-4.0\n  provider: {provider_name}\n"
+    )
+    return root
+
+
+def test_a_features_folder_in_plugins_dir_is_discovered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated_plugin_import: None
+) -> None:
+    """CLIM-926's acceptance: both halves come from the same folder, discovered like the other three."""
+    from open_climate_service.features.config import get_feature_templates
+    from open_climate_service.features.provider import registry
+
+    _write_plugin_dir(tmp_path, "national", "national-districts")
+    monkeypatch.setattr("open_climate_service.config.get_config", lambda: {"plugins_dir": "./plugins/"})
+    monkeypatch.setattr("open_climate_service.config.get_config_path", lambda: tmp_path / "climate-service.yaml")
+
+    assert "national" in registry(), "the provider is not discovered"
+    template = get_feature_templates().get("national-districts")
+    assert template.provider == "national"
+    assert template.license == "CC-BY-4.0", "authored metadata comes from the template file"
+
+
+def test_plugins_dir_overrides_a_builtin_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, isolated_plugin_import: None
+) -> None:
+    """An instance replaces a shipped provider without forking, as it can for the other three."""
+    from open_climate_service.features.provider import registry
+
+    _write_plugin_dir(tmp_path, "stored", "anything", module="override")
+    monkeypatch.setattr("open_climate_service.config.get_config", lambda: {"plugins_dir": "./plugins/"})
+    monkeypatch.setattr("open_climate_service.config.get_config_path", lambda: tmp_path / "climate-service.yaml")
+
+    found = registry()["stored"]
+
+    assert found.__module__ == "features.override", f"plugins_dir must win, got {found.__module__}"
