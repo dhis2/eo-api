@@ -167,6 +167,24 @@ def read_sidecar(collection_id: str) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _property_names(path: Path) -> list[str]:
+    """The collection's top-level columns, and the covering bbox is not one of them.
+
+    A covering bbox is a struct column, so Parquet's leaf view reports it as xmin/ymin/xmax/ymax.
+    Those are storage detail, not attributes anyone can filter or export on, and listing them at
+    `GET /features` invites a client to ask for a property that is not really there.
+    """
+    import pyarrow.parquet as pq
+
+    try:
+        names = list(pq.read_schema(path).names)
+    except Exception:  # noqa: BLE001 — the caller already reports an unreadable file
+        return []
+    covering = (_geo_metadata(pq.read_metadata(path)).get("covering") or {}).get("bbox") or {}
+    hidden = {ref[0] for ref in covering.values() if isinstance(ref, list) and ref}
+    return [name for name in names if name not in hidden]
+
+
 def _geo_metadata(meta: Any) -> dict[str, Any]:
     """The GeoParquet ``geo`` metadata for the primary geometry column, or an empty dict.
 
@@ -234,7 +252,10 @@ def describe(collection_id: str) -> dict[str, Any] | None:
     return {
         "id": collection_id,
         "feature_count": int(meta.num_rows),
-        "properties": [name for name in meta.schema.names if name != "geometry"],
+        # Arrow's top-level field names, not Parquet's leaf paths: a covering bbox is a struct
+        # column, so the leaf view reports xmin/ymin/xmax/ymax as four separate properties on every
+        # collection that has one — which is every collection a provider writes.
+        "properties": [name for name in _property_names(path) if name != "geometry"],
         "geometry_types": types,
         "crs": crs_label,
         "bbox": bounds,
@@ -276,6 +297,54 @@ and hopeless for a collection of building footprints, which a single unqualified
 otherwise pull into memory. The limit is generous for any administrative hierarchy and small
 enough to stop that; a windowed read via ``bbox`` is not subject to it beyond its own result size.
 """
+
+
+def _file_crs(path: Path) -> Any:
+    """The file's CRS from its GeoParquet footer, or None when it declares lon/lat.
+
+    Read from the footer rather than by opening the data: this is needed *before* the read, to know
+    which coordinate system a window has to be expressed in.
+    """
+    import pyarrow.parquet as pq
+    from pyproj import CRS
+
+    try:
+        raw = _geo_metadata(pq.read_metadata(path)).get("crs")
+    except Exception:  # noqa: BLE001 — an unreadable footer just means "assume lon/lat"
+        return None
+    if raw is None:  # per the GeoParquet spec, null means OGC:CRS84
+        return None
+    try:
+        return CRS.from_json_dict(raw) if isinstance(raw, dict) else CRS.from_user_input(raw)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _bbox_in_file_crs(
+    bbox: tuple[float, float, float, float] | list[float], path: Path, source: str
+) -> tuple[float, float, float, float]:
+    """Express a lon/lat window in the file's own coordinate system.
+
+    The window is always given in lon/lat, but the filter runs against stored coordinates — and the
+    reprojection to EPSG:4326 happens *after* the read. So a lon/lat window applied unchanged to a
+    projected collection selects a region in metres near the origin and silently returns nothing.
+    Collections above :data:`MAX_FEATURES` require a bbox, which makes this their only call path.
+
+    ``transform_bounds`` densifies the edges rather than mapping four corners, so a projection that
+    curves the boundary still gets a window that contains the requested region.
+    """
+    crs = _file_crs(path)
+    if crs is None or _is_lonlat(crs):
+        return (float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+
+    from pyproj import Transformer
+
+    transformer = Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    west, south, east, north = transformer.transform_bounds(
+        float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])
+    )
+    logger.debug("Transformed lon/lat window to %s for %s", _crs_label(crs), source)
+    return (west, south, east, north)
 
 
 def _supports_bbox_filter(path: Path) -> bool:
@@ -393,6 +462,9 @@ def read_features(
         if id_property:
             wanted.add(id_property)
         columns = sorted(wanted)
+
+    if bbox is not None:
+        bbox = _bbox_in_file_crs(bbox, path, source)
 
     if bbox is None:
         frame = gpd.read_parquet(path, columns=columns)

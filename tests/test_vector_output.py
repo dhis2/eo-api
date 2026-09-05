@@ -146,9 +146,12 @@ def test_csv_output_does_not_leak_the_wkt_carrier_column(tmp_path: Path) -> None
     either becomes a bogus value column or makes the export refuse the cube.
     """
     header = _write(_result(), tmp_path, "CSV").read_text(encoding="utf-8").splitlines()[0]
-    assert GEOMETRY_WKT_COORD not in header
-    assert "geometry" in header  # the labels are still there -- they are the location column
-    assert "t2m" in header
+    columns = header.split(",")
+    assert GEOMETRY_WKT_COORD not in columns
+    # Exact, not a substring: "geometry" in header also matches "geometry_id", so the looser
+    # assertion passed while the location column was silently renamed.
+    assert "geometry" in columns, f"the labels are the location column; got {columns}"
+    assert "t2m" in columns
 
 
 def test_dhis2_export_still_finds_its_single_value_column() -> None:
