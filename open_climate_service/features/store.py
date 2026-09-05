@@ -30,6 +30,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -93,10 +95,40 @@ def is_fresh(declaration: FeatureTemplate) -> bool:
 
 
 def target_path(feature_id: str) -> Path:
-    """Where a collection's GeoParquet lives. Handed to a provider that writes its own file."""
+    """Where a collection's GeoParquet lives."""
     root = shared_features.features_dir()
     root.mkdir(parents=True, exist_ok=True)
     return root / f"{feature_id}{shared_features.FEATURE_SUFFIX}"
+
+
+def staging_path(feature_id: str) -> Path:
+    """Where a refresh is written before it replaces the live entry.
+
+    Writing straight to the live path lets a reader open a half-written file: a scheduled refresh
+    racing a `/result` produces "Parquet magic bytes not found in footer", which is both a failed
+    job and an unintelligible reason. Staging then replacing means a reader sees the old file or the
+    new one and never a partial one.
+
+    Beside the target so the replace is a same-filesystem rename, and without the `.parquet` suffix
+    so the directory scan cannot mistake a leftover for a collection.
+
+    Unique per call, not per collection: two refreshes of one set otherwise share a staging file and
+    each moves the other's out from under it, trading a torn read for a FileNotFoundError. With a
+    path each, both complete and the later one wins -- which is the same outcome as re-syncing a
+    dataset twice.
+    """
+    root = shared_features.features_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    handle, name = tempfile.mkstemp(prefix=f"{feature_id}.", suffix=".staging", dir=root)
+    os.close(handle)
+    return Path(name)
+
+
+def _commit(staged: Path, feature_id: str) -> Path:
+    """Move a staged file into place atomically, and return where it landed."""
+    final = target_path(feature_id)
+    os.replace(staged, final)
+    return final
 
 
 _MISSING = object()
@@ -144,20 +176,30 @@ def _write_sidecar(
     sidecar = shared_features.sidecar_path(declaration.id)
     if sidecar is None:
         return
-    sidecar.write_text(
-        json.dumps(
-            {
-                "id_property": id_property,
-                "provider": declaration.provider,
-                "params_fingerprint": params_fingerprint(declaration),
-                "version": version,
-                "fetched_at": fetched.isoformat(),
-                "feature_count": count,
-            },
-            indent=2,
-            default=str,
-        )
+    payload = json.dumps(
+        {
+            "id_property": id_property,
+            "provider": declaration.provider,
+            "params_fingerprint": params_fingerprint(declaration),
+            "version": version,
+            "fetched_at": fetched.isoformat(),
+            "feature_count": count,
+        },
+        indent=2,
+        default=str,
     )
+    # Atomic, for the same reason the parquet is. A torn sidecar is worse than a torn collection:
+    # it parses as absent, so `id_property` is lost and the collection comes back with the wrong
+    # ids -- silently, where a torn parquet at least fails loudly.
+    handle, name = tempfile.mkstemp(prefix=f"{declaration.id}.", suffix=".sidecar", dir=sidecar.parent)
+    os.close(handle)
+    staged = Path(name)
+    try:
+        staged.write_text(payload)
+        os.replace(staged, sidecar)
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
 
 
 def _validate_id_column(path: Path, id_property: str, declaration: FeatureTemplate) -> int:
@@ -199,8 +241,14 @@ def record_written_file(declaration: FeatureTemplate, path: Path, *, version: st
     """
     import pyarrow.parquet as pq
 
-    if not path.is_file():
-        raise ValueError(f"Feature provider {declaration.provider!r} reported writing {path}, which does not exist")
+    # Existence is not enough: the staging path is created empty before the provider is handed it,
+    # so a provider that returns without writing leaves a zero-byte file rather than none.
+    if not path.is_file() or path.stat().st_size == 0:
+        raise ValueError(
+            f"Feature provider {declaration.provider!r} reported writing {path}, which is missing or empty"
+        )
+
+    staged = path != target_path(declaration.id)
 
     # Ownership is *not* rechecked here. The file is already written, so at this point the store
     # holds the provider's own output — asking whether it may overwrite what is there would compare
@@ -220,6 +268,12 @@ def record_written_file(declaration: FeatureTemplate, path: Path, *, version: st
         )
 
     count = _validate_id_column(path, id_property, declaration)
+
+    # Only once the file is known good does it become the live entry: a provider that fails
+    # part-way, or writes something that breaks the identity contract, leaves the previous
+    # collection untouched rather than a broken one in its place.
+    if staged:
+        _commit(path, declaration.id)
 
     now = datetime.now(UTC)
     recorded = version or f"{params_fingerprint(declaration)}-{now.strftime('%Y%m%dT%H%M%S%fZ')}"
@@ -264,7 +318,13 @@ def write(declaration: FeatureTemplate, collection: dict[str, Any], *, version: 
     recorded = version or f"{params_fingerprint(declaration)}-{now.strftime('%Y%m%dT%H%M%S%fZ')}"
 
     # A covering bbox costs almost nothing to write and is what makes a windowed read cheap later.
-    frame.to_parquet(target_path(declaration.id), write_covering_bbox=True)
+    staged = staging_path(declaration.id)
+    try:
+        frame.to_parquet(staged, write_covering_bbox=True)
+        _commit(staged, declaration.id)
+    except BaseException:
+        staged.unlink(missing_ok=True)
+        raise
 
     _write_sidecar(declaration, id_property=ID_COLUMN, version=recorded, count=len(features), fetched=now)
     logger.info(
