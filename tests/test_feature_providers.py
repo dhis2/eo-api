@@ -427,3 +427,41 @@ def test_a_template_with_no_provider_describes_a_curated_file(instance: Path, mo
 
     assert resolver.ensure_current("districts") == resolver.CURATED_VERSION
     assert len(load_features("districts")["features"]) == 2
+
+
+# --- read-only instances -------------------------------------------------------------------------
+
+
+def test_a_read_only_instance_does_not_fetch_or_write(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`POST /result` is allowed on a read-only instance, and a graph may contain `load_features`.
+
+    Resolving one must not reach upstream or touch the store: that would be a write, and an outbound
+    request, driven by a route whose whole point is that it changes nothing.
+    """
+    calls: list[Any] = []
+    _declare(monkeypatch, {"id": "zones", "provider": "remote", "ttl_seconds": 0})
+    _register(monkeypatch, "remote", lambda **_: calls.append(1) or _collection(["A", "B"]))
+    monkeypatch.setattr("open_climate_service.config.is_read_only", lambda: True)
+
+    with pytest.raises(ValueError, match="read-only"):
+        resolver.ensure_current("zones")
+
+    assert calls == [], "the provider must not be called"
+    assert list((instance / "features").iterdir()) == [], "nothing may be written"
+
+
+def test_a_read_only_instance_serves_a_stale_entry_rather_than_refusing(
+    instance: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stale boundaries are far better than a failed job on an instance that cannot refresh them."""
+    calls: list[Any] = []
+    _declare(monkeypatch, {"id": "zones", "provider": "remote", "ttl_seconds": 0})
+    _register(monkeypatch, "remote", lambda **_: calls.append(1) or _collection(["A", "B"]))
+    first = resolver.ensure_current("zones")  # writable: populates the store
+
+    monkeypatch.setattr("open_climate_service.config.is_read_only", lambda: True)
+    served = resolver.ensure_current("zones")
+
+    assert served == first
+    assert len(calls) == 1, "the stale entry is served, not refetched"
+    assert [f["id"] for f in load_features("zones")["features"]] == ["A", "B"]
