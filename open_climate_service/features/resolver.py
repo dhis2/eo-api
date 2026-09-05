@@ -18,6 +18,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from open_climate_service import config as api_config
 from open_climate_service.features import store
 from open_climate_service.features.config import FeatureTemplate, get_feature_templates
 from open_climate_service.features.provider import resolve_provider, stores_result
@@ -92,6 +93,24 @@ def ensure_current(feature_id: str, *, refresh: bool = False) -> str:
         recorded = store.metadata(feature_id).get("version")
         if isinstance(recorded, str):
             return recorded
+    if api_config.is_read_only():
+        # A refresh fetches from upstream and rewrites the store. `POST /result` is one of the few
+        # write-ish routes a read-only instance allows, so a graph containing `load_features` would
+        # otherwise make it fetch and write -- from a request that is supposed to change nothing.
+        # Serve what is there instead, and say that it may be stale.
+        recorded = store.metadata(feature_id).get("version")
+        if isinstance(recorded, str):
+            logger.warning(
+                "Feature set '%s' is past its TTL but this instance is read-only; serving version %s",
+                feature_id,
+                recorded,
+            )
+            return recorded
+        raise ValueError(
+            f"Feature set {feature_id!r} is not in the store and this instance is read-only, so it "
+            "cannot be fetched. Ingest it on a writable instance, or ship the collection with the "
+            "instance."
+        )
     produced, version = _call(declared)
     if isinstance(produced, Path):
         return store.record_written_file(declared, produced, version=version)
