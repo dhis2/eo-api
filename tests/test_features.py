@@ -16,7 +16,6 @@ from open_climate_service.openeo import jobs
 from open_climate_service.plugins.processes.aggregate_spatial import aggregate_spatial
 from open_climate_service.plugins.processes.load_vector_cube import load_vector_cube
 from open_climate_service.shared import features
-from open_climate_service.shared.features import GEOMETRY_WKT_COORD
 
 
 @pytest.fixture
@@ -311,22 +310,18 @@ def test_route_404s_for_an_unknown_or_unsafe_id(client: TestClient, features_dir
     assert client.get("/features/..%2F..%2Fetc%2Fpasswd").status_code == 404
 
 
-# --- geometry survives the aggregation and reaches vector output -------------------------------
+# --- a stored collection reaches vector output -------------------------------------------------
+#
+# The format rules themselves -- which extensions each format resolves to, that a non-vector format
+# is not diverted, that the WKT carrier never leaks into CSV -- belong to the change that introduced
+# them and are covered in `tests/test_vector_output.py`. Repeating them here bought nothing and cost
+# something: the copies drifted, and a weakened assertion was fixed in one file and not the other.
+#
+# What only this file can test is the collection half: geometry that came from the *store* survives
+# aggregation and reaches the output carrying the ids `id_property` selected.
 
 
-def test_aggregation_keeps_the_shapes_alongside_the_labels(features_dir: Path) -> None:
-    _write_districts(features_dir)
-    result = aggregate_spatial(_grid(), load_vector_cube("districts", id_property="ou_code"), _mean)
-
-    # The labels stay the feature ids -- the exports key their location column on them.
-    assert list(result.geometry.values) == ["MW.N", "MW.S"]
-    # ...and the shapes ride alongside as WKT.
-    wkt = list(result[GEOMETRY_WKT_COORD].values)
-    assert all(text.startswith("POLYGON") for text in wkt)
-    assert result.t2m.values.tolist() == [[25.0, 25.0], [5.0, 5.0]]  # north (30+20)/2, south (10+0)/2
-
-
-def test_parquet_output_is_geoparquet_with_real_geometry(features_dir: Path, tmp_path: Path) -> None:
+def test_a_stored_collection_reaches_vector_output_with_its_ids(features_dir: Path, tmp_path: Path) -> None:
     """The CLIM-836 bug: PARQUET on a vector cube silently wrote a Zarr store instead.
 
     The geometry labels are feature ids, so parsing them as WKT failed; the failure was swallowed
@@ -335,55 +330,17 @@ def test_parquet_output_is_geoparquet_with_real_geometry(features_dir: Path, tmp
     _write_districts(features_dir)
     result = aggregate_spatial(_grid(), load_vector_cube("districts", id_property="ou_code"), _mean)
 
+    # The labels are the ids `id_property` chose -- the exports key their location column on them.
+    assert list(result.geometry.values) == ["MW.N", "MW.S"]
+    assert result.t2m.values.tolist() == [[25.0, 25.0], [5.0, 5.0]]  # north (30+20)/2, south (10+0)/2
+
     written = _write(result, tmp_path, "PARQUET")
     assert written.suffix == ".parquet"
-    assert written.is_file()
-
     frame = gpd.read_parquet(written)
     assert len(frame) == 4  # two districts x two time steps
     assert sorted(frame.geom_type.unique()) == ["Polygon"]
     assert sorted(set(frame["geometry_id"])) == ["MW.N", "MW.S"]
     assert [float(v) for v in frame.total_bounds] == [0.0, 0.0, 4.0, 4.0]
-
-
-def test_geojson_output_carries_the_geometry_too(features_dir: Path, tmp_path: Path) -> None:
-    _write_districts(features_dir)
-    result = aggregate_spatial(_grid(), load_vector_cube("districts", id_property="ou_code"), _mean)
-
-    written = _write(result, tmp_path, "GEOJSON")
-    assert written.suffix == ".geojson"
-    frame = gpd.read_file(written)
-    assert sorted(frame.geom_type.unique()) == ["Polygon"]
-
-
-@pytest.mark.parametrize(("fmt", "suffix"), [("ZARR", ".zarr"), ("NETCDF", ".nc"), ("CSV", ".csv")])
-def test_non_vector_formats_are_still_honoured_for_a_vector_cube(
-    features_dir: Path, tmp_path: Path, fmt: str, suffix: str
-) -> None:
-    """A vector cube asked for a non-vector format must not be diverted to vector output."""
-    _write_districts(features_dir)
-    result = aggregate_spatial(_grid(), load_vector_cube("districts", id_property="ou_code"), _mean)
-
-    results_dir = tmp_path / fmt
-    results_dir.mkdir()
-    written = _write(result, results_dir, fmt)
-    assert written.suffix == suffix
-
-
-def test_csv_output_does_not_leak_the_wkt_carrier_column(features_dir: Path, tmp_path: Path) -> None:
-    """CSV keeps the columns it always had: the WKT coordinate is an internal carrier.
-
-    The tabular exports identify their value column by elimination, so a stray coordinate either
-    becomes a bogus value column or makes the export refuse the cube.
-    """
-    _write_districts(features_dir)
-    result = aggregate_spatial(_grid(), load_vector_cube("districts", id_property="ou_code"), _mean)
-
-    written = _write(result, tmp_path, "CSV")
-    header = written.read_text(encoding="utf-8").splitlines()[0]
-    assert GEOMETRY_WKT_COORD not in header
-    assert "geometry" in header  # the labels are still there -- they are the location column
-    assert "t2m" in header
 
 
 def test_a_client_supplied_feature_collection_still_works(tmp_path: Path) -> None:
