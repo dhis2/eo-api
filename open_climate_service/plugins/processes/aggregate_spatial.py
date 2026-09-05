@@ -195,6 +195,11 @@ def aggregate_spatial(
     # null-terminated bytes and comes back truncated, and `encode_cf` restructures the cube into
     # several CF geometry variables — right for an archival file, wrong for a carrier that only
     # has to survive as far as the vector writer.
+    # Cost worth knowing: numpy stores this as fixed-width unicode (`<U{longest}`) at 4 bytes per
+    # character, sized by the *longest* WKT, and it is attached on every aggregation regardless of
+    # the output format. For simple boundaries that is nothing; for detailed ones it is roughly
+    # 4 x longest-WKT x n_features. Hex-encoded WKB in a bytes array would be ~4x smaller and is
+    # still null-free, so still Zarr-safe -- worth doing if a real boundary set makes this hurt.
     combined = combined.assign_coords({GEOMETRY_WKT_COORD: (geom_dim, [geom.wkt for geom in geom_shapes])})
     return combined
 

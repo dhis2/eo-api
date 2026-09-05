@@ -1424,6 +1424,7 @@ def _vector_frame(ds: Any) -> Any:
     the shapes.
     """
     import geopandas as gpd
+    import pandas as pd
     from shapely import wkt as shapely_wkt
 
     frame = ds.to_dataframe().reset_index()
@@ -1434,7 +1435,13 @@ def _vector_frame(ds: Any) -> Any:
         return shapely_wkt.loads(str(value))
 
     source = GEOMETRY_WKT_COORD if GEOMETRY_WKT_COORD in frame.columns else "geometry"
-    geoms = frame[source].apply(_as_geometry)
+    # A flattened vector cube has one row per (feature, timestep), so the same handful of polygons
+    # repeat once per step: a daily year over 500 districts is 182,500 rows carrying 500 distinct
+    # shapes. Parse each distinct value once and fan it back out, rather than paying WKT parsing per
+    # row — for large boundaries that is the dominant cost of writing the file.
+    codes, uniques = pd.factorize(frame[source])
+    parsed = [_as_geometry(value) for value in uniques]
+    geoms = [parsed[code] for code in codes]
     attributes = frame.drop(columns=[c for c in (GEOMETRY_WKT_COORD, "geometry") if c in frame.columns])
     # The label survives as a plain column: it is the feature id every consumer joins on.
     if "geometry" in frame.columns and source != "geometry":
