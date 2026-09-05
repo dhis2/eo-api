@@ -201,6 +201,8 @@ The `format` argument of `save_result` controls what the server writes. `GET /fi
 
 For aggregating a dataset to DHIS2 org units and producing `DHIS2JSON` or `CHAPCSV` directly, see the built-in [org-unit aggregation workflows](workflows.md#built-in-workflows).
 
+An `aggregate_spatial` result keeps the geometry it was aggregated over, so `GEOJSON` and `PARQUET` output carries the real shapes — mappable in QGIS or geopandas without joining back to a boundary file — alongside a `geometry_id` column holding each feature's id. The tabular and raster formats drop the shapes and keep the id, since that is the column the DHIS2 and CHAP exports use for location. Asking for a vector format for a cube with no usable geometry is an error rather than a silent fallback to another format.
+
 ```bash
 # Monthly precipitation totals as NetCDF
 curl -X POST http://127.0.0.1:9000/result \
