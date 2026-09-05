@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -126,6 +128,43 @@ def collection_path(collection_id: str) -> Path | None:
     except ValueError:
         return None
     return candidate if candidate.is_file() else None
+
+
+SIDECAR_SUFFIX = ".json"
+
+
+def sidecar_path(collection_id: str) -> Path | None:
+    """The metadata file beside a collection, or None when the id is not a valid one.
+
+    Existence is not checked: a curated file an admin dropped in has no sidecar, which is how the
+    store distinguishes it from one a provider maintains.
+    """
+    if not _is_valid_id(collection_id):
+        return None
+    root = features_dir()
+    candidate = (root / f"{collection_id}{SIDECAR_SUFFIX}").resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
+def read_sidecar(collection_id: str) -> dict[str, Any]:
+    """A collection's metadata, or an empty dict when it has none.
+
+    The sidecar makes the store self-describing. It records which column carries the feature id, so
+    a caller need not know — and, for a collection a provider maintains, where it came from and when.
+    """
+    path = sidecar_path(collection_id)
+    if path is None or not path.is_file():
+        return {}
+    try:
+        loaded = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Feature collection '%s' has an unreadable sidecar; ignoring it", collection_id)
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
 
 
 def _property_names(path: Path) -> list[str]:
@@ -323,8 +362,24 @@ def _supports_bbox_filter(path: Path) -> bool:
     return bool((_geo_metadata(meta).get("covering") or {}).get("bbox"))
 
 
-def _apply_feature_ids(payload: dict[str, Any], frame: Any, id_property: str, source: str) -> None:
-    """Set each feature's ``id`` from ``id_property``, rejecting ids that cannot identify a feature.
+def _is_null(value: Any) -> bool:
+    """Whether a value cannot serve as an id: None, a float NaN, or a pandas NA/NaT."""
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    import pandas as pd
+
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        # pd.isna returns an array for array-likes, whose truth value is ambiguous. An id that is
+        # itself a collection is not null — it is a different problem, and str() will surface it.
+        return False
+
+
+def validate_feature_ids(values: Iterable[Any], *, source: str, field: str) -> list[str]:
+    """Return the stringified ids, rejecting any that cannot identify exactly one feature.
 
     The id becomes the label on the geometry dimension, which the DHIS2 and CHAP exports use as
     their location column — so an id that does not identify one feature produces wrong data rather
@@ -332,30 +387,42 @@ def _apply_feature_ids(payload: dict[str, Any], frame: Any, id_property: str, so
     two features onto one ``orgUnit``, where DHIS2 keeps whichever ``dataValue`` arrives last and
     silently discards the other. Both fail loudly here instead.
 
-    Uniqueness is checked on the stringified ids rather than the raw column, because those are the
-    values that reach the export.
-    """
-    ids = frame[id_property]
+    This is the single implementation of the identity contract (CLIM-926): a stored collection read
+    through :func:`read_features` and a provider's freshly-resolved output both come through here,
+    so the two cannot drift into disagreeing about what a usable id is.
 
-    null_count = int(ids.isna().sum())
+    Uniqueness is checked on the stringified ids rather than the raw values, because those are what
+    reach the export.
+    """
+    raw = list(values)
+
+    null_count = sum(1 for value in raw if _is_null(value))
     if null_count:
         raise ValueError(
-            f"{source} has {null_count:,} feature(s) with no {id_property!r}. Every feature needs "
+            f"{source} has {null_count:,} feature(s) with no {field!r}. Every feature needs "
             "an id: it becomes the location label an export writes against."
         )
 
-    labels = ids.astype(str)
-    duplicated = labels[labels.duplicated(keep=False)]
-    if len(duplicated):
-        sample = sorted(set(duplicated))
-        shown = ", ".join(repr(value) for value in sample[:5])
-        more = f" (and {len(sample) - 5:,} more)" if len(sample) > 5 else ""
+    labels = [str(value) for value in raw]
+    seen: dict[str, int] = {}
+    for label in labels:
+        seen[label] = seen.get(label, 0) + 1
+    repeated = sorted(label for label, count in seen.items() if count > 1)
+    if repeated:
+        total = sum(seen[label] for label in repeated)
+        shown = ", ".join(repr(label) for label in repeated[:5])
+        more = f" (and {len(repeated) - 5:,} more)" if len(repeated) > 5 else ""
         raise ValueError(
-            f"{source} has {len(duplicated):,} feature(s) sharing a {id_property!r}: {shown}{more}. "
+            f"{source} has {total:,} feature(s) sharing a {field!r}: {shown}{more}. "
             "Feature ids must be unique — two features with one id are aggregated under one label "
             "and exported as one location."
         )
+    return labels
 
+
+def _apply_feature_ids(payload: dict[str, Any], frame: Any, id_property: str, source: str) -> None:
+    """Set each feature's ``id`` from ``id_property``, after checking the ids can identify features."""
+    labels = validate_feature_ids(frame[id_property], source=source, field=id_property)
     for feature, label in zip(payload.get("features", []), labels, strict=True):
         feature["id"] = label
 
@@ -449,15 +516,18 @@ def load_feature_collection(
 ) -> dict[str, Any]:
     """Read a named collection as a GeoJSON FeatureCollection.
 
-    Resolves the id against the vector directory and enforces the whole-file read limit, then
-    hands the file to :func:`read_features`. The split is what lets the config layer (CLIM-926)
-    read a cached FeatureCollection through the same code without the cache becoming addressable
-    by id here.
+    Resolves the id against the feature directory and enforces the whole-file read limit, then
+    hands the file to :func:`read_features`.
 
     ``id_property`` chooses which column becomes each feature's ``id``. That matters beyond
     cosmetics: the feature id becomes the label on the geometry dimension, which is what the
     DHIS2 and CHAP exports use as their location column — so pointing it at an org-unit code
     column is what makes a named collection usable for a DHIS2 push.
+
+    When it is not given, the collection's sidecar is asked. That is what lets a provider-maintained
+    collection be read correctly by a caller that knows only its id: the provider records the id
+    column when it writes, so `load_vector_cube("districts")` and `load_features("districts")` return
+    the same ids without either having to be told.
 
     Collections above :data:`MAX_FEATURES` require a ``bbox``.
     """
@@ -473,6 +543,9 @@ def load_feature_collection(
             f"{MAX_FEATURES:,} that can be loaded as a FeatureCollection. Pass a bbox to read a "
             "window of it."
         )
+
+    if id_property is None:
+        id_property = read_sidecar(collection_id).get("id_property")
 
     return read_features(
         path,

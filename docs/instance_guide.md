@@ -182,7 +182,7 @@ The `/extent` endpoint should return your configured bounding box.
 
 ## Adding plugins
 
-Plugins extend the instance with custom datasets, processes, and workflows. They live in `plugins_dir` and are loaded automatically. The `plugins_dir` is added to `sys.path`, so Python modules placed directly inside it are importable.
+Plugins extend the instance with custom datasets, processes, workflows, and feature providers. They live in `plugins_dir` and are loaded automatically. The `plugins_dir` is added to `sys.path`, so Python modules placed directly inside it are importable.
 
 ```
 plugins/
@@ -191,11 +191,62 @@ plugins/
 │   └── enacts.py               # streaming plugin class
 ├── processes/
 │   └── spatial_stats.py        # @process-decorated functions
-└── workflows/
-    └── aggregate_for_dhis2.json
+├── workflows/
+│   └── aggregate_for_dhis2.json
+└── features/
+    └── national_registry.py    # @feature_provider-decorated functions
 ```
 
-See [Extensibility](extensibility.md) for the three plugin types, and [Adding custom datasets](adding_custom_datasets.md) for the dataset template field reference and streaming plugin contract.
+See [Extensibility](extensibility.md) for the plugin types, and [Adding custom datasets](adding_custom_datasets.md) for the dataset template field reference and streaming plugin contract.
+
+---
+
+## Declared feature sets
+
+Zonal aggregation needs geometry. Passing a GeoJSON `FeatureCollection` with every request works for a hand-made call and not for a schedule: a country's hierarchy is megabytes, it would have to be pasted into `climate-service.yaml`, and it goes stale whenever the hierarchy changes.
+
+Instead, describe a feature set in a **template**, exactly as you would a dataset. Templates are `features/*.yaml` in `plugins_dir`, beside the providers that fetch them:
+
+```
+plugins/features/
+├── districts.yaml          # the template
+└── dhis2_hierarchy.py      # the @feature_provider it names
+```
+
+```yaml
+- id: districts
+  name: District boundaries
+  description: Level-2 organisation units, as held by the national DHIS2 instance.
+  license: CC-BY-4.0
+  attribution: Ministry of Health
+  source_url: https://dhis2.example.org
+  provider: dhis2
+  params: { level: 2 }
+  ttl_seconds: 86400        # optional — default: 24 hours
+```
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `id` | Yes | The name workflows and triggers reference. Must be unique |
+| `name` / `description` | No | Shown at `GET /features` |
+| `license` | No | SPDX id or URI. Some sources require this — Overture buildings are ODbL, and share-alike applies to anything derived and served |
+| `attribution` | No | Credit line to surface wherever the layer is shown |
+| `source` / `source_url` | No | Where it came from |
+| `keywords` | No | For catalogue search |
+| `provider` | No | A registered feature provider. Omit for a file you place in the store by hand |
+| `params` | No | Passed to the provider as keyword arguments |
+| `ttl_seconds` | No | How long a provider-backed set is reused before refetching. Defaults to 24 hours |
+| `id_property` | No | Property whose value becomes each feature's id. Required when the provider does not already set correct ids |
+
+A template with no `provider` carries metadata only: nothing refreshes the file, and it exists so a collection an admin placed can still declare its licence.
+
+There is **one** store, `<data_dir>/features/`. A provider-backed set updates its entry there rather than filling a separate cache — the same shape as a dataset plugin writing into `downloads/`. Each provider-maintained entry gets a JSON sidecar recording the runtime facts: provider, version and fetch time. A file an admin drops in has no sidecar, and a provider refuses to overwrite it.
+
+The `stored` provider reads that same store, so an instance with no external system configured can still declare feature sets and schedule aggregation against boundaries it ships itself.
+
+Past versions are not kept. Recording *which* boundaries a run used needs a version string, not an archive — and re-running a scheduled push is usually a repair that wants current boundaries anyway.
+
+Feature ids must identify exactly one feature. A null or duplicate id fails loudly, because the id becomes the location label an export writes against — two features under one id would be pushed as one organisation unit, silently discarding a value.
 
 ---
 

@@ -33,6 +33,8 @@ data_dir: ./data   # required — directory for downloaded NetCDF files and Zarr
 #       publish: true
 #       max_attempts: 3
 
+# Named geometry sets live in plugins/features/*.yaml templates, not here -- see the instance guide.
+
 # Event-driven workflows are separate from cron schedules. Every trigger whose `on_update_of`
 # matches a successful dataset update creates an independent openEO workflow job.
 # automation:
