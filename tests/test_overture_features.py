@@ -65,8 +65,12 @@ def test_a_feature_straddling_the_edge_is_kept(tmp_path: Path, source: Path) -> 
     assert list(gpd.read_parquet(out)["id"]) == ["middle-1"]
 
 
-def test_the_extract_declares_a_covering_bbox(tmp_path: Path, source: Path) -> None:
-    """Without this a windowed read scans the whole file, which is the cost this exists to avoid."""
+def test_the_extract_inherits_the_sources_covering_bbox(tmp_path: Path, source: Path) -> None:
+    """Without a covering, a windowed read of the extract scans the whole file.
+
+    Nothing recomputes or re-declares it: carrying the source's `geo` metadata through means the
+    extract is valid GeoParquet with a working covering for free.
+    """
     import json
 
     import pyarrow.parquet as pq
@@ -76,7 +80,7 @@ def test_the_extract_declares_a_covering_bbox(tmp_path: Path, source: Path) -> N
 
     geo = json.loads(pq.read_metadata(out).metadata[b"geo"])
     covering = (geo["columns"][geo["primary_column"]].get("covering") or {}).get("bbox")
-    assert covering, "DuckDB writes no covering entry; the ingestion must add one"
+    assert covering, "the extract must keep a usable covering"
     assert len(gpd.read_parquet(out, bbox=(4, 4, 7, 7))) == 1
 
 
@@ -182,7 +186,7 @@ def test_duplicate_ids_in_an_extract_are_refused(
     """The identity contract applies to a file-writing provider too, read from the id column alone."""
     broken = tmp_path / "broken.parquet"
     gpd.GeoDataFrame({"id": ["same", "same"]}, geometry=[_building(0, 0), _building(5, 5)], crs="EPSG:4326").to_parquet(
-        broken
+        broken, write_covering_bbox=True
     )
     _declare(
         monkeypatch,
@@ -216,11 +220,11 @@ def test_an_extract_will_not_overwrite_a_curated_collection(
         resolver.ensure_current("buildings")
 
 
-def test_the_sources_own_bbox_is_not_carried_through(tmp_path: Path, source: Path) -> None:
-    """Every real Overture partition already has a bbox struct.
+def test_the_sources_own_bbox_is_what_is_carried(tmp_path: Path, source: Path) -> None:
+    """Exactly one bbox struct, the source's own -- nothing recomputes it.
 
-    `SELECT *` plus a computed `AS bbox` would emit both, so the extract would carry two identical
-    structs and the covering reference would name an ambiguous column.
+    Recomputing would mean decoding every geometry, which is the cost this path exists to avoid,
+    and would leave two identical structs with an ambiguous covering reference.
     """
     import pyarrow.parquet as pq
 
@@ -232,29 +236,10 @@ def test_the_sources_own_bbox_is_not_carried_through(tmp_path: Path, source: Pat
     assert len(gpd.read_parquet(out, bbox=(4, 4, 7, 7))) == 1, "and it is still the usable covering"
 
 
-def test_a_failed_covering_rewrite_leaves_nothing_in_the_store(
-    instance: Path, monkeypatch: pytest.MonkeyPatch, source: Path
-) -> None:
-    """A temp inside the store would survive as a stray collection the directory scan picks up."""
-    import pyarrow.parquet as pq
+def test_a_source_without_a_bbox_column_is_refused(tmp_path: Path) -> None:
+    """The window would otherwise have to touch every geometry -- the cost this exists to avoid."""
+    plain = tmp_path / "plain.parquet"
+    gpd.GeoDataFrame({"id": ["a"]}, geometry=[_building(0, 0)], crs="EPSG:4326").to_parquet(plain)
 
-    from open_climate_service.plugins.features import overture as overture_module
-
-    real = pq.ParquetWriter
-
-    class Exploding(real):  # type: ignore[misc,valid-type]
-        def write_batch(self, *args: Any, **kwargs: Any) -> None:
-            raise OSError("disk full")
-
-    monkeypatch.setattr(pq, "ParquetWriter", Exploding)
-
-    with pytest.raises(OSError, match="disk full"):
-        overture_module.overture(
-            path=instance / "features" / "buildings.parquet",
-            release="2026-08",
-            bbox=[-1.0, -1.0, 20.0, 20.0],
-            source=str(source),
-        )
-
-    leftovers = sorted(p.name for p in (instance / "features").glob("*covering*"))
-    assert leftovers == [], f"the store must not hold rewrite temporaries; found {leftovers}"
+    with pytest.raises(ValueError, match="has no 'bbox' column"):
+        overture(path=tmp_path / "out.parquet", release="2026-08", bbox=[-1.0, -1.0, 20.0, 20.0], source=str(plain))

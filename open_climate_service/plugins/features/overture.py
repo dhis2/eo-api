@@ -1,21 +1,29 @@
 """Overture Maps as a feature provider: a bbox extract, straight to GeoParquet (CLIM-893).
 
-Overture publishes its themes as GeoParquet on S3, partitioned and with per-row bbox columns, so a
-country-sized extract is a predicate pushdown rather than a download-and-clip. DuckDB does the whole
-thing in one statement: read the remote partitions, filter by bbox, write a local GeoParquet. The
-geometry is never in Python memory, which is what makes buildings tractable at all — a country's
-footprints are millions of features, and materialising those as GeoJSON dicts costs orders of
-magnitude more than the data itself.
+Overture publishes its themes as GeoParquet on S3, partitioned and carrying a per-row ``bbox``
+struct, so a country-sized extract is a predicate pushdown rather than a download-and-clip. The
+extract streams batch by batch from the remote partitions to a local file: the geometry is never
+decoded, and peak memory is one batch rather than the whole country. That is what makes buildings
+tractable at all -- a country's footprints are millions of features, and materialising those as
+GeoJSON dicts costs orders of magnitude more than the data itself.
 
 That is why this returns a **path** rather than a FeatureCollection. The store records it without
-decoding the geometry; only the id column is read back, to check the identity contract.
+decoding the geometry; only the id column is read back, in Arrow, to check the identity contract.
+
+Two things fall out of the source already having a ``bbox`` struct, and both are why this needs no
+geometry engine:
+
+* The window is a filter on plain numeric struct fields, which Arrow pushes down to row-group
+  statistics. No spatial predicate, no geometry decoding.
+* The extract inherits the source's ``geo`` metadata, **covering included**, so a windowed read of
+  the result prunes row groups too. Nothing has to be recomputed or re-declared.
 
 Monthly releases are what make the version meaningful: a release *is* a version, so "is there a
 newer one than we hold" is answerable without comparing data. The release is passed explicitly
 rather than resolved to "latest", so an instance upgrades deliberately and a re-ingest is
 reproducible.
 
-**Licence.** The buildings theme is ODbL, because it incorporates OpenStreetMap — attribution plus
+**Licence.** The buildings theme is ODbL, because it incorporates OpenStreetMap -- attribution plus
 share-alike on a derived database. The template that declares this provider carries `license` and
 `attribution`; serving an extract without surfacing them is a licence breach, not an oversight.
 See CLIM-1010 for where that metadata is published.
@@ -23,10 +31,7 @@ See CLIM-1010 for where that metadata is published.
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -36,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 S3_RELEASE_ROOT = "s3://overturemaps-us-west-2/release"
 DEFAULT_THEME = "buildings"
-DEFAULT_TYPE = "building"
+BBOX_COLUMN = "bbox"
 
 _THEME_TYPES = {
     "buildings": "building",
@@ -53,51 +58,9 @@ def source_url(release: str, theme: str, type_: str) -> str:
     return f"{S3_RELEASE_ROOT}/{release}/theme={theme}/type={type_}/*"
 
 
-def _declare_covering_bbox(path: Path, bbox_column: str = "bbox") -> None:
-    """Mark the written ``bbox`` struct as the geometry's covering, in GeoParquet metadata.
-
-    DuckDB writes valid GeoParquet but no ``covering`` entry, and without one a windowed read has to
-    scan the whole file — precisely the cost this ingestion exists to avoid for a country's
-    buildings. The bbox struct is already written as a column; this only says what it is.
-
-    Done by streaming row groups through a new writer rather than reading the table whole, so peak
-    memory stays at one row group instead of the entire extract.
-    """
-    import tempfile
-
-    import pyarrow.parquet as pq
-
-    with pq.ParquetFile(path) as reader:
-        schema = reader.schema_arrow
-        if bbox_column not in schema.names:
-            return
-
-        raw = (schema.metadata or {}).get(b"geo")
-        if raw is None:
-            logger.warning("Overture extract %s has no GeoParquet metadata; leaving it unmarked", path.name)
-            return
-        geo = json.loads(raw)
-        column = geo["columns"][geo["primary_column"]]
-        column["covering"] = {
-            "bbox": {edge: [bbox_column, edge] for edge in ("xmin", "ymin", "xmax", "ymax")},
-        }
-        metadata = {**(schema.metadata or {}), b"geo": json.dumps(geo).encode()}
-
-        # Written outside the feature store, then moved in. A temp inside it would be a stray
-        # `*.parquet` if this failed part-way -- picked up by the directory scan, warned about on
-        # every listing, and indistinguishable from a real collection.
-        handle, temp_name = tempfile.mkstemp(suffix=".parquet", prefix=f"{path.stem}-covering-")
-        os.close(handle)
-        temp = Path(temp_name)
-        try:
-            with pq.ParquetWriter(temp, schema.with_metadata(metadata)) as writer:
-                for batch in reader.iter_batches():
-                    writer.write_batch(batch)
-        except BaseException:
-            temp.unlink(missing_ok=True)
-            raise
-    # os.replace is atomic within a filesystem; shutil.move handles the temp dir being elsewhere.
-    shutil.move(str(temp), str(path))
+def theme_types() -> dict[str, Any]:
+    """The theme -> type mapping, for callers that want to validate before ingesting."""
+    return dict(_THEME_TYPES)
 
 
 @feature_provider("overture")
@@ -106,17 +69,19 @@ def overture(
     release: str,
     bbox: list[float],
     theme: str = DEFAULT_THEME,
-    type: str | None = None,  # noqa: A002 — Overture's own field name
+    type: str | None = None,  # noqa: A002 -- Overture's own field name
     columns: list[str] | None = None,
     source: str | None = None,
 ) -> tuple[Path, str]:
     """Extract one Overture theme for a bounding box, writing GeoParquet to ``path``.
 
-    ``bbox`` is ``[west, south, east, north]`` in lon/lat — normally the instance extent.
+    ``bbox`` is ``[west, south, east, north]`` in lon/lat -- normally the instance extent.
     ``source`` overrides the S3 location, which is what lets this be tested against a local file.
     Returns the path and the release id, which becomes the collection's version.
     """
-    import duckdb
+    import pyarrow.compute as pc
+    import pyarrow.dataset as pa_dataset
+    import pyarrow.parquet as pq
 
     if len(bbox) != 4:
         raise ValueError(f"Overture bbox must be [west, south, east, north], got {bbox!r}")
@@ -129,54 +94,47 @@ def overture(
         raise ValueError(f"Unknown Overture theme {theme!r}. Known: {', '.join(sorted(_THEME_TYPES))}")
 
     location = source or source_url(release, theme, type_)
-    selected = ", ".join(columns) if columns else "*"
+    dataset = pa_dataset.dataset(location, format="parquet")
 
-    connection = duckdb.connect()
-    connection.execute("INSTALL spatial; LOAD spatial;")
-    if source is None:
-        # Only needed to reach S3; a local source must not require the extension or network.
-        connection.execute("INSTALL httpfs; LOAD httpfs; SET s3_region='us-west-2';")
+    if BBOX_COLUMN not in dataset.schema.names:
+        # Without it the window would have to touch every geometry, which is the cost this whole
+        # path exists to avoid -- so say so rather than silently doing the expensive thing.
+        raise ValueError(
+            f"Overture source {location!r} has no {BBOX_COLUMN!r} column, so a bbox window cannot be "
+            "pushed down. Every Overture release ships one; a hand-made extract may need rewriting "
+            "with write_covering_bbox=True."
+        )
+
+    # Intersects, not contains: a building on the edge of the extent belongs to it. Arrow pushes
+    # this down to row-group statistics, so only overlapping groups are fetched over the network.
+    window = (
+        (pc.field(BBOX_COLUMN, "xmin") < east)
+        & (pc.field(BBOX_COLUMN, "xmax") > west)
+        & (pc.field(BBOX_COLUMN, "ymin") < north)
+        & (pc.field(BBOX_COLUMN, "ymax") > south)
+    )
+
+    projection: list[str] | None = None
+    if columns is not None:
+        # geometry is the point of the file and bbox is what the covering metadata refers to, so
+        # neither can be dropped by a column selection without invalidating the result.
+        projection = list(dict.fromkeys([*columns, "geometry", BBOX_COLUMN]))
+        missing = [name for name in projection if name not in dataset.schema.names]
+        if missing:
+            raise ValueError(f"Overture source {location!r} has no column(s): {', '.join(missing)}")
+
+    scanner = dataset.scanner(columns=projection, filter=window)
+    # Carry the source's `geo` metadata onto the output, so the extract stays valid GeoParquet and
+    # keeps its covering. Projection drops schema metadata, hence re-attaching it explicitly.
+    schema = scanner.projected_schema.with_metadata(dataset.schema.metadata)
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    read = f"read_parquet('{location}', filename=false, hive_partitioning=1)"
+    written = 0
+    with pq.ParquetWriter(path, schema) as writer:
+        for batch in scanner.to_batches():
+            if batch.num_rows:
+                writer.write_batch(batch)
+                written += batch.num_rows
 
-    # Overture ships a per-row `bbox` struct, and filtering on it is what makes this a pushdown
-    # rather than a download: only the row groups whose bbox statistics overlap are fetched. A
-    # source without one is still usable — a hand-made extract, or a future theme that drops it —
-    # but the predicate then has to touch the geometry, so say which path was taken.
-    has_bbox = any(row[0] == "bbox" for row in connection.execute(f"DESCRIBE SELECT * FROM {read}").fetchall())
-    if has_bbox:
-        where = f"bbox.xmin < {east} AND bbox.xmax > {west} AND bbox.ymin < {north} AND bbox.ymax > {south}"
-    else:
-        logger.info("Overture source %s has no bbox column; filtering on geometry instead", location)
-        where = f"ST_Intersects(geometry, ST_MakeEnvelope({west}, {south}, {east}, {north}))"
-
-    # The bbox struct is written alongside the geometry so a *windowed read of the extract* can
-    # prune row groups; `_declare_covering_bbox` then records what it is.
-    #
-    # The source's own bbox is excluded rather than carried through. `SELECT *` plus a computed
-    # `AS bbox` against a source that already has one -- which every real Overture partition does --
-    # emits both, so the extract carries two identical structs and the covering reference names an
-    # ambiguous column.
-    projection = selected if columns else ("* EXCLUDE (bbox)" if has_bbox else "*")
-    connection.execute(
-        f"""
-        COPY (
-            SELECT {projection},
-                   {{'xmin': ST_XMin(geometry), 'ymin': ST_YMin(geometry),
-                     'xmax': ST_XMax(geometry), 'ymax': ST_YMax(geometry)}} AS bbox
-            FROM {read}
-            WHERE {where}
-        ) TO '{path}' (FORMAT PARQUET)
-        """
-    )
-    connection.close()
-
-    _declare_covering_bbox(path)
-    logger.info("Extracted Overture %s (%s) for %s to %s", theme, release, bbox, path.name)
+    logger.info("Extracted %d Overture %s features (%s) for %s to %s", written, theme, release, bbox, path.name)
     return path, release
-
-
-def theme_types() -> dict[str, Any]:
-    """The theme → type mapping, for callers that want to validate before ingesting."""
-    return dict(_THEME_TYPES)
