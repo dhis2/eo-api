@@ -1,4 +1,4 @@
-"""Named vector collections: boundary sets an instance ships, loadable by id (CLIM-836).
+"""Named feature collections: boundary sets an instance ships, loadable by id (CLIM-836).
 
 Zonal statistics needs geometry, and until now the only way to supply it was a GeoJSON
 FeatureCollection in every request. For the boundaries an instance uses over and over —
@@ -6,7 +6,7 @@ administrative regions, districts, catchments — that means a client posting th
 megabytes on each call, and every client having its own copy of what should be one authoritative
 boundary set.
 
-A vector collection is a **GeoParquet file** in ``<data_dir>/vector/``. GeoParquet rather than
+A feature collection is a **GeoParquet file** in ``<data_dir>/features/``. GeoParquet rather than
 GeoJSON because it is what `save_result` already writes for vector output, and because a reader
 can use the per-row-group bounding boxes in its footer to fetch only the rows it needs over HTTP
 range requests — the same access pattern the Zarr stores already rely on.
@@ -36,17 +36,17 @@ itself carries feature *labels* (ids) — which the DHIS2 and CHAP exports use a
 column — so the shapes ride alongside rather than replacing them.
 """
 
-VECTOR_SUFFIX = ".parquet"
+FEATURE_SUFFIX = ".parquet"
 # Collection ids come from filenames and end up in URLs and process arguments, so they are held
 # to the same shape as a dataset id rather than accepting anything a filesystem permits.
 _ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 
-def vector_dir() -> Path:
-    """Where an instance keeps its vector collections."""
+def features_dir() -> Path:
+    """Where an instance keeps its feature collections."""
     from open_climate_service.data_manager.services.downloader import DOWNLOAD_DIR
 
-    return DOWNLOAD_DIR.parent / "vector"
+    return DOWNLOAD_DIR.parent / "features"
 
 
 def _is_valid_id(value: str) -> bool:
@@ -119,8 +119,8 @@ def collection_path(collection_id: str) -> Path | None:
     """
     if not _is_valid_id(collection_id):
         return None
-    root = vector_dir()
-    candidate = (root / f"{collection_id}{VECTOR_SUFFIX}").resolve()
+    root = features_dir()
+    candidate = (root / f"{collection_id}{FEATURE_SUFFIX}").resolve()
     try:
         candidate.relative_to(root.resolve())
     except ValueError:
@@ -151,7 +151,7 @@ def describe(collection_id: str) -> dict[str, Any] | None:
     geometry column. Both fields are written by every GeoParquet writer we care about — with or
     without a covering bbox — and reading the footer is ~400x faster than reading every geometry
     (0.4 ms vs 150 ms for 300k footprints). This matters because `list_collections` describes
-    every collection on every request to `GET /vector-collections`, so the cost of doing it the
+    every collection on every request to `GET /features`, so the cost of doing it the
     slow way scales with the total feature count of the instance, not with the response size.
 
     An older file whose metadata lacks either field falls back to reading the geometry column,
@@ -165,7 +165,7 @@ def describe(collection_id: str) -> dict[str, Any] | None:
     try:
         meta = pq.read_metadata(path)
     except Exception:
-        logger.warning("Vector collection '%s' could not be read; skipping", collection_id, exc_info=True)
+        logger.warning("Feature collection '%s' could not be read; skipping", collection_id, exc_info=True)
         return None
 
     geo = _geo_metadata(meta)
@@ -180,13 +180,13 @@ def describe(collection_id: str) -> dict[str, Any] | None:
         types = sorted({str(t) for t in geometry_types})
         crs_label = _crs_label_from_projjson(geo.get("crs"))
     else:
-        logger.debug("Vector collection '%s' has incomplete geo metadata; reading geometry", collection_id)
+        logger.debug("Feature collection '%s' has incomplete geo metadata; reading geometry", collection_id)
         import geopandas as gpd
 
         try:
             frame = gpd.read_parquet(path, columns=["geometry"])
         except Exception:
-            logger.warning("Vector collection '%s' could not be read; skipping", collection_id, exc_info=True)
+            logger.warning("Feature collection '%s' could not be read; skipping", collection_id, exc_info=True)
             return None
         bounds = [float(v) for v in frame.total_bounds] if len(frame) else None
         types = sorted({str(t) for t in frame.geom_type.unique()})
@@ -207,17 +207,17 @@ def describe(collection_id: str) -> dict[str, Any] | None:
 
 
 def list_collections() -> list[dict[str, Any]]:
-    """Every readable vector collection, by id.
+    """Every readable feature collection, by id.
 
     A file that cannot be read is logged and skipped rather than failing the listing: one corrupt
     boundary file should not hide the others, which is the opposite of the dataset-template rule
     where a bad template aborts its whole file.
     """
-    root = vector_dir()
+    root = features_dir()
     if not root.is_dir():
         return []
     described = []
-    for path in sorted(root.glob(f"*{VECTOR_SUFFIX}")):
+    for path in sorted(root.glob(f"*{FEATURE_SUFFIX}")):
         if not _is_valid_id(path.stem):
             logger.warning("Ignoring vector file '%s': not a valid collection id", path.name)
             continue
@@ -239,44 +239,86 @@ enough to stop that; a windowed read via ``bbox`` is not subject to it beyond it
 """
 
 
-def load_feature_collection(
-    collection_id: str,
+def _supports_bbox_filter(path: Path) -> bool:
+    """Whether the file carries a per-row covering bbox, read from its footer.
+
+    The path-based counterpart of the same field in :func:`describe`, for readers that hold a file
+    rather than a collection id.
+    """
+    import pyarrow.parquet as pq
+
+    try:
+        meta = pq.read_metadata(path)
+    except Exception:  # noqa: BLE001 — an unreadable footer just means no pushdown
+        return False
+    return bool((_geo_metadata(meta).get("covering") or {}).get("bbox"))
+
+
+def _apply_feature_ids(payload: dict[str, Any], frame: Any, id_property: str, source: str) -> None:
+    """Set each feature's ``id`` from ``id_property``, rejecting ids that cannot identify a feature.
+
+    The id becomes the label on the geometry dimension, which the DHIS2 and CHAP exports use as
+    their location column — so an id that does not identify one feature produces wrong data rather
+    than a visible failure. A null would be written as the string ``'nan'``, and a duplicate maps
+    two features onto one ``orgUnit``, where DHIS2 keeps whichever ``dataValue`` arrives last and
+    silently discards the other. Both fail loudly here instead.
+
+    Uniqueness is checked on the stringified ids rather than the raw column, because those are the
+    values that reach the export.
+    """
+    ids = frame[id_property]
+
+    null_count = int(ids.isna().sum())
+    if null_count:
+        raise ValueError(
+            f"{source} has {null_count:,} feature(s) with no {id_property!r}. Every feature needs "
+            "an id: it becomes the location label an export writes against."
+        )
+
+    labels = ids.astype(str)
+    duplicated = labels[labels.duplicated(keep=False)]
+    if len(duplicated):
+        sample = sorted(set(duplicated))
+        shown = ", ".join(repr(value) for value in sample[:5])
+        more = f" (and {len(sample) - 5:,} more)" if len(sample) > 5 else ""
+        raise ValueError(
+            f"{source} has {len(duplicated):,} feature(s) sharing a {id_property!r}: {shown}{more}. "
+            "Feature ids must be unique — two features with one id are aggregated under one label "
+            "and exported as one location."
+        )
+
+    for feature, label in zip(payload.get("features", []), labels, strict=True):
+        feature["id"] = label
+
+
+def read_features(
+    path: Path,
     *,
+    source: str,
     id_property: str | None = None,
     properties: list[str] | None = None,
     bbox: tuple[float, float, float, float] | list[float] | None = None,
 ) -> dict[str, Any]:
-    """Read a collection as a GeoJSON FeatureCollection.
+    """Read a GeoParquet file as a GeoJSON FeatureCollection.
 
-    GeoJSON rather than a geopandas frame because that is what `aggregate_spatial` already
-    accepts, so a named collection is interchangeable with a client-supplied one and needs no
-    change to the aggregation path.
+    Takes a path rather than a collection id so that anything holding a GeoParquet file can reuse
+    the read — notably a resolved feature cache (CLIM-926), which is deliberately *not* a vector
+    collection: it is derived, evictable, and never published at `GET /features`. Sharing
+    the reader keeps one implementation of the CRS and identity rules without giving the cache an
+    id in the public namespace.
 
-    ``id_property`` chooses which column becomes each feature's ``id``. That matters beyond
-    cosmetics: the feature id becomes the label on the geometry dimension, which is what the
-    DHIS2 and CHAP exports use as their location column — so pointing it at an org-unit code
-    column is what makes a named collection usable for a DHIS2 push.
+    ``source`` names the origin in errors and logs (e.g. ``"Feature collection 'districts'"``), so a
+    message never calls a cache file a collection.
+
+    GeoJSON rather than a geopandas frame because that is what `aggregate_spatial` already accepts,
+    so a stored set is interchangeable with a client-supplied one and needs no change to the
+    aggregation path.
 
     ``bbox`` restricts the read to a lon/lat window. Where the file carries a per-row covering
     bbox, this is pushed down to row-group pruning and only the matching groups are fetched;
-    otherwise the file is read and filtered, which is correct but not cheap. Collections above
-    :data:`MAX_FEATURES` require it.
+    otherwise the file is read and filtered, which is correct but not cheap.
     """
-    path = collection_path(collection_id)
-    if path is None:
-        available = ", ".join(info["id"] for info in list_collections()) or "none"
-        raise ValueError(f"Unknown vector collection {collection_id!r}. Available: {available}")
-
     import geopandas as gpd
-
-    info = describe(collection_id) or {}
-    feature_count = int(info.get("feature_count") or 0)
-    if bbox is None and feature_count > MAX_FEATURES:
-        raise ValueError(
-            f"Vector collection {collection_id!r} has {feature_count:,} features, more than the "
-            f"{MAX_FEATURES:,} that can be loaded as a FeatureCollection. Pass a bbox to read a "
-            "window of it."
-        )
 
     columns: list[str] | None = None
     if properties is not None:
@@ -287,16 +329,16 @@ def load_feature_collection(
 
     if bbox is None:
         frame = gpd.read_parquet(path, columns=columns)
-    elif info.get("supports_bbox_filter"):
+    elif _supports_bbox_filter(path):
         frame = gpd.read_parquet(path, columns=columns, bbox=tuple(bbox))
     else:
         # No covering bbox to prune on, so geopandas would reject `bbox=`. Read and clip instead,
         # and say so: the difference is a whole-file read, which is what the covering bbox exists
         # to avoid.
         logger.info(
-            "Vector collection '%s' has no covering bbox; reading in full and filtering. "
+            "%s has no covering bbox; reading in full and filtering. "
             "Rewrite it with write_covering_bbox=True to make windowed reads cheap.",
-            collection_id,
+            source,
         )
         from shapely.geometry import box
 
@@ -309,19 +351,61 @@ def load_feature_collection(
     if frame.crs is not None and not _is_lonlat(frame.crs):
         # aggregate_spatial masks against the raster's own grid and assumes lon/lat, so a
         # projected boundary set is reprojected here rather than silently missing every pixel.
-        logger.info("Reprojecting vector collection '%s' from %s to EPSG:4326", collection_id, _crs_label(frame.crs))
+        logger.info("Reprojecting %s from %s to EPSG:4326", source, _crs_label(frame.crs))
         frame = frame.to_crs("EPSG:4326")
 
     if id_property is not None:
         if id_property not in frame.columns:
             raise ValueError(
-                f"Vector collection {collection_id!r} has no property {id_property!r}. "
+                f"{source} has no property {id_property!r}. "
                 f"Available: {', '.join(c for c in frame.columns if c != 'geometry')}"
             )
         frame = frame.set_index(id_property, drop=False)
 
     payload: dict[str, Any] = frame.to_geo_dict()
     if id_property is not None:
-        for feature, value in zip(payload.get("features", []), frame[id_property], strict=False):
-            feature["id"] = str(value)
+        _apply_feature_ids(payload, frame, id_property, source)
     return payload
+
+
+def load_feature_collection(
+    collection_id: str,
+    *,
+    id_property: str | None = None,
+    properties: list[str] | None = None,
+    bbox: tuple[float, float, float, float] | list[float] | None = None,
+) -> dict[str, Any]:
+    """Read a named collection as a GeoJSON FeatureCollection.
+
+    Resolves the id against the vector directory and enforces the whole-file read limit, then
+    hands the file to :func:`read_features`. The split is what lets the config layer (CLIM-926)
+    read a cached FeatureCollection through the same code without the cache becoming addressable
+    by id here.
+
+    ``id_property`` chooses which column becomes each feature's ``id``. That matters beyond
+    cosmetics: the feature id becomes the label on the geometry dimension, which is what the
+    DHIS2 and CHAP exports use as their location column — so pointing it at an org-unit code
+    column is what makes a named collection usable for a DHIS2 push.
+
+    Collections above :data:`MAX_FEATURES` require a ``bbox``.
+    """
+    path = collection_path(collection_id)
+    if path is None:
+        available = ", ".join(info["id"] for info in list_collections()) or "none"
+        raise ValueError(f"Unknown feature collection {collection_id!r}. Available: {available}")
+
+    feature_count = int((describe(collection_id) or {}).get("feature_count") or 0)
+    if bbox is None and feature_count > MAX_FEATURES:
+        raise ValueError(
+            f"Feature collection {collection_id!r} has {feature_count:,} features, more than the "
+            f"{MAX_FEATURES:,} that can be loaded as a FeatureCollection. Pass a bbox to read a "
+            "window of it."
+        )
+
+    return read_features(
+        path,
+        source=f"Feature collection {collection_id!r}",
+        id_property=id_property,
+        properties=properties,
+        bbox=bbox,
+    )

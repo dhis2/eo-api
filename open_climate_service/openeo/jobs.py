@@ -28,8 +28,8 @@ from open_climate_service.openeo.schemas import (
     OpenEOJobUpdate,
 )
 from open_climate_service.shared.cf import is_temperature_like
+from open_climate_service.shared.features import GEOMETRY_WKT_COORD
 from open_climate_service.shared.time import utc_now
-from open_climate_service.shared.vectors import GEOMETRY_WKT_COORD
 from open_climate_service.stac.media_types import ZARR_V3_MEDIA_TYPE, zarr_media_type
 
 _T = TypeVar("_T")

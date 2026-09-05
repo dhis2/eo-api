@@ -136,7 +136,7 @@ plugins_dir: ./plugins/
 | `extent.bbox` | Yes | Bounding box in WGS84 decimal degrees |
 | `extent.name` | No | Human-readable label shown in API responses |
 | `extent.country_code` | No | ISO 3166-1 alpha-3 — required for WorldPop downloads |
-| `data_dir` | Yes | Directory for downloaded files and Zarr stores, resolved relative to the config file. A `vector/` subdirectory here holds the instance's [vector collections](openeo.md#vector-collections) |
+| `data_dir` | Yes | Directory for downloaded files and Zarr stores, resolved relative to the config file. A `features/` subdirectory here holds the instance's [feature collections](openeo.md#feature-collections) |
 | `plugins_dir` | No | Directory containing `datasets/`, `processes/`, and `workflows/` plugin subdirectories |
 | `read_only` | No | Set `true` to refuse all state-changing requests — see [Read-only instances](#read-only-instances). Defaults to `false` |
 | `scheduler` | No | Instance-level scheduled dataset-sync configuration. See [Scheduled dataset synchronization](scheduled_sync.md) |

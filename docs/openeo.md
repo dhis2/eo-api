@@ -62,23 +62,23 @@ Each collection includes `cube:dimensions` (spatial `x`/`y`, temporal `t`, `band
 
 ---
 
-## Vector collections
+## Feature collections
 
 Zonal statistics needs geometry. It can always be posted with the request, but for the boundaries an instance uses repeatedly — administrative regions, districts, catchments — that means sending the same several megabytes on every call, and every client keeping its own copy of what should be one authoritative boundary set.
 
-An instance can therefore ship named vector collections: GeoParquet files in `<data_dir>/vector/`, one per collection, the filename being the collection id.
+An instance can therefore ship named feature collections: GeoParquet files in `<data_dir>/features/`, one per collection, the filename being the collection id.
 
 ```
 data/
-└── vector/
+└── features/
     ├── districts.parquet
     └── catchments.parquet
 ```
 
-They are listed at `GET /vector-collections`, with per-collection metadata at `GET /vector-collections/{id}`:
+They are listed at `GET /features`, with per-collection metadata at `GET /features/{id}`:
 
 ```bash
-curl http://localhost:8000/vector-collections
+curl http://localhost:8000/features
 ```
 
 ```json

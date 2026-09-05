@@ -1,4 +1,4 @@
-"""load_vector_cube — load a named vector collection the instance ships (CLIM-836).
+"""load_vector_cube — load a named feature collection the instance ships (CLIM-836).
 
 The counterpart to `load_collection` for vector data. Without it, every zonal-statistics request
 has to carry its own GeoJSON, so the same boundary set is posted repeatedly and each client keeps
@@ -16,18 +16,18 @@ from __future__ import annotations
 from typing import Any
 
 from open_climate_service.process import process
-from open_climate_service.shared import vectors
+from open_climate_service.shared import features
 
 
 @process(
-    summary="Load a named vector collection",
+    summary="Load a named feature collection",
     description=(
-        "Load a vector collection stored on this instance, by id, for use as the `geometries` "
+        "Load a feature collection stored on this instance, by id, for use as the `geometries` "
         "argument of `aggregate_spatial`. Available collections are listed at "
-        "`GET /vector-collections`."
+        "`GET /features`."
     ),
     parameters={
-        "id": {"description": "Collection id, as listed by GET /vector-collections."},
+        "id": {"description": "Collection id, as listed by GET /features."},
         "id_property": {
             "description": (
                 "Column whose value becomes each feature's id. The feature id becomes the label "
@@ -63,4 +63,4 @@ def load_vector_cube(
     client-supplied one and `aggregate_spatial` needs no second input path. The geometry survives
     the aggregation either way — see `aggregate_spatial`'s WKT companion coordinate.
     """
-    return vectors.load_feature_collection(id, id_property=id_property, properties=properties, bbox=bbox)
+    return features.load_feature_collection(id, id_property=id_property, properties=properties, bbox=bbox)

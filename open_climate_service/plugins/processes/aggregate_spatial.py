@@ -8,7 +8,7 @@ import numpy as np
 import xarray as xr
 
 from open_climate_service.process import process
-from open_climate_service.shared.vectors import GEOMETRY_WKT_COORD
+from open_climate_service.shared.features import GEOMETRY_WKT_COORD
 
 
 def _parse_geometries(geometries: Any) -> tuple[list[Any], list[str]]:
