@@ -63,6 +63,11 @@ xarray = [
 # Full server stack — required to run your own Open Climate Service instance.
 server = [
     "fastapi>=0.100.0",
+    # Overture ingestion. Wanted for its STAC-catalogue file selection, not for convenience: it
+    # opens only the partitions overlapping the requested window, where scanning the whole theme
+    # measured ~40x slower for a country-sized extract. Pure Python over pyarrow, which is already
+    # here -- no binary engine.
+    "overturemaps>=1.0.2",
     "jinja2>=3.1",
     "starlette>=0.27.0",
     "uvicorn>=0.41.0",
