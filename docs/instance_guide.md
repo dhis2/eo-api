@@ -182,7 +182,7 @@ The `/extent` endpoint should return your configured bounding box.
 
 ## Adding plugins
 
-Plugins extend the instance with custom datasets, processes, and workflows. They live in `plugins_dir` and are loaded automatically. The `plugins_dir` is added to `sys.path`, so Python modules placed directly inside it are importable.
+Plugins extend the instance with custom datasets, processes, workflows, and feature providers. They live in `plugins_dir` and are loaded automatically. The `plugins_dir` is added to `sys.path`, so Python modules placed directly inside it are importable.
 
 ```
 plugins/
@@ -191,11 +191,64 @@ plugins/
 │   └── enacts.py               # streaming plugin class
 ├── processes/
 │   └── spatial_stats.py        # @process-decorated functions
-└── workflows/
-    └── aggregate_for_dhis2.json
+├── workflows/
+│   └── aggregate_for_dhis2.json
+└── features/
+    └── national_registry.py    # @feature_provider-decorated functions
 ```
 
-See [Extensibility](extensibility.md) for the three plugin types, and [Adding custom datasets](adding_custom_datasets.md) for the dataset template field reference and streaming plugin contract.
+See [Extensibility](extensibility.md) for the plugin types, and [Adding custom datasets](adding_custom_datasets.md) for the dataset template field reference and streaming plugin contract.
+
+---
+
+## Declared feature sets
+
+Zonal aggregation needs geometry. Passing a GeoJSON `FeatureCollection` with every request works for a hand-made call and not for a schedule: a country's hierarchy is megabytes, it would have to be pasted into `climate-service.yaml`, and it goes stale whenever the hierarchy changes.
+
+Instead, declare a feature set once and reference it by id:
+
+```yaml
+features:
+  - id: districts
+    provider: dhis2
+    params: { level: 2 }
+  - id: catchments
+    provider: stored
+    params: { id: catchments, id_property: catchment_code }
+```
+
+| Field | Required | Description |
+| ----- | -------- | ----------- |
+| `id` | Yes | The name workflows and triggers reference. Must be unique |
+| `provider` | Yes | A registered feature provider. `stored` ships with OCS; others come from plugins |
+| `params` | No | Passed to the provider as keyword arguments |
+| `ttl_seconds` | No | How long a resolved set is reused before refetching. Defaults to 24 hours |
+| `id_property` | No | Property whose value becomes each feature's id. Required when the provider does not already set correct ids |
+
+A trigger then references the id instead of carrying geometry:
+
+```yaml
+automation:
+  workflow_triggers:
+    - id: chirps-to-dhis2
+      on_update_of: chirps3_precipitation_daily
+      workflow_id: aggregate_to_dhis2_json
+      arguments:
+        geometries: { from_features: districts }
+```
+
+At submission this becomes a `load_features` node naming a **snapshot**, not a copy of the geometry — so the job record stays small, and it still records exactly which boundaries the run used:
+
+```json
+{"process_id": "load_features",
+ "arguments": {"id": "districts", "snapshot": "a1b2c3d4e5f6-20260905T110422123456Z"}}
+```
+
+Resolved sets are cached under `<data_dir>/cache/features/`. That is deliberately **not** `<data_dir>/features/`: the cache is derived and evictable, and it is never listed at `GET /features` — an organisation-unit hierarchy at facility level carries point coordinates, and publishing it should be a decision, not a side effect of caching.
+
+The `stored` provider reads `<data_dir>/features/`, so an instance with no external system configured can still declare feature sets and schedule aggregation against boundaries it ships itself.
+
+Feature ids must identify exactly one feature. A null or duplicate id fails loudly, because the id becomes the location label an export writes against — two features under one id would be pushed as one organisation unit, silently discarding a value.
 
 ---
 

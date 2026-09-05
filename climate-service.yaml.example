@@ -33,6 +33,15 @@ data_dir: ./data   # required — directory for downloaded NetCDF files and Zarr
 #       publish: true
 #       max_attempts: 3
 
+# Named geometry sets, referenced by id instead of pasted into every request. `stored` reads a
+# GeoParquet file from <data_dir>/features/; other providers come from plugins/features/.
+# Resolved sets are cached under <data_dir>/cache/features/ and refetched once the TTL expires.
+# features:
+#   - id: districts
+#     provider: stored
+#     params: {id: districts, id_property: ou_code}
+#     ttl_seconds: 86400      # optional — default: 24 hours
+
 # Event-driven workflows are separate from cron schedules. Every trigger whose `on_update_of`
 # matches a successful dataset update creates an independent openEO workflow job.
 # automation:
@@ -43,7 +52,7 @@ data_dir: ./data   # required — directory for downloaded NetCDF files and Zarr
 #       arguments:
 #         dataset_id: $event.dataset_id
 #         temporal_extent: [$event.previous_end, $event.current_end]
-#         geometries: {type: FeatureCollection, features: []}
+#         geometries: {from_features: districts}   # or an inline FeatureCollection for ad-hoc calls
 #         period_type: day
 #       replay_existing: false  # default: do not backfill events predating this trigger
 #
@@ -53,7 +62,7 @@ data_dir: ./data   # required — directory for downloaded NetCDF files and Zarr
 #       arguments:
 #         dataset_id: $event.dataset_id
 #         temporal_extent: [$event.previous_end, $event.current_end]
-#         geometries: {type: FeatureCollection, features: []}
+#         geometries: {from_features: districts}
 #         data_element_id: BXgDHhPdFVU
 #         period_type: day
 

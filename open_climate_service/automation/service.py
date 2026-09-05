@@ -153,6 +153,70 @@ def _iter_strings(value: Any) -> Any:
             yield from _iter_strings(item)
 
 
+FROM_FEATURES = "from_features"
+"""Trigger-argument key naming a declared feature set instead of carrying its geometry."""
+
+
+def _resolve_feature_references(value: Any) -> Any:
+    """Rewrite ``{"from_features": "districts"}`` into a `load_features` node, not into geometry.
+
+    The rewritten arguments are copied verbatim into the submitted process graph, which is then
+    persisted in the job record — so resolving the reference to a FeatureCollection here would write
+    a country's whole hierarchy into ``jobs.json`` on every scheduled run, which is the problem the
+    reference exists to remove. A node keeps the record at ~90 bytes and defers the fetch to
+    execution.
+
+    The snapshot id *is* resolved here, because it is a short string and because stamping it at
+    submission is what makes the run reproducible: re-running the record aggregates the boundaries
+    that run saw rather than whatever the hierarchy holds later.
+    """
+    if isinstance(value, list):
+        return [_resolve_feature_references(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if set(value) == {FROM_FEATURES} and isinstance(value[FROM_FEATURES], str):
+        from open_climate_service.features import resolver
+
+        feature_id = value[FROM_FEATURES]
+        return {
+            "process_id": "load_features",
+            "arguments": {"id": feature_id, "snapshot": resolver.current_snapshot(feature_id)},
+        }
+    return {key: _resolve_feature_references(item) for key, item in value.items()}
+
+
+def _validate_feature_references(config: AutomationConfig) -> None:
+    """Refuse a `from_features` reference to an id the instance does not declare.
+
+    Checked at startup rather than at fire time: a typo in a schedule should be a boot error, not a
+    job that fails at 3am on the first trigger.
+    """
+    from open_climate_service.features.config import get_features_config
+
+    declared = {declaration.id for declaration in get_features_config().features}
+    for trigger in config.workflow_triggers:
+        for feature_id in _iter_feature_references(trigger.arguments):
+            if feature_id not in declared:
+                available = ", ".join(sorted(declared)) or "none"
+                raise ValueError(
+                    f"Workflow trigger {trigger.id!r} references feature {feature_id!r}, "
+                    f"which is not declared under `features:`. Declared: {available}"
+                )
+
+
+def _iter_feature_references(value: Any) -> Any:
+    """Yield every feature id referenced by a `from_features` key in a nested structure."""
+    if isinstance(value, list):
+        for item in value:
+            yield from _iter_feature_references(item)
+    elif isinstance(value, dict):
+        if set(value) == {FROM_FEATURES} and isinstance(value[FROM_FEATURES], str):
+            yield value[FROM_FEATURES]
+            return
+        for item in value.values():
+            yield from _iter_feature_references(item)
+
+
 def _validate_event_references(config: AutomationConfig) -> None:
     """Refuse arguments that look like event references but are not the known tokens.
 
@@ -195,6 +259,7 @@ class WorkflowAutomationService:
                 raise ValueError(f"Workflow trigger {trigger.id!r} references unknown workflow {trigger.workflow_id!r}")
         _validate_output_ownership(self._config)
         _validate_event_references(self._config)
+        _validate_feature_references(self._config)
         if api_config.is_read_only():
             return
         activations = _load_activations()
@@ -254,7 +319,7 @@ class WorkflowAutomationService:
     def _submit(self, trigger: WorkflowTrigger, event: JobEvent, service: OpenEOJobService) -> None:
         """Create and start the deterministic job for one trigger/event pair."""
         dataset_id = event.data.get("dataset_id")
-        arguments = _resolve_event_values(trigger.arguments, event)
+        arguments = _resolve_feature_references(_resolve_event_values(trigger.arguments, event))
         body = OpenEOJobCreate(
             title=f"{trigger.workflow_id} after {dataset_id} update",
             description=f"Triggered by {event.event_id} using automation rule {trigger.id}",

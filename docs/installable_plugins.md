@@ -15,10 +15,10 @@ keeps working exactly as before, and still takes precedence (see [Precedence](#p
 
 ## Package layout
 
-An importable package can ship any combination of the three extension points — **datasets,
-processes, and workflows are all auto-discovered** when the package is installed. `datasets/`
-and `processes/` hold importable Python, so each needs an `__init__.py` (`workflows/` is plain
-JSON and does not):
+An importable package can ship any combination of the four extension points — **datasets,
+processes, workflows, and features are all auto-discovered** when the package is installed.
+`datasets/`, `processes/` and `features/` hold importable Python, so each needs an `__init__.py`
+(`workflows/` is plain JSON and does not):
 
 ```
 osc_example_plugin/
@@ -32,6 +32,9 @@ osc_example_plugin/
     my_process.py
   workflows/             # optional: openEO UDP JSON graphs
     my_workflow.json
+  features/              # optional: @feature_provider-decorated callables
+    __init__.py
+    my_provider.py
 ```
 
 The layout mirrors `plugins_dir`, so migrating a `plugins_dir`-based plugin to a distributable
@@ -71,10 +74,27 @@ uv add osc-example-plugin
 ```
 
 OCS auto-discovers every installed package in the `open_climate_service.plugins` group and loads
-its `datasets/*.yaml` templates, its `processes/` (`@process`-decorated callables), and its
-`workflows/*.json` (openEO UDPs). The ingestion plugin class is importable by dotted path because
-the package is installed. The datasets then appear in `/datasets` and can be ingested like any
-built-in.
+its `datasets/*.yaml` templates, its `processes/` (`@process`-decorated callables), its
+`workflows/*.json` (openEO UDPs), and its `features/` (`@feature_provider`-decorated callables).
+The ingestion plugin class is importable by dotted path because the package is installed. The
+datasets then appear in `/datasets` and can be ingested like any built-in.
+
+### Feature providers
+
+A feature provider resolves parameters to a GeoJSON `FeatureCollection`. Where the geometry comes
+from is the provider's business — a national registry, a WFS, an organisation-unit hierarchy:
+
+```python
+from open_climate_service.features.provider import feature_provider
+
+@feature_provider("national-districts")
+def national_districts(**params) -> dict:
+    ...  # return a FeatureCollection
+```
+
+The instance then declares a feature set that binds an id to the provider and its parameters, and
+workflows reference the id instead of carrying geometry — see
+[Declared feature sets](instance_guide.md#declared-feature-sets).
 
 ## Precedence
 

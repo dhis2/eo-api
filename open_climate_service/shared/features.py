@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -254,8 +256,24 @@ def _supports_bbox_filter(path: Path) -> bool:
     return bool((_geo_metadata(meta).get("covering") or {}).get("bbox"))
 
 
-def _apply_feature_ids(payload: dict[str, Any], frame: Any, id_property: str, source: str) -> None:
-    """Set each feature's ``id`` from ``id_property``, rejecting ids that cannot identify a feature.
+def _is_null(value: Any) -> bool:
+    """Whether a value cannot serve as an id: None, a float NaN, or a pandas NA/NaT."""
+    if value is None:
+        return True
+    if isinstance(value, float) and math.isnan(value):
+        return True
+    import pandas as pd
+
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        # pd.isna returns an array for array-likes, whose truth value is ambiguous. An id that is
+        # itself a collection is not null — it is a different problem, and str() will surface it.
+        return False
+
+
+def validate_feature_ids(values: Iterable[Any], *, source: str, field: str) -> list[str]:
+    """Return the stringified ids, rejecting any that cannot identify exactly one feature.
 
     The id becomes the label on the geometry dimension, which the DHIS2 and CHAP exports use as
     their location column — so an id that does not identify one feature produces wrong data rather
@@ -263,30 +281,42 @@ def _apply_feature_ids(payload: dict[str, Any], frame: Any, id_property: str, so
     two features onto one ``orgUnit``, where DHIS2 keeps whichever ``dataValue`` arrives last and
     silently discards the other. Both fail loudly here instead.
 
-    Uniqueness is checked on the stringified ids rather than the raw column, because those are the
-    values that reach the export.
-    """
-    ids = frame[id_property]
+    This is the single implementation of the identity contract (CLIM-926): a stored collection read
+    through :func:`read_features` and a provider's freshly-resolved output both come through here,
+    so the two cannot drift into disagreeing about what a usable id is.
 
-    null_count = int(ids.isna().sum())
+    Uniqueness is checked on the stringified ids rather than the raw values, because those are what
+    reach the export.
+    """
+    raw = list(values)
+
+    null_count = sum(1 for value in raw if _is_null(value))
     if null_count:
         raise ValueError(
-            f"{source} has {null_count:,} feature(s) with no {id_property!r}. Every feature needs "
+            f"{source} has {null_count:,} feature(s) with no {field!r}. Every feature needs "
             "an id: it becomes the location label an export writes against."
         )
 
-    labels = ids.astype(str)
-    duplicated = labels[labels.duplicated(keep=False)]
-    if len(duplicated):
-        sample = sorted(set(duplicated))
-        shown = ", ".join(repr(value) for value in sample[:5])
-        more = f" (and {len(sample) - 5:,} more)" if len(sample) > 5 else ""
+    labels = [str(value) for value in raw]
+    seen: dict[str, int] = {}
+    for label in labels:
+        seen[label] = seen.get(label, 0) + 1
+    repeated = sorted(label for label, count in seen.items() if count > 1)
+    if repeated:
+        total = sum(seen[label] for label in repeated)
+        shown = ", ".join(repr(label) for label in repeated[:5])
+        more = f" (and {len(repeated) - 5:,} more)" if len(repeated) > 5 else ""
         raise ValueError(
-            f"{source} has {len(duplicated):,} feature(s) sharing a {id_property!r}: {shown}{more}. "
+            f"{source} has {total:,} feature(s) sharing a {field!r}: {shown}{more}. "
             "Feature ids must be unique — two features with one id are aggregated under one label "
             "and exported as one location."
         )
+    return labels
 
+
+def _apply_feature_ids(payload: dict[str, Any], frame: Any, id_property: str, source: str) -> None:
+    """Set each feature's ``id`` from ``id_property``, after checking the ids can identify features."""
+    labels = validate_feature_ids(frame[id_property], source=source, field=id_property)
     for feature, label in zip(payload.get("features", []), labels, strict=True):
         feature["id"] = label
 
