@@ -157,21 +157,36 @@ FROM_FEATURES = "from_features"
 """Trigger-argument key naming a declared feature set instead of carrying its geometry."""
 
 
-def _resolve_feature_references(value: Any) -> Any:
-    """Rewrite ``{"from_features": "districts"}`` into a `load_features` node, not into geometry.
+def _feature_node_name(feature_id: str) -> str:
+    """The graph node that resolves one feature set. Stable, so two references share one node."""
+    return f"features_{feature_id}"
 
-    The rewritten arguments are copied verbatim into the submitted process graph, which is then
-    persisted in the job record — so resolving the reference to a FeatureCollection here would write
-    a country's whole hierarchy into ``jobs.json`` on every scheduled run, which is the problem the
-    reference exists to remove. A node keeps the record small and defers the fetch to execution.
+
+def _resolve_feature_references(value: Any, nodes: dict[str, Any] | None = None) -> Any:
+    """Rewrite ``{"from_features": "districts"}`` into a reference to a `load_features` node.
+
+    Geometry must not be resolved here. The rewritten arguments are copied verbatim into the
+    submitted process graph, which is persisted in the job record — so producing a FeatureCollection
+    at this point would write a country's whole hierarchy into ``jobs.json`` on every scheduled run,
+    which is the problem the reference exists to remove.
+
+    The reference is emitted as ``{"from_node": ...}`` with the `load_features` call added to
+    ``nodes`` as a sibling, **not** as an inline ``{"process_id": ...}`` dict in the argument.
+    An inline process dict is not evaluated: the graph parser passes it through untouched, so
+    `aggregate_spatial` would receive the dict itself and try to read it as GeoJSON. Only a
+    ``from_node`` reference becomes a `ResultReference` the executor resolves.
     """
     if isinstance(value, list):
-        return [_resolve_feature_references(item) for item in value]
+        return [_resolve_feature_references(item, nodes) for item in value]
     if not isinstance(value, dict):
         return value
     if set(value) == {FROM_FEATURES} and isinstance(value[FROM_FEATURES], str):
-        return {"process_id": "load_features", "arguments": {"id": value[FROM_FEATURES]}}
-    return {key: _resolve_feature_references(item) for key, item in value.items()}
+        feature_id = value[FROM_FEATURES]
+        name = _feature_node_name(feature_id)
+        if nodes is not None:
+            nodes[name] = {"process_id": "load_features", "arguments": {"id": feature_id}}
+        return {"from_node": name}
+    return {key: _resolve_feature_references(item, nodes) for key, item in value.items()}
 
 
 def _feature_provenance(arguments: Any) -> str:
@@ -333,17 +348,19 @@ class WorkflowAutomationService:
         dataset_id = event.data.get("dataset_id")
         resolved = _resolve_event_values(trigger.arguments, event)
         provenance = _feature_provenance(resolved)
-        arguments = _resolve_feature_references(resolved)
+        feature_nodes: dict[str, Any] = {}
+        arguments = _resolve_feature_references(resolved, feature_nodes)
         body = OpenEOJobCreate(
             title=f"{trigger.workflow_id} after {dataset_id} update",
             description=f"Triggered by {event.event_id} using automation rule {trigger.id}{provenance}",
             process={
                 "process_graph": {
+                    **feature_nodes,
                     "workflow": {
                         "process_id": trigger.workflow_id,
                         "arguments": arguments,
                         "result": True,
-                    }
+                    },
                 }
             },
         )

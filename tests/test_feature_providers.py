@@ -240,13 +240,55 @@ def test_a_trigger_reference_becomes_a_node_not_geometry(instance: Path, monkeyp
     _declare(monkeypatch, {"id": "districts", "provider": "counting"})
     _register(monkeypatch, "counting", lambda **_: _collection(["MW.N", "MW.S"]))
 
+    nodes: dict[str, Any] = {}
     resolved = automation_service._resolve_feature_references(
-        {"dataset_id": "chirps", "geometries": {"from_features": "districts"}}
+        {"dataset_id": "chirps", "geometries": {"from_features": "districts"}}, nodes
     )
 
     assert resolved["dataset_id"] == "chirps"
-    assert resolved["geometries"] == {"process_id": "load_features", "arguments": {"id": "districts"}}
-    assert "coordinates" not in str(resolved), "geometry must not reach the job record"
+    assert resolved["geometries"] == {"from_node": "features_districts"}
+    assert nodes == {"features_districts": {"process_id": "load_features", "arguments": {"id": "districts"}}}
+    assert "coordinates" not in str(resolved) + str(nodes), "geometry must not reach the job record"
+
+
+def test_the_reference_is_a_node_the_executor_actually_resolves(
+    instance: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An inline `{"process_id": ...}` in an argument is *not* evaluated — it is passed through.
+
+    The graph parser leaves such a dict untouched, so `aggregate_spatial` would receive it and try
+    to read it as GeoJSON. Only a sibling node plus `from_node` becomes a `ResultReference` the
+    executor resolves, so this asserts the wiring is that shape rather than the inline one.
+    """
+    from openeo_pg_parser_networkx import OpenEOProcessGraph
+    from openeo_pg_parser_networkx.pg_schema import ResultReference
+
+    _declare(monkeypatch, {"id": "districts", "provider": "counting"})
+    _register(monkeypatch, "counting", lambda **_: _collection(["MW.N", "MW.S"]))
+
+    nodes: dict[str, Any] = {}
+    arguments = automation_service._resolve_feature_references({"geometries": {"from_features": "districts"}}, nodes)
+    graph = {"process_graph": {**nodes, "workflow": {"process_id": "add", "arguments": arguments, "result": True}}}
+
+    parsed = OpenEOProcessGraph(pg_data=graph)
+    workflow = next(attrs for _, attrs in parsed.nodes if attrs["process_id"] == "add")
+
+    assert isinstance(workflow["resolved_kwargs"]["geometries"], ResultReference)
+
+
+def test_load_features_runs_through_the_graph_executor(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`load_features` is registered and callable by the real engine, not only as a Python function."""
+    from open_climate_service.openeo.execution import run_process_graph
+
+    _declare(monkeypatch, {"id": "districts", "provider": "counting"})
+    _register(monkeypatch, "counting", lambda **_: _collection(["MW.N", "MW.S"]))
+
+    result = run_process_graph(
+        {"process_graph": {"feat": {"process_id": "load_features", "arguments": {"id": "districts"}, "result": True}}}
+    )
+
+    assert result["type"] == "FeatureCollection"
+    assert [feature["id"] for feature in result["features"]] == ["MW.N", "MW.S"]
 
 
 def test_the_job_records_which_feature_version_it_ran_against(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:

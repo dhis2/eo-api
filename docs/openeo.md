@@ -100,12 +100,23 @@ curl http://localhost:8000/features
 
 ```python
 cube = conn.load_collection("era5land_temperature_daily", temporal_extent=["2024-01-01", "2024-12-31"])
-stats = cube.aggregate_spatial(
-    geometries={"process_id": "load_vector_cube", "arguments": {"id": "districts", "id_property": "ou_code"}},
-    reducer="mean",
-)
+boundaries = conn.datacube_from_process("load_vector_cube", id="districts", id_property="ou_code")
+stats = cube.aggregate_spatial(geometries=boundaries, reducer="mean")
 stats.download("districts.parquet", format="PARQUET")
 ```
+
+`load_vector_cube` has to be its **own node**, referenced by the aggregation — which is what `datacube_from_process` produces, and what `{"from_node": ...}` looks like in raw JSON:
+
+```json
+{
+  "boundaries": {"process_id": "load_vector_cube", "arguments": {"id": "districts", "id_property": "ou_code"}},
+  "stats": {"process_id": "aggregate_spatial",
+            "arguments": {"data": {"from_node": "cube"}, "geometries": {"from_node": "boundaries"}, "reducer": "mean"},
+            "result": true}
+}
+```
+
+An inline `{"process_id": ...}` written directly as the `geometries` value does **not** work: the graph parser passes such a dict through untouched rather than evaluating it, so the aggregation receives the dict itself and fails trying to read it as GeoJSON.
 
 `id_property` names the column that becomes each feature's id. That is more than cosmetic: the feature id becomes the label on the `geometry` dimension, which is what the `DHIS2JSON` and `CHAPCSV` exports use as their location column — so point it at an org-unit code column when the result is destined for DHIS2.
 
@@ -114,8 +125,7 @@ A collection in a projected CRS is reprojected to EPSG:4326 on load, since the a
 `load_vector_cube` builds a GeoJSON feature per row, so it is meant for boundary sets — administrative hierarchies, catchments — not for collections of hundreds of thousands of features. Above 50,000 features an unqualified call is refused, and a `bbox` is required:
 
 ```python
-{"process_id": "load_vector_cube",
- "arguments": {"id": "buildings", "bbox": [85.2, 27.6, 85.4, 27.8]}}
+conn.datacube_from_process("load_vector_cube", id="buildings", bbox=[85.2, 27.6, 85.4, 27.8])
 ```
 
 Where the GeoParquet carries a per-row covering bbox — written with `write_covering_bbox=True` — a windowed read prunes row groups and fetches only the matching ones. `supports_bbox_filter` in the listing says whether a given collection has one; without it the window still works, but the whole file is read and filtered.
