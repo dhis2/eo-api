@@ -153,97 +153,6 @@ def _iter_strings(value: Any) -> Any:
             yield from _iter_strings(item)
 
 
-FROM_FEATURES = "from_features"
-"""Trigger-argument key naming a declared feature set instead of carrying its geometry."""
-
-
-def _feature_node_name(feature_id: str) -> str:
-    """The graph node that resolves one feature set. Stable, so two references share one node."""
-    return f"features_{feature_id}"
-
-
-def _resolve_feature_references(value: Any, nodes: dict[str, Any] | None = None) -> Any:
-    """Rewrite ``{"from_features": "districts"}`` into a reference to a `load_features` node.
-
-    Geometry must not be resolved here. The rewritten arguments are copied verbatim into the
-    submitted process graph, which is persisted in the job record — so producing a FeatureCollection
-    at this point would write a country's whole hierarchy into ``jobs.json`` on every scheduled run,
-    which is the problem the reference exists to remove.
-
-    The reference is emitted as ``{"from_node": ...}`` with the `load_features` call added to
-    ``nodes`` as a sibling, **not** as an inline ``{"process_id": ...}`` dict in the argument.
-    An inline process dict is not evaluated: the graph parser passes it through untouched, so
-    `aggregate_spatial` would receive the dict itself and try to read it as GeoJSON. Only a
-    ``from_node`` reference becomes a `ResultReference` the executor resolves.
-    """
-    if isinstance(value, list):
-        return [_resolve_feature_references(item, nodes) for item in value]
-    if not isinstance(value, dict):
-        return value
-    if set(value) == {FROM_FEATURES} and isinstance(value[FROM_FEATURES], str):
-        feature_id = value[FROM_FEATURES]
-        name = _feature_node_name(feature_id)
-        if nodes is not None:
-            nodes[name] = {"process_id": "load_features", "arguments": {"id": feature_id}}
-        return {"from_node": name}
-    return {key: _resolve_feature_references(item, nodes) for key, item in value.items()}
-
-
-def _feature_provenance(arguments: Any) -> str:
-    """Describe the feature versions this job runs against, for the job's own record.
-
-    Refreshing here rather than only at execution is what makes the description meaningful: it names
-    the version the store actually holds when the job is submitted, which is what explains why one
-    run covered 47 districts and the next covered 48.
-
-    Best-effort. A provider that is briefly unreachable should delay the fetch to execution, not
-    fail the submission — and a job with no provenance line is a smaller problem than a schedule
-    that stops dispatching.
-    """
-    from open_climate_service.features import resolver
-
-    parts = []
-    for feature_id in sorted(set(_iter_feature_references(arguments))):
-        try:
-            parts.append(f"{feature_id}@{resolver.ensure_current(feature_id)}")
-        except Exception:
-            logger.warning("Could not refresh feature set '%s' at submission", feature_id, exc_info=True)
-            parts.append(f"{feature_id}@unresolved")
-    return f" against features {', '.join(parts)}" if parts else ""
-
-
-def _validate_feature_references(config: AutomationConfig) -> None:
-    """Refuse a `from_features` reference to an id the instance does not declare.
-
-    Checked at startup rather than at fire time: a typo in a schedule should be a boot error, not a
-    job that fails at 3am on the first trigger.
-    """
-    from open_climate_service.features.config import get_feature_templates
-
-    declared = {template.id for template in get_feature_templates().templates}
-    for trigger in config.workflow_triggers:
-        for feature_id in _iter_feature_references(trigger.arguments):
-            if feature_id not in declared:
-                available = ", ".join(sorted(declared)) or "none"
-                raise ValueError(
-                    f"Workflow trigger {trigger.id!r} references feature {feature_id!r}, "
-                    f"which is not declared under `features:`. Declared: {available}"
-                )
-
-
-def _iter_feature_references(value: Any) -> Any:
-    """Yield every feature id referenced by a `from_features` key in a nested structure."""
-    if isinstance(value, list):
-        for item in value:
-            yield from _iter_feature_references(item)
-    elif isinstance(value, dict):
-        if set(value) == {FROM_FEATURES} and isinstance(value[FROM_FEATURES], str):
-            yield value[FROM_FEATURES]
-            return
-        for item in value.values():
-            yield from _iter_feature_references(item)
-
-
 def _validate_event_references(config: AutomationConfig) -> None:
     """Refuse arguments that look like event references but are not the known tokens.
 
@@ -286,7 +195,6 @@ class WorkflowAutomationService:
                 raise ValueError(f"Workflow trigger {trigger.id!r} references unknown workflow {trigger.workflow_id!r}")
         _validate_output_ownership(self._config)
         _validate_event_references(self._config)
-        _validate_feature_references(self._config)
         if api_config.is_read_only():
             return
         activations = _load_activations()
@@ -346,21 +254,17 @@ class WorkflowAutomationService:
     def _submit(self, trigger: WorkflowTrigger, event: JobEvent, service: OpenEOJobService) -> None:
         """Create and start the deterministic job for one trigger/event pair."""
         dataset_id = event.data.get("dataset_id")
-        resolved = _resolve_event_values(trigger.arguments, event)
-        provenance = _feature_provenance(resolved)
-        feature_nodes: dict[str, Any] = {}
-        arguments = _resolve_feature_references(resolved, feature_nodes)
+        arguments = _resolve_event_values(trigger.arguments, event)
         body = OpenEOJobCreate(
             title=f"{trigger.workflow_id} after {dataset_id} update",
-            description=f"Triggered by {event.event_id} using automation rule {trigger.id}{provenance}",
+            description=f"Triggered by {event.event_id} using automation rule {trigger.id}",
             process={
                 "process_graph": {
-                    **feature_nodes,
                     "workflow": {
                         "process_id": trigger.workflow_id,
                         "arguments": arguments,
                         "result": True,
-                    },
+                    }
                 }
             },
         )

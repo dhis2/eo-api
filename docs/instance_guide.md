@@ -240,64 +240,7 @@ plugins/features/
 
 A template with no `provider` carries metadata only: nothing refreshes the file, and it exists so a collection an admin placed can still declare its licence.
 
-A trigger then references the id instead of carrying geometry:
-
-```yaml
-automation:
-  workflow_triggers:
-    - id: chirps-to-dhis2
-      on_update_of: chirps3_precipitation_daily
-      workflow_id: aggregate_to_dhis2_json
-      arguments:
-        geometries: { from_features: districts }
-```
-
-At submission this becomes a `load_features` **node** in the process graph, referenced by the workflow — not a copy of the geometry:
-
-```json
-{"features_districts": {"process_id": "load_features", "arguments": {"id": "districts"}},
- "workflow": {"process_id": "aggregate_to_dhis2_json",
-              "arguments": {"geometries": {"from_node": "features_districts"}}, "result": true}}
-```
-
-The job's description records which version of each set it ran against (`against features districts@release-2026-09`), which is what explains why one run covered 47 districts and the next covered 48.
-
 There is **one** store, `<data_dir>/features/`. A provider-backed set updates its entry there rather than filling a separate cache — the same shape as a dataset plugin writing into `downloads/`. Each provider-maintained entry gets a JSON sidecar recording the runtime facts: provider, version and fetch time. A file an admin drops in has no sidecar, and a provider refuses to overwrite it.
-
-The `stored` provider reads that same store, so an instance with no external system configured can still declare feature sets and schedule aggregation against boundaries it ships itself.
-
-Past versions are not kept. Recording *which* boundaries a run used needs a version string, not an archive — and re-running a scheduled push is usually a repair that wants current boundaries anyway.
-
-Feature ids must identify exactly one feature. A null or duplicate id fails loudly, because the id becomes the location label an export writes against — two features under one id would be pushed as one organisation unit, silently discarding a value.
-
------ | -------- | ----------- |
-| `id` | Yes | The name workflows and triggers reference. Must be unique |
-| `provider` | Yes | A registered feature provider. `stored` ships with OCS; others come from plugins |
-| `params` | No | Passed to the provider as keyword arguments |
-| `ttl_seconds` | No | How long a resolved set is reused before refetching. Defaults to 24 hours |
-| `id_property` | No | Property whose value becomes each feature's id. Required when the provider does not already set correct ids |
-
-A trigger then references the id instead of carrying geometry:
-
-```yaml
-automation:
-  workflow_triggers:
-    - id: chirps-to-dhis2
-      on_update_of: chirps3_precipitation_daily
-      workflow_id: aggregate_to_dhis2_json
-      arguments:
-        geometries: { from_features: districts }
-```
-
-At submission this becomes a `load_features` node, not a copy of the geometry — so the job record stays small:
-
-```json
-{"process_id": "load_features", "arguments": {"id": "districts"}}
-```
-
-The job's description records which version of each set it ran against (`against features districts@release-2026-09`), which is what explains why one run covered 47 districts and the next covered 48.
-
-There is **one** store, `<data_dir>/features/`. A provider-backed set updates its entry there rather than filling a separate cache — the same shape as a dataset plugin writing into `downloads/`. Each provider-maintained entry gets a JSON sidecar recording its provider, version and fetch time; a file an admin drops in has no sidecar, and a provider refuses to overwrite it.
 
 The `stored` provider reads that same store, so an instance with no external system configured can still declare feature sets and schedule aggregation against boundaries it ships itself.
 
