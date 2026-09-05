@@ -33,7 +33,8 @@ data_dir: ./data   # required — directory for downloaded NetCDF files and Zarr
 #       publish: true
 #       max_attempts: 3
 
-# Named geometry sets live in plugins/features/*.yaml templates, not here -- see the instance guide.
+# Named geometry sets live in plugins/features/*.yaml templates, not here -- see the instance
+# guide. A trigger references one by id with {from_features: <id>} instead of inline GeoJSON.
 
 # Event-driven workflows are separate from cron schedules. Every trigger whose `on_update_of`
 # matches a successful dataset update creates an independent openEO workflow job.
@@ -45,7 +46,7 @@ data_dir: ./data   # required — directory for downloaded NetCDF files and Zarr
 #       arguments:
 #         dataset_id: $event.dataset_id
 #         temporal_extent: [$event.previous_end, $event.current_end]
-#         geometries: {type: FeatureCollection, features: []}
+#         geometries: {from_features: districts}   # or an inline FeatureCollection for ad-hoc calls
 #         period_type: day
 #       replay_existing: false  # default: do not backfill events predating this trigger
 #
@@ -55,7 +56,7 @@ data_dir: ./data   # required — directory for downloaded NetCDF files and Zarr
 #       arguments:
 #         dataset_id: $event.dataset_id
 #         temporal_extent: [$event.previous_end, $event.current_end]
-#         geometries: {type: FeatureCollection, features: []}
+#         geometries: {from_features: districts}
 #         data_element_id: BXgDHhPdFVU
 #         period_type: day
 
