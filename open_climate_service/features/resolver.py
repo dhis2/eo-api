@@ -13,7 +13,9 @@ persisted process graph — the problem this ticket exists to remove.
 
 from __future__ import annotations
 
+import inspect
 import logging
+from pathlib import Path
 from typing import Any
 
 from open_climate_service.features import store
@@ -32,23 +34,38 @@ def declaration(feature_id: str) -> FeatureTemplate:
     return get_feature_templates().get(feature_id)
 
 
-def _call(declared: FeatureTemplate) -> tuple[dict[str, Any], str | None]:
-    """Call the provider and check it returned something usable."""
+def _call(declared: FeatureTemplate) -> tuple[dict[str, Any] | Path, str | None]:
+    """Call the provider and check it returned something usable.
+
+    A provider takes one of two forms — see :func:`feature_provider`. One returns a
+    FeatureCollection; the other writes GeoParquet itself and returns its Path, which is how a
+    source too large to hold as Python dicts is ingested. The second form is handed ``path``.
+    """
     provider = resolve_provider(declared.provider)
-    result = provider(**declared.params)
+    wants_path = "path" in inspect.signature(provider).parameters
+    if wants_path:
+        # Ownership is checked *before* the provider runs, not after: it writes straight into the
+        # store, so by the time it returns, a curated file it would have clobbered is already gone.
+        store.check_ownership(declared)
+        params = {**declared.params, "path": store.target_path(declared.id)}
+    else:
+        params = declared.params
+    result = provider(**params)
 
     version: str | None = None
     if isinstance(result, tuple):
-        collection, version = result
+        produced, version = result
     else:
-        collection = result
+        produced = result
 
-    if not isinstance(collection, dict) or collection.get("type") != "FeatureCollection":
+    if isinstance(produced, Path):
+        return produced, version
+    if not isinstance(produced, dict) or produced.get("type") != "FeatureCollection":
         raise ValueError(
-            f"Feature provider {declared.provider!r} must return a GeoJSON FeatureCollection "
-            f"for {declared.id!r}, got {type(collection).__name__}"
+            f"Feature provider {declared.provider!r} must return a GeoJSON FeatureCollection or a "
+            f"Path for {declared.id!r}, got {type(produced).__name__}"
         )
-    return collection, version
+    return produced, version
 
 
 def ensure_current(feature_id: str, *, refresh: bool = False) -> str:
@@ -68,8 +85,10 @@ def ensure_current(feature_id: str, *, refresh: bool = False) -> str:
         recorded = store.metadata(feature_id).get("version")
         if isinstance(recorded, str):
             return recorded
-    collection, version = _call(declared)
-    return store.write(declared, collection, version=version)
+    produced, version = _call(declared)
+    if isinstance(produced, Path):
+        return store.record_written_file(declared, produced, version=version)
+    return store.write(declared, produced, version=version)
 
 
 def load(feature_id: str) -> dict[str, Any]:
@@ -81,7 +100,12 @@ def load(feature_id: str) -> dict[str, Any]:
     """
     declared = declaration(feature_id)
     if not stores_result(resolve_provider(declared.provider)):
-        collection, _ = _call(declared)
-        return collection
+        produced, _ = _call(declared)
+        if isinstance(produced, Path):
+            raise ValueError(
+                f"Feature provider {declared.provider!r} writes a file, so it cannot also be a "
+                "read-through provider. Remove stores_result=False."
+            )
+        return produced
     ensure_current(feature_id)
     return shared_features.load_feature_collection(feature_id)

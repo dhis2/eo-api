@@ -63,6 +63,9 @@ xarray = [
 # Full server stack — required to run your own Open Climate Service instance.
 server = [
     "fastapi>=0.100.0",
+    # Ingests large vector sources by streaming a bbox-filtered extract straight to GeoParquet.
+    # Server-side only: the client never ingests, and duckdb is a heavy binary wheel.
+    "duckdb>=1.5.5",
     "jinja2>=3.1",
     "starlette>=0.27.0",
     "uvicorn>=0.41.0",
