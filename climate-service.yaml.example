@@ -34,8 +34,8 @@ data_dir: ./data   # required — directory for downloaded NetCDF files and Zarr
 #       max_attempts: 3
 
 # Named geometry sets, referenced by id instead of pasted into every request. `stored` reads a
-# GeoParquet file from <data_dir>/features/; other providers come from plugins/features/.
-# Resolved sets are cached under <data_dir>/cache/features/ and refetched once the TTL expires.
+# GeoParquet file from <data_dir>/features/; other providers come from plugins/features/ and
+# update their entry in that same store once the TTL expires.
 # features:
 #   - id: districts
 #     provider: stored

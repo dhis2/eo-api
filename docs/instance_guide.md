@@ -237,16 +237,19 @@ automation:
         geometries: { from_features: districts }
 ```
 
-At submission this becomes a `load_features` node naming a **snapshot**, not a copy of the geometry — so the job record stays small, and it still records exactly which boundaries the run used:
+At submission this becomes a `load_features` node, not a copy of the geometry — so the job record stays small:
 
 ```json
-{"process_id": "load_features",
- "arguments": {"id": "districts", "snapshot": "a1b2c3d4e5f6-20260905T110422123456Z"}}
+{"process_id": "load_features", "arguments": {"id": "districts"}}
 ```
 
-Resolved sets are cached under `<data_dir>/cache/features/`. That is deliberately **not** `<data_dir>/features/`: the cache is derived and evictable, and it is never listed at `GET /features` — an organisation-unit hierarchy at facility level carries point coordinates, and publishing it should be a decision, not a side effect of caching.
+The job's description records which version of each set it ran against (`against features districts@release-2026-09`), which is what explains why one run covered 47 districts and the next covered 48.
 
-The `stored` provider reads `<data_dir>/features/`, so an instance with no external system configured can still declare feature sets and schedule aggregation against boundaries it ships itself.
+There is **one** store, `<data_dir>/features/`. A provider-backed set updates its entry there rather than filling a separate cache — the same shape as a dataset plugin writing into `downloads/`. Each provider-maintained entry gets a JSON sidecar recording its provider, version and fetch time; a file an admin drops in has no sidecar, and a provider refuses to overwrite it.
+
+The `stored` provider reads that same store, so an instance with no external system configured can still declare feature sets and schedule aggregation against boundaries it ships itself.
+
+Past versions are not kept. Recording *which* boundaries a run used needs a version string, not an archive — and re-running a scheduled push is usually a repair that wants current boundaries anyway.
 
 Feature ids must identify exactly one feature. A null or duplicate id fails loudly, because the id becomes the location label an export writes against — two features under one id would be pushed as one organisation unit, silently discarding a value.
 

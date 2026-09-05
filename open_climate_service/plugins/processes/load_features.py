@@ -8,11 +8,11 @@ a plugin registers.
 It exists so that a reference can survive **into** the process graph instead of being resolved
 before it. A scheduled trigger writes:
 
-    {"process_id": "load_features", "arguments": {"id": "districts", "snapshot": "...-20260905T110422Z"}}
+    {"process_id": "load_features", "arguments": {"id": "districts"}}
 
-which is ~90 bytes in the persisted job record, rather than the megabytes a resolved
-FeatureCollection would be. The `snapshot` argument is stamped at submission, so the record still
-says exactly which boundaries the run used.
+which is a few dozen bytes in the persisted job record, rather than the megabytes a resolved
+FeatureCollection would be. Which boundaries the run used is recorded on the job itself, as the
+version the store held at submission.
 """
 
 from __future__ import annotations
@@ -28,21 +28,14 @@ from open_climate_service.process import process
     description=(
         "Resolve a feature set declared in this instance's configuration, for use as the "
         "`geometries` argument of `aggregate_spatial`. The declaration binds the id to a provider "
-        "and its parameters; the result is cached, and each cached version has a snapshot id."
+        "and its parameters; the stored collection is refreshed when it is past its TTL."
     ),
     parameters={
         "id": {"description": "Feature id, as declared under `features:` in the instance config."},
-        "snapshot": {
-            "description": (
-                "Pin to one cached snapshot, as recorded on a triggered job. Omit to use the "
-                "current one, fetching from the provider when the cache is past its TTL."
-            )
-        },
     },
 )
 def load_features(
     id: str,  # noqa: A002 — the openEO parameter is named `id`, as in load_vector_cube
-    snapshot: str | None = None,
 ) -> dict[str, Any]:
     """Return the declared feature set as a GeoJSON FeatureCollection."""
-    return resolver.load(id, snapshot=snapshot)
+    return resolver.load(id)

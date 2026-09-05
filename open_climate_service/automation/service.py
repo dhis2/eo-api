@@ -163,26 +163,38 @@ def _resolve_feature_references(value: Any) -> Any:
     The rewritten arguments are copied verbatim into the submitted process graph, which is then
     persisted in the job record — so resolving the reference to a FeatureCollection here would write
     a country's whole hierarchy into ``jobs.json`` on every scheduled run, which is the problem the
-    reference exists to remove. A node keeps the record at ~90 bytes and defers the fetch to
-    execution.
-
-    The snapshot id *is* resolved here, because it is a short string and because stamping it at
-    submission is what makes the run reproducible: re-running the record aggregates the boundaries
-    that run saw rather than whatever the hierarchy holds later.
+    reference exists to remove. A node keeps the record small and defers the fetch to execution.
     """
     if isinstance(value, list):
         return [_resolve_feature_references(item) for item in value]
     if not isinstance(value, dict):
         return value
     if set(value) == {FROM_FEATURES} and isinstance(value[FROM_FEATURES], str):
-        from open_climate_service.features import resolver
-
-        feature_id = value[FROM_FEATURES]
-        return {
-            "process_id": "load_features",
-            "arguments": {"id": feature_id, "snapshot": resolver.current_snapshot(feature_id)},
-        }
+        return {"process_id": "load_features", "arguments": {"id": value[FROM_FEATURES]}}
     return {key: _resolve_feature_references(item) for key, item in value.items()}
+
+
+def _feature_provenance(arguments: Any) -> str:
+    """Describe the feature versions this job runs against, for the job's own record.
+
+    Refreshing here rather than only at execution is what makes the description meaningful: it names
+    the version the store actually holds when the job is submitted, which is what explains why one
+    run covered 47 districts and the next covered 48.
+
+    Best-effort. A provider that is briefly unreachable should delay the fetch to execution, not
+    fail the submission — and a job with no provenance line is a smaller problem than a schedule
+    that stops dispatching.
+    """
+    from open_climate_service.features import resolver
+
+    parts = []
+    for feature_id in sorted(set(_iter_feature_references(arguments))):
+        try:
+            parts.append(f"{feature_id}@{resolver.ensure_current(feature_id)}")
+        except Exception:
+            logger.warning("Could not refresh feature set '%s' at submission", feature_id, exc_info=True)
+            parts.append(f"{feature_id}@unresolved")
+    return f" against features {', '.join(parts)}" if parts else ""
 
 
 def _validate_feature_references(config: AutomationConfig) -> None:
@@ -319,10 +331,12 @@ class WorkflowAutomationService:
     def _submit(self, trigger: WorkflowTrigger, event: JobEvent, service: OpenEOJobService) -> None:
         """Create and start the deterministic job for one trigger/event pair."""
         dataset_id = event.data.get("dataset_id")
-        arguments = _resolve_feature_references(_resolve_event_values(trigger.arguments, event))
+        resolved = _resolve_event_values(trigger.arguments, event)
+        provenance = _feature_provenance(resolved)
+        arguments = _resolve_feature_references(resolved)
         body = OpenEOJobCreate(
             title=f"{trigger.workflow_id} after {dataset_id} update",
-            description=f"Triggered by {event.event_id} using automation rule {trigger.id}",
+            description=f"Triggered by {event.event_id} using automation rule {trigger.id}{provenance}",
             process={
                 "process_graph": {
                     "workflow": {

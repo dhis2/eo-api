@@ -130,6 +130,43 @@ def collection_path(collection_id: str) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+SIDECAR_SUFFIX = ".json"
+
+
+def sidecar_path(collection_id: str) -> Path | None:
+    """The metadata file beside a collection, or None when the id is not a valid one.
+
+    Existence is not checked: a curated file an admin dropped in has no sidecar, which is how the
+    store distinguishes it from one a provider maintains.
+    """
+    if not _is_valid_id(collection_id):
+        return None
+    root = features_dir()
+    candidate = (root / f"{collection_id}{SIDECAR_SUFFIX}").resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError:
+        return None
+    return candidate
+
+
+def read_sidecar(collection_id: str) -> dict[str, Any]:
+    """A collection's metadata, or an empty dict when it has none.
+
+    The sidecar makes the store self-describing. It records which column carries the feature id, so
+    a caller need not know — and, for a collection a provider maintains, where it came from and when.
+    """
+    path = sidecar_path(collection_id)
+    if path is None or not path.is_file():
+        return {}
+    try:
+        loaded = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Feature collection '%s' has an unreadable sidecar; ignoring it", collection_id)
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
 def _geo_metadata(meta: Any) -> dict[str, Any]:
     """The GeoParquet ``geo`` metadata for the primary geometry column, or an empty dict.
 
@@ -407,15 +444,18 @@ def load_feature_collection(
 ) -> dict[str, Any]:
     """Read a named collection as a GeoJSON FeatureCollection.
 
-    Resolves the id against the vector directory and enforces the whole-file read limit, then
-    hands the file to :func:`read_features`. The split is what lets the config layer (CLIM-926)
-    read a cached FeatureCollection through the same code without the cache becoming addressable
-    by id here.
+    Resolves the id against the feature directory and enforces the whole-file read limit, then
+    hands the file to :func:`read_features`.
 
     ``id_property`` chooses which column becomes each feature's ``id``. That matters beyond
     cosmetics: the feature id becomes the label on the geometry dimension, which is what the
     DHIS2 and CHAP exports use as their location column — so pointing it at an org-unit code
     column is what makes a named collection usable for a DHIS2 push.
+
+    When it is not given, the collection's sidecar is asked. That is what lets a provider-maintained
+    collection be read correctly by a caller that knows only its id: the provider records the id
+    column when it writes, so `load_vector_cube("districts")` and `load_features("districts")` return
+    the same ids without either having to be told.
 
     Collections above :data:`MAX_FEATURES` require a ``bbox``.
     """
@@ -431,6 +471,9 @@ def load_feature_collection(
             f"{MAX_FEATURES:,} that can be loaded as a FeatureCollection. Pass a bbox to read a "
             "window of it."
         )
+
+    if id_property is None:
+        id_property = read_sidecar(collection_id).get("id_property")
 
     return read_features(
         path,

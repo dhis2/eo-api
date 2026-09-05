@@ -27,19 +27,26 @@ logger = logging.getLogger(__name__)
 F = TypeVar("F", bound=Callable[..., Any])
 
 _OCS_FEATURE_PROVIDER_ATTR = "__ocs_feature_provider__"
+_OCS_STORES_RESULT_ATTR = "__ocs_feature_provider_stores__"
 
 
-def feature_provider(name: str) -> Callable[[F], F]:
+def feature_provider(name: str, *, stores_result: bool = True) -> Callable[[F], F]:
     """Register ``func`` as the provider named ``name``.
 
     The function takes the declaration's ``params`` as keyword arguments and returns a GeoJSON
     FeatureCollection. It may also return ``(collection, version)``, where ``version`` is an etag
-    or release id the cache can compare against — a provider that can answer "has this changed?"
-    more cheaply than refetching should say so that way.
+    or release id — a provider whose upstream has real versions should say so that way, and it is
+    recorded verbatim as the set's version.
+
+    ``stores_result=False`` marks a provider that resolves live and whose output must **not** be
+    written into the feature store. `stored` is the case that needs it: it reads the store already,
+    so writing its result back would have the entry rewrite itself on every refresh. Such a provider
+    has nothing to refresh, and its declaration is an alias rather than an ingestion.
     """
 
     def decorate(func: F) -> F:
         setattr(func, _OCS_FEATURE_PROVIDER_ATTR, name)
+        setattr(func, _OCS_STORES_RESULT_ATTR, stores_result)
         return func
 
     return decorate
@@ -48,6 +55,11 @@ def feature_provider(name: str) -> Callable[[F], F]:
 def get_provider_name(func: Any) -> str | None:
     """The registered name of a provider function, or None if it is not one."""
     return getattr(func, _OCS_FEATURE_PROVIDER_ATTR, None)
+
+
+def stores_result(func: Any) -> bool:
+    """Whether this provider's output belongs in the feature store."""
+    return bool(getattr(func, _OCS_STORES_RESULT_ATTR, True))
 
 
 def _load_from_module(module_name: str) -> list[Any]:

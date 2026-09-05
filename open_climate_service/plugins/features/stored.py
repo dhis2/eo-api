@@ -21,7 +21,7 @@ from open_climate_service.features.provider import feature_provider
 from open_climate_service.shared import features
 
 
-@feature_provider("stored")
+@feature_provider("stored", stores_result=False)
 def stored(
     id: str,  # noqa: A002 — names the collection, matching load_vector_cube's parameter
     id_property: str | None = None,

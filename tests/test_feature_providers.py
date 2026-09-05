@@ -1,4 +1,4 @@
-"""Declared feature sets: providers, cache snapshots and trigger references (CLIM-926)."""
+"""Declared feature sets: providers, store updates and trigger references (CLIM-926)."""
 
 from pathlib import Path
 from typing import Any
@@ -9,10 +9,11 @@ from shapely.geometry import Polygon
 
 from open_climate_service.automation import service as automation_service
 from open_climate_service.automation.config import AutomationConfig
-from open_climate_service.features import cache, resolver
-from open_climate_service.features.config import FeatureDeclaration, get_features_config
+from open_climate_service.features import resolver, store
+from open_climate_service.features.config import get_features_config
 from open_climate_service.features.provider import feature_provider, registry, resolve_provider
 from open_climate_service.plugins.processes.load_features import load_features
+from open_climate_service.plugins.processes.load_vector_cube import load_vector_cube
 
 _NORTH = Polygon([(0, 2), (4, 2), (4, 4), (0, 4)])
 _SOUTH = Polygon([(0, 0), (4, 0), (4, 2), (0, 2)])
@@ -85,7 +86,7 @@ def test_an_undeclared_id_names_what_is_declared(monkeypatch: pytest.MonkeyPatch
         resolver.declaration("nope")
 
 
-# --- caching and snapshots -------------------------------------------------------------------
+# --- store updates and freshness -------------------------------------------------------------------
 
 
 def test_a_resolved_set_is_cached_and_the_provider_called_once(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -98,24 +99,26 @@ def test_a_resolved_set_is_cached_and_the_provider_called_once(instance: Path, m
     _declare(monkeypatch, {"id": "districts", "provider": "counting", "params": {"level": 2}})
     _register(monkeypatch, "counting", provider)
 
-    first = resolver.current_snapshot("districts")
-    second = resolver.current_snapshot("districts")
+    first = resolver.ensure_current("districts")
+    second = resolver.ensure_current("districts")
 
     assert first == second
     assert len(calls) == 1, "a second call within the TTL must not refetch"
     assert calls[0] == {"level": 2}
 
 
-def test_changing_params_invalidates_the_cache(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_changing_params_refetches(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`level: 2` and `level: 3` are different questions and must not share an answer."""
-    _register(monkeypatch, "counting", lambda **_: _collection(["MW.N", "MW.S"]))
+    calls: list[Any] = []
+    _register(monkeypatch, "counting", lambda **params: calls.append(params) or _collection(["MW.N", "MW.S"]))
 
     _declare(monkeypatch, {"id": "districts", "provider": "counting", "params": {"level": 2}})
-    level_2 = resolver.current_snapshot("districts")
+    level_2 = resolver.ensure_current("districts")
     _declare(monkeypatch, {"id": "districts", "provider": "counting", "params": {"level": 3}})
-    level_3 = resolver.current_snapshot("districts")
+    level_3 = resolver.ensure_current("districts")
 
-    assert level_2 != level_3
+    assert calls == [{"level": 2}, {"level": 3}], "a params change must reach the provider"
+    assert level_2 != level_3, "the recorded version must distinguish what was fetched"
 
 
 def test_an_expired_ttl_refetches(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,52 +126,80 @@ def test_an_expired_ttl_refetches(instance: Path, monkeypatch: pytest.MonkeyPatc
     _register(monkeypatch, "counting", lambda **_: calls.append(1) or _collection(["MW.N", "MW.S"]))
     _declare(monkeypatch, {"id": "districts", "provider": "counting", "ttl_seconds": 0})
 
-    resolver.current_snapshot("districts")
-    resolver.current_snapshot("districts")
+    resolver.ensure_current("districts")
+    resolver.ensure_current("districts")
 
     assert len(calls) == 2
 
 
-def test_a_pinned_snapshot_is_read_back_not_refetched(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A recorded snapshot must return the boundaries that run saw, not today's."""
+def test_a_refresh_updates_the_entry_in_place(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """One store, one file per set: a refresh replaces the entry rather than adding beside it."""
     _declare(monkeypatch, {"id": "districts", "provider": "shifting", "ttl_seconds": 0})
     _register(monkeypatch, "shifting", lambda **_: _collection(["MW.N", "MW.S"]))
-    pinned = resolver.current_snapshot("districts")
+    resolver.ensure_current("districts")
 
     # The upstream hierarchy changes: one district is renamed.
     _register(monkeypatch, "shifting", lambda **_: _collection(["MW.N", "MW.CENTRAL"]))
 
-    assert [f["id"] for f in load_features("districts", snapshot=pinned)["features"]] == ["MW.N", "MW.S"]
     assert [f["id"] for f in load_features("districts")["features"]] == ["MW.N", "MW.CENTRAL"]
+    assert len(list((instance / "features").glob("*.parquet"))) == 1
 
 
-def test_a_dropped_snapshot_fails_clearly(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_sidecar_makes_the_store_self_describing(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A reader knowing only the id still gets the right ids — including `load_vector_cube`."""
     _declare(monkeypatch, {"id": "districts", "provider": "counting"})
     _register(monkeypatch, "counting", lambda **_: _collection(["MW.N", "MW.S"]))
-    snapshot = resolver.current_snapshot("districts")
-    (instance / "cache" / "features" / "districts" / f"{snapshot}.parquet").unlink()
+    resolver.ensure_current("districts")
 
-    with pytest.raises(ValueError, match="no longer cached"):
-        load_features("districts", snapshot=snapshot)
-
-
-@pytest.mark.parametrize("bad_snapshot", ["../../features/districts", "nope", "", "deadbeef1234-not-a-time"])
-def test_a_snapshot_id_cannot_address_an_arbitrary_path(instance: Path, bad_snapshot: str) -> None:
-    """The id arrives from a persisted process graph, so it is validated rather than trusted."""
-    assert cache.snapshot_path("districts", bad_snapshot) is None
+    assert [f["id"] for f in load_vector_cube("districts")["features"]] == ["MW.N", "MW.S"]
+    assert store.metadata("districts")["provider"] == "counting"
 
 
-def test_eviction_keeps_the_newest_snapshots(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _declare(monkeypatch, {"id": "districts", "provider": "counting", "ttl_seconds": 0})
-    _register(monkeypatch, "counting", lambda **_: _collection(["MW.N", "MW.S"]))
-    declared = FeatureDeclaration(id="districts", provider="counting", ttl_seconds=0)
-    for index in range(4):
-        cache.write(declared, _collection([f"A{index}", f"B{index}"]))
+def test_a_stored_declaration_reads_through_without_rewriting_the_store(
+    instance: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `stored` set is an alias for a file already in the store, not an ingestion into it.
 
-    removed = cache.evict("districts", keep=2)
+    Writing its result back would have the entry rewrite itself on every refresh, and would trip the
+    ownership guard on the most natural config — declaration id equal to the collection id.
+    """
+    gpd.GeoDataFrame({"ou_code": ["MW.N", "MW.S"]}, geometry=[_NORTH, _SOUTH], crs="EPSG:4326").to_parquet(
+        instance / "features" / "districts.parquet"
+    )
+    _declare(
+        monkeypatch,
+        {"id": "districts", "provider": "stored", "params": {"id": "districts", "id_property": "ou_code"}},
+    )
 
-    assert len(removed) == 2
-    assert len(list((instance / "cache" / "features" / "districts").glob("*.parquet"))) == 2
+    assert resolver.ensure_current("districts") == resolver.LIVE_VERSION
+    assert [f["id"] for f in load_features("districts")["features"]] == ["MW.N", "MW.S"]
+    assert store.metadata("districts") == {}, "a read-through must not claim ownership of the file"
+
+
+def test_a_provider_will_not_overwrite_a_curated_collection(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An admin's file has no sidecar, so nothing claims ownership of it — refuse rather than clobber."""
+    gpd.GeoDataFrame({"ou_code": ["MW.N", "MW.S"]}, geometry=[_NORTH, _SOUTH], crs="EPSG:4326").to_parquet(
+        instance / "features" / "districts.parquet"
+    )
+    _declare(monkeypatch, {"id": "districts", "provider": "counting"})
+    _register(monkeypatch, "counting", lambda **_: _collection(["A", "B"]))
+
+    with pytest.raises(ValueError, match="not maintained by a provider"):
+        resolver.ensure_current("districts")
+
+
+def test_a_provider_will_not_overwrite_another_providers_collection(
+    instance: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _declare(monkeypatch, {"id": "districts", "provider": "first"})
+    _register(monkeypatch, "first", lambda **_: _collection(["MW.N", "MW.S"]))
+    resolver.ensure_current("districts")
+
+    _declare(monkeypatch, {"id": "districts", "provider": "second"})
+    _register(monkeypatch, "second", lambda **_: _collection(["A", "B"]))
+
+    with pytest.raises(ValueError, match="maintained by provider 'first'"):
+        resolver.ensure_current("districts")
 
 
 # --- the identity contract, applied to providers ----------------------------------------------
@@ -180,7 +211,7 @@ def test_a_provider_returning_duplicate_ids_is_refused(instance: Path, monkeypat
     _register(monkeypatch, "broken", lambda **_: _collection(["MW.N", "MW.N"]))
 
     with pytest.raises(ValueError, match="sharing a 'id'.*MW.N"):
-        resolver.current_snapshot("districts")
+        resolver.ensure_current("districts")
 
 
 def test_a_provider_returning_a_null_id_is_refused(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -188,7 +219,7 @@ def test_a_provider_returning_a_null_id_is_refused(instance: Path, monkeypatch: 
     _register(monkeypatch, "broken", lambda **_: _collection(["MW.N", None]))
 
     with pytest.raises(ValueError, match="1 feature.* with no 'id'"):
-        resolver.current_snapshot("districts")
+        resolver.ensure_current("districts")
 
 
 def test_a_provider_returning_something_other_than_a_collection_is_refused(
@@ -198,14 +229,14 @@ def test_a_provider_returning_something_other_than_a_collection_is_refused(
     _register(monkeypatch, "broken", lambda **_: {"type": "Feature"})
 
     with pytest.raises(ValueError, match="must return a GeoJSON FeatureCollection"):
-        resolver.current_snapshot("districts")
+        resolver.ensure_current("districts")
 
 
 # --- trigger references ------------------------------------------------------------------------
 
 
 def test_a_trigger_reference_becomes_a_node_not_geometry(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The whole point: the persisted process graph names a snapshot, it does not carry polygons."""
+    """The whole point: the persisted process graph names the set, it does not carry polygons."""
     _declare(monkeypatch, {"id": "districts", "provider": "counting"})
     _register(monkeypatch, "counting", lambda **_: _collection(["MW.N", "MW.S"]))
 
@@ -214,10 +245,32 @@ def test_a_trigger_reference_becomes_a_node_not_geometry(instance: Path, monkeyp
     )
 
     assert resolved["dataset_id"] == "chirps"
-    assert resolved["geometries"]["process_id"] == "load_features"
-    assert resolved["geometries"]["arguments"]["id"] == "districts"
-    assert resolved["geometries"]["arguments"]["snapshot"]
+    assert resolved["geometries"] == {"process_id": "load_features", "arguments": {"id": "districts"}}
     assert "coordinates" not in str(resolved), "geometry must not reach the job record"
+
+
+def test_the_job_records_which_feature_version_it_ran_against(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Explaining why one run covered 47 districts and the next covered 48 needs the version."""
+    _declare(monkeypatch, {"id": "districts", "provider": "counting"})
+    _register(monkeypatch, "counting", lambda **_: (_collection(["MW.N", "MW.S"]), "release-2026-09"))
+
+    provenance = automation_service._feature_provenance({"geometries": {"from_features": "districts"}})
+
+    assert provenance == " against features districts@release-2026-09"
+
+
+def test_an_unreachable_provider_does_not_fail_the_submission(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A schedule that stops dispatching is worse than a job with no provenance line."""
+
+    def unreachable(**_: Any) -> dict[str, Any]:
+        raise ConnectionError("DHIS2 unreachable")
+
+    _declare(monkeypatch, {"id": "districts", "provider": "flaky"})
+    _register(monkeypatch, "flaky", unreachable)
+
+    assert automation_service._feature_provenance({"geometries": {"from_features": "districts"}}) == (
+        " against features districts@unresolved"
+    )
 
 
 def test_the_rewritten_node_stays_small(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,15 +1,14 @@
-"""Resolve a declared feature id to geometry, through its provider and the cache (CLIM-926).
+"""Resolve a declared feature id to geometry, through its provider and the store (CLIM-926).
 
-Two entry points, deliberately split:
+Two entry points:
 
-- :func:`current_snapshot` answers "which snapshot should this job use?" and returns an **id**.
-  The automation layer calls it at submission, so the job record names a snapshot without ever
-  holding geometry.
-- :func:`load` answers "give me the geometry" and is called during execution, by the
-  ``load_features`` process.
+- :func:`ensure_current` refreshes the stored entry if it is stale and returns the **version** that
+  is now in the store. The automation layer calls it at submission so a job can record which
+  boundaries it ran against, without the geometry itself ever entering the job record.
+- :func:`load` returns the geometry, and is called during execution by the ``load_features`` process.
 
-That split is the whole design. Resolving geometry at submission would inline megabytes into every
-persisted process graph — which is the problem this ticket exists to remove.
+That split is the design. Resolving geometry at submission would inline megabytes into every
+persisted process graph — the problem this ticket exists to remove.
 """
 
 from __future__ import annotations
@@ -17,11 +16,15 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from open_climate_service.features import cache
+from open_climate_service.features import store
 from open_climate_service.features.config import FeatureDeclaration, get_features_config
-from open_climate_service.features.provider import resolve_provider
+from open_climate_service.features.provider import resolve_provider, stores_result
+from open_climate_service.shared import features as shared_features
 
 logger = logging.getLogger(__name__)
+
+LIVE_VERSION = "live"
+"""Version recorded for a set whose provider resolves in place and stores nothing."""
 
 
 def declaration(feature_id: str) -> FeatureDeclaration:
@@ -29,8 +32,8 @@ def declaration(feature_id: str) -> FeatureDeclaration:
     return get_features_config().get(feature_id)
 
 
-def _fetch(declared: FeatureDeclaration) -> str:
-    """Call the provider and cache the result, returning the new snapshot id."""
+def _call(declared: FeatureDeclaration) -> tuple[dict[str, Any], str | None]:
+    """Call the provider and check it returned something usable."""
     provider = resolve_provider(declared.provider)
     result = provider(**declared.params)
 
@@ -45,32 +48,40 @@ def _fetch(declared: FeatureDeclaration) -> str:
             f"Feature provider {declared.provider!r} must return a GeoJSON FeatureCollection "
             f"for {declared.id!r}, got {type(collection).__name__}"
         )
-    return cache.write(declared, collection, version=version)
+    return collection, version
 
 
-def current_snapshot(feature_id: str, *, refresh: bool = False) -> str:
-    """The snapshot id a job submitted now should use, fetching only when the cache is stale.
+def ensure_current(feature_id: str, *, refresh: bool = False) -> str:
+    """Make the stored entry current and return its version.
 
-    Returns an id rather than geometry so the caller can record which boundaries a run used without
-    persisting them. Refetching is bounded by the declaration's TTL, so a schedule that fires hourly
-    still calls the provider once a day — and a briefly unreachable upstream does not fail the
-    submission while a usable snapshot is still within its TTL.
+    Fetching is bounded by the declaration's TTL, so a schedule firing hourly still asks the
+    provider once a day — and a briefly unreachable upstream does not fail a submission while the
+    stored entry is still within its TTL.
+
+    A provider that stores nothing has nothing to make current: it reads whatever the store holds
+    at the moment it runs, so there is no fetch here and no version to record beyond that fact.
     """
     declared = declaration(feature_id)
-    if not refresh:
-        existing = cache.latest(declared)
-        if existing is not None:
-            return existing
-    return _fetch(declared)
+    if not stores_result(resolve_provider(declared.provider)):
+        return LIVE_VERSION
+    if not refresh and store.is_fresh(declared):
+        recorded = store.metadata(feature_id).get("version")
+        if isinstance(recorded, str):
+            return recorded
+    collection, version = _call(declared)
+    return store.write(declared, collection, version=version)
 
 
-def load(feature_id: str, *, snapshot: str | None = None) -> dict[str, Any]:
-    """The FeatureCollection for ``feature_id``, pinned to ``snapshot`` when one is named.
+def load(feature_id: str) -> dict[str, Any]:
+    """The FeatureCollection for ``feature_id``, refreshing the store first if it is stale.
 
-    A named snapshot is read as-is and never refreshed: a job that recorded one is asking for the
-    boundaries that run saw, and quietly substituting today's would make the result irreproducible
-    in exactly the way the snapshot id exists to prevent.
+    A stored set is read through the provider, which goes to the same call `load_vector_cube` makes.
+    A provider-maintained one is read from the store it just updated, where the sidecar says which
+    column carries the ids — so both come back looking the same.
     """
-    if snapshot is not None:
-        return cache.read(feature_id, snapshot)
-    return cache.read(feature_id, current_snapshot(feature_id))
+    declared = declaration(feature_id)
+    if not stores_result(resolve_provider(declared.provider)):
+        collection, _ = _call(declared)
+        return collection
+    ensure_current(feature_id)
+    return shared_features.load_feature_collection(feature_id)
