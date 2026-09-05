@@ -17,7 +17,7 @@ import logging
 from typing import Any
 
 from open_climate_service.features import store
-from open_climate_service.features.config import FeatureDeclaration, get_features_config
+from open_climate_service.features.config import FeatureTemplate, get_feature_templates
 from open_climate_service.features.provider import resolve_provider, stores_result
 from open_climate_service.shared import features as shared_features
 
@@ -27,12 +27,12 @@ LIVE_VERSION = "live"
 """Version recorded for a set whose provider resolves in place and stores nothing."""
 
 
-def declaration(feature_id: str) -> FeatureDeclaration:
-    """The instance's declaration for ``feature_id``."""
-    return get_features_config().get(feature_id)
+def declaration(feature_id: str) -> FeatureTemplate:
+    """The instance's template for ``feature_id``."""
+    return get_feature_templates().get(feature_id)
 
 
-def _call(declared: FeatureDeclaration) -> tuple[dict[str, Any], str | None]:
+def _call(declared: FeatureTemplate) -> tuple[dict[str, Any], str | None]:
     """Call the provider and check it returned something usable."""
     provider = resolve_provider(declared.provider)
     result = provider(**declared.params)

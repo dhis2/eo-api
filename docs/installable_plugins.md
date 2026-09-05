@@ -32,8 +32,9 @@ osc_example_plugin/
     my_process.py
   workflows/             # optional: openEO UDP JSON graphs
     my_workflow.json
-  features/              # optional: @feature_provider-decorated callables
+  features/              # optional: feature templates (.yaml) + @feature_provider callables (.py)
     __init__.py
+    districts.yaml
     my_provider.py
 ```
 

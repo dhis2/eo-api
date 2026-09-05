@@ -218,9 +218,9 @@ def _validate_feature_references(config: AutomationConfig) -> None:
     Checked at startup rather than at fire time: a typo in a schedule should be a boot error, not a
     job that fails at 3am on the first trigger.
     """
-    from open_climate_service.features.config import get_features_config
+    from open_climate_service.features.config import get_feature_templates
 
-    declared = {declaration.id for declaration in get_features_config().features}
+    declared = {template.id for template in get_feature_templates().templates}
     for trigger in config.workflow_triggers:
         for feature_id in _iter_feature_references(trigger.arguments):
             if feature_id not in declared:

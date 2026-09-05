@@ -9,9 +9,11 @@ A collection therefore comes in two flavours, distinguished by whether it has a 
 
 - **curated** — an admin dropped in a GeoParquet file. No sidecar, or one naming only its id column.
   Nothing refreshes it; deleting it is a config change.
-- **provider-maintained** — a declaration in ``features:`` names a provider, and the entry is
-  rewritten whenever it falls outside its TTL. The sidecar records the provider, the params it was
-  fetched with, the version, and when.
+- **provider-maintained** — a ``features/*.yaml`` template names a provider, and the entry is
+  rewritten whenever it falls outside its TTL. The sidecar records the *runtime* facts: the
+  provider, the params fingerprint, the version and when it was fetched. Authored metadata —
+  licence, attribution, description — belongs to the template, not here, so a set can be described
+  in the catalogue before it has ever been fetched.
 
 The sidecar is what keeps a refresh from clobbering something it does not own: a provider only
 rewrites an entry whose sidecar says it is that provider's.
@@ -31,7 +33,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from open_climate_service.features.config import FeatureDeclaration
+from open_climate_service.features.config import FeatureTemplate
 from open_climate_service.shared import features as shared_features
 
 logger = logging.getLogger(__name__)
@@ -45,7 +47,7 @@ as ``id_property``, so a reader that knows only the collection id still gets the
 """
 
 
-def params_fingerprint(declaration: FeatureDeclaration) -> str:
+def params_fingerprint(declaration: FeatureTemplate) -> str:
     """A digest of what was asked for, so changing the request forces a refetch.
 
     Covers the provider and its params: ``level: 2`` and ``level: 3`` are different questions and an
@@ -65,7 +67,7 @@ def metadata(feature_id: str) -> dict[str, Any]:
     return shared_features.read_sidecar(feature_id)
 
 
-def is_fresh(declaration: FeatureDeclaration) -> bool:
+def is_fresh(declaration: FeatureTemplate) -> bool:
     """Whether the stored entry can be served without asking the provider again.
 
     False when there is no entry, when it was fetched for different params, when it belongs to a
@@ -89,7 +91,7 @@ def is_fresh(declaration: FeatureDeclaration) -> bool:
     return age < declaration.effective_ttl
 
 
-def write(declaration: FeatureDeclaration, collection: dict[str, Any], *, version: str | None = None) -> str:
+def write(declaration: FeatureTemplate, collection: dict[str, Any], *, version: str | None = None) -> str:
     """Write a resolved FeatureCollection into the store, returning the version recorded for it.
 
     Refuses to overwrite a collection this provider does not own, so a declaration whose id collides

@@ -5,12 +5,13 @@ from typing import Any
 
 import geopandas as gpd
 import pytest
+from fastapi.testclient import TestClient
 from shapely.geometry import Polygon
 
 from open_climate_service.automation import service as automation_service
 from open_climate_service.automation.config import AutomationConfig
 from open_climate_service.features import resolver, store
-from open_climate_service.features.config import get_features_config
+from open_climate_service.features.config import FeatureTemplates
 from open_climate_service.features.provider import feature_provider, registry, resolve_provider
 from open_climate_service.plugins.processes.load_features import load_features
 from open_climate_service.plugins.processes.load_vector_cube import load_vector_cube
@@ -39,8 +40,12 @@ def instance(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def _declare(monkeypatch: pytest.MonkeyPatch, *declarations: dict[str, Any]) -> None:
-    monkeypatch.setattr("open_climate_service.config.get_config", lambda: {"features": list(declarations)})
+def _declare(monkeypatch: pytest.MonkeyPatch, *templates: dict[str, Any]) -> None:
+    """Stand in for the `features/*.yaml` templates a real instance would ship."""
+    loaded = FeatureTemplates.model_validate({"templates": list(templates)})
+    monkeypatch.setattr("open_climate_service.features.config.get_feature_templates", lambda: loaded)
+    monkeypatch.setattr("open_climate_service.features.resolver.get_feature_templates", lambda: loaded)
+    monkeypatch.setattr("open_climate_service.features.routes.get_feature_templates", lambda: loaded)
 
 
 def _register(monkeypatch: pytest.MonkeyPatch, name: str, func: Any) -> None:
@@ -74,10 +79,9 @@ def test_the_stored_provider_reads_the_instance_feature_store(instance: Path) ->
 # --- declarations ----------------------------------------------------------------------------
 
 
-def test_duplicate_feature_ids_are_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    _declare(monkeypatch, {"id": "d", "provider": "stored"}, {"id": "d", "provider": "stored"})
-    with pytest.raises(ValueError, match="feature ids must be unique"):
-        get_features_config()
+def test_duplicate_feature_ids_are_refused() -> None:
+    with pytest.raises(ValueError, match="feature template ids must be unique"):
+        FeatureTemplates.model_validate({"templates": [{"id": "d"}, {"id": "d"}]})
 
 
 def test_an_undeclared_id_names_what_is_declared(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -351,3 +355,47 @@ def test_a_trigger_referencing_an_undeclared_feature_fails_at_startup(
     )
     with pytest.raises(ValueError, match="references feature 'distrcits'.*Declared: districts"):
         automation_service._validate_feature_references(config)
+
+
+# --- catalogue metadata --------------------------------------------------------------------------
+
+
+def test_the_listing_carries_the_licence_and_provenance_a_template_declares(
+    client: TestClient, instance: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file knows its CRS and bounds; only a template knows its licence and what it is for."""
+    gpd.GeoDataFrame({"ou_code": ["MW.N", "MW.S"]}, geometry=[_NORTH, _SOUTH], crs="EPSG:4326").to_parquet(
+        instance / "features" / "districts.parquet"
+    )
+    _declare(
+        monkeypatch,
+        {
+            "id": "districts",
+            "name": "Malawi districts",
+            "license": "CC-BY-4.0",
+            "attribution": "National Statistical Office of Malawi",
+            "source_url": "https://example.org/districts",
+        },
+    )
+
+    listed = client.get("/features").json()
+
+    assert listed[0]["name"] == "Malawi districts"
+    assert listed[0]["license"] == "CC-BY-4.0"
+    assert listed[0]["attribution"] == "National Statistical Office of Malawi"
+    assert listed[0]["feature_count"] == 2, "file-derived facts survive the merge"
+
+
+def test_a_collection_with_no_template_is_still_listed(
+    client: TestClient, instance: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An admin's file is a real collection; having authored nothing about it is not an error."""
+    gpd.GeoDataFrame({"ou_code": ["MW.N", "MW.S"]}, geometry=[_NORTH, _SOUTH], crs="EPSG:4326").to_parquet(
+        instance / "features" / "districts.parquet"
+    )
+    _declare(monkeypatch)
+
+    listed = client.get("/features").json()
+
+    assert [info["id"] for info in listed] == ["districts"]
+    assert "license" not in listed[0]
