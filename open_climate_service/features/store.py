@@ -160,6 +160,33 @@ def _write_sidecar(
     )
 
 
+def _validate_id_column(path: Path, id_property: str, declaration: FeatureTemplate) -> int:
+    """Check a written file's ids in Arrow, and return how many features it holds.
+
+    Kept in Arrow rather than pulled into Python. `to_pylist()` on a country's buildings is millions
+    of Python str objects, which is the exact cost the file-writing path exists to avoid -- the ids
+    would end up dominating a read that was supposed to touch one narrow column. `null_count` and a
+    distinct count answer the same question in C++, and only a *failing* file pays to materialise
+    anything, and then only enough to name the offenders.
+    """
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    column = pq.read_table(path, columns=[id_property])[id_property]
+    total = len(column)
+    source = f"Feature set {declaration.id!r} from provider {declaration.provider!r}"
+    if total == 0:
+        raise ValueError(f"Feature provider {declaration.provider!r} wrote no features for {declaration.id!r}")
+
+    labels = pc.cast(column, "string")
+    if column.null_count or pc.any(pc.is_null(labels)).as_py():
+        # Only now is it worth materialising: the message has to name what went wrong.
+        shared_features.validate_feature_ids(column.to_pylist(), source=source, field=id_property)
+    if pc.count_distinct(labels).as_py() != total:
+        shared_features.validate_feature_ids(labels.to_pylist(), source=source, field=id_property)
+    return total
+
+
 def record_written_file(declaration: FeatureTemplate, path: Path, *, version: str | None = None) -> str:
     """Record a GeoParquet file a provider wrote itself, without loading its geometry.
 
@@ -192,23 +219,16 @@ def record_written_file(declaration: FeatureTemplate, path: Path, *, version: st
             f"Available: {', '.join(n for n in schema.names if n != 'geometry')}"
         )
 
-    column = pq.read_table(path, columns=[id_property])[id_property].to_pylist()
-    if not column:
-        raise ValueError(f"Feature provider {declaration.provider!r} wrote no features for {declaration.id!r}")
-    shared_features.validate_feature_ids(
-        column,
-        source=f"Feature set {declaration.id!r} from provider {declaration.provider!r}",
-        field=id_property,
-    )
+    count = _validate_id_column(path, id_property, declaration)
 
     now = datetime.now(UTC)
     recorded = version or f"{params_fingerprint(declaration)}-{now.strftime('%Y%m%dT%H%M%S%fZ')}"
-    _write_sidecar(declaration, id_property=id_property, version=recorded, count=len(column), fetched=now)
+    _write_sidecar(declaration, id_property=id_property, version=recorded, count=count, fetched=now)
     logger.info(
         "Recorded feature collection '%s' written by provider '%s': %d features, version %s",
         declaration.id,
         declaration.provider,
-        len(column),
+        count,
         recorded,
     )
     return recorded
