@@ -140,10 +140,16 @@ def overture(
 
     # The bbox struct is written alongside the geometry so a *windowed read of the extract* can
     # prune row groups; `_declare_covering_bbox` then records what it is.
+    #
+    # The source's own bbox is excluded rather than carried through. `SELECT *` plus a computed
+    # `AS bbox` against a source that already has one -- which every real Overture partition does --
+    # emits both, so the extract carries two identical structs and the covering reference names an
+    # ambiguous column.
+    projection = selected if columns else ("* EXCLUDE (bbox)" if has_bbox else "*")
     connection.execute(
         f"""
         COPY (
-            SELECT {selected},
+            SELECT {projection},
                    {{'xmin': ST_XMin(geometry), 'ymin': ST_YMin(geometry),
                      'xmax': ST_XMax(geometry), 'ymax': ST_YMax(geometry)}} AS bbox
             FROM {read}

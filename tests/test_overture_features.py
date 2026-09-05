@@ -214,3 +214,19 @@ def test_an_extract_will_not_overwrite_a_curated_collection(
 
     with pytest.raises(ValueError, match="not maintained by a provider"):
         resolver.ensure_current("buildings")
+
+
+def test_the_sources_own_bbox_is_not_carried_through(tmp_path: Path, source: Path) -> None:
+    """Every real Overture partition already has a bbox struct.
+
+    `SELECT *` plus a computed `AS bbox` would emit both, so the extract would carry two identical
+    structs and the covering reference would name an ambiguous column.
+    """
+    import pyarrow.parquet as pq
+
+    out = tmp_path / "buildings.parquet"
+    overture(path=out, release="2026-08", bbox=[-1.0, -1.0, 20.0, 20.0], source=str(source))
+
+    names = pq.read_schema(out).names
+    assert names.count("bbox") == 1, f"exactly one bbox struct, got {names}"
+    assert len(gpd.read_parquet(out, bbox=(4, 4, 7, 7))) == 1, "and it is still the usable covering"
