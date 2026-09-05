@@ -1,5 +1,6 @@
 """Open Climate Service -- Climate and earth observation data API for DHIS2."""
 
+import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -9,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import Response
 
 import open_climate_service.startup  # noqa: F401  # pyright: ignore[reportUnusedImport]
+from open_climate_service.automation.service import get_workflow_automation_service
 from open_climate_service.data_registry import routes as dataset_template_routes
 from open_climate_service.extents import routes as extent_routes
 from open_climate_service.features import routes as feature_routes
@@ -21,6 +23,8 @@ from open_climate_service.scheduler import routes as scheduler_routes
 from open_climate_service.scheduler.service import get_scheduler_service
 from open_climate_service.stac import routes as stac_routes
 from open_climate_service.system import routes as system_routes
+
+logger = logging.getLogger(__name__)
 
 # Hosted browser tools that read a Zarr store directly over HTTP. They are the reason a local
 # instance needs any cross-origin story at all: each is a public page fetching a store that may
@@ -75,11 +79,21 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     job_service.recover_pending_jobs()
     openeo_service = get_openeo_job_service()
     openeo_service.recover_pending_jobs()
+    automation_service = get_workflow_automation_service()
+    automation_service.start()
+    job_service.set_event_consumer(automation_service.consume)
+    try:
+        automation_service.replay()
+    except Exception:
+        # Replay must not take down startup: a partial replay is idempotent and the consumer
+        # above still handles every newly persisted event.
+        logger.exception("Workflow automation replay failed; continuing startup")
     scheduler_service = get_scheduler_service()
     scheduler_service.start()
     try:
         yield
     finally:
+        job_service.set_event_consumer(None)
         scheduler_service.shutdown()
         job_service.shutdown()
         openeo_service.shutdown()

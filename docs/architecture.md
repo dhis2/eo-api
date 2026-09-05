@@ -42,6 +42,8 @@ Multiple artifacts can exist for the same dataset template if data was ingested 
 
 Artifacts are stored in `{data_dir}/artifacts/records.json`, where `data_dir` is the path configured in `climate-service.yaml`. This is an internal implementation detail — consumers should never depend on artifact IDs or artifact paths directly.
 
+Store paths are persisted relative to `data_dir` (`downloads/foo.icechunk`) and resolved to absolute paths when records are loaded, so the data directory stays portable: it can be moved, copied to another host, or written in a container at `/app/data` and read from the host. Records written before this convention hold absolute paths and are re-rooted onto the current `data_dir` on read, then rewritten in relative form on the next update. Stores kept outside `data_dir` are recorded as absolute paths.
+
 ### Managed dataset
 
 A **managed dataset** is the public-facing view of the most recent artifact for a given template. It is what `/datasets`, `/zarr`, and `/stac` expose. When an operator ingests or syncs a dataset, the managed dataset view updates to reflect the new artifact — the public ID stays stable.
@@ -135,8 +137,9 @@ Successful native jobs may also contain domain events in their `events` field. T
 persisted in the same update that marks the job successful, so consumers never observe an event
 for failed work. An async sync that actually appends or rematerializes data records one
 `dataset.updated` event with the dataset, artifact, executed action, and previous/current coverage.
-An up-to-date sync records no event. The event is a durable completion outcome; dispatching
-downstream workflows or external notifications is a separate concern.
+An up-to-date sync records no event. Instance-configured workflow triggers consume these durable
+outcomes and submit existing openEO workflows. A deterministic job ID makes replay after restart
+idempotent. External notification remains a separate concern.
 
 Jobs provide:
 
