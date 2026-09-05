@@ -357,7 +357,7 @@ def test_a_provider_claiming_to_write_but_not_writing_is_refused(
     _declare(monkeypatch, {"id": "big", "provider": "writes"})
     _register(monkeypatch, "writes", lambda path, **_: path)
 
-    with pytest.raises(ValueError, match="reported writing.*which does not exist"):
+    with pytest.raises(ValueError, match="reported writing.*missing or empty"):
         resolver.ensure_current("big")
 
 
@@ -547,3 +547,75 @@ def test_plugins_dir_overrides_a_builtin_provider(
     found = registry()["stored"]
 
     assert found.__module__ == "features.override", f"plugins_dir must win, got {found.__module__}"
+
+
+# --- concurrent refresh --------------------------------------------------------------------------
+
+
+def test_a_refresh_never_exposes_a_half_written_collection(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A scheduled refresh and a running job touch the same file at the same time.
+
+    Writing in place let a reader open a partially written parquet -- "magic bytes not found in
+    footer", which is a failed job and an unintelligible reason. Reproduced before the fix at 4
+    failures in 36 operations. Staging and replacing means a reader sees the old file or the new
+    one, never a partial one.
+    """
+    import threading
+    import time
+
+    from open_climate_service.shared import features as shared
+
+    zones = 60
+    payload = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "id": f"z{i}", "properties": {}, "geometry": _NORTH.__geo_interface__}
+            for i in range(zones)
+        ],
+    }
+
+    def slow(**_: Any) -> dict[str, Any]:
+        time.sleep(0.01)  # a real provider is not instant
+        return payload
+
+    _declare(monkeypatch, {"id": "zones", "provider": "racy", "ttl_seconds": 0})
+    _register(monkeypatch, "racy", slow)
+    resolver.ensure_current("zones")
+
+    failures: list[str] = []
+    seen: list[int] = []
+
+    def refresher() -> None:
+        for _ in range(8):
+            try:
+                resolver.ensure_current("zones", refresh=True)
+            except Exception as exc:  # noqa: BLE001 — the point is that none occur
+                failures.append(f"refresh: {type(exc).__name__}")
+
+    def reader() -> None:
+        for _ in range(8):
+            try:
+                seen.append(len(shared.load_feature_collection("zones")["features"]))
+            except Exception as exc:  # noqa: BLE001
+                failures.append(f"read: {type(exc).__name__}")
+
+    threads = [threading.Thread(target=refresher) for _ in range(2)]
+    threads += [threading.Thread(target=reader) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert failures == [], f"a concurrent read or refresh failed: {sorted(set(failures))}"
+    assert set(seen) == {zones}, f"a reader saw a partial collection: {sorted(set(seen))}"
+
+
+def test_a_staged_file_is_not_mistaken_for_a_collection(instance: Path) -> None:
+    """A crash mid-write leaves the staging file behind; the directory scan must not list it."""
+    (instance / "features" / "districts.staging").write_bytes(b"half a parquet")
+    gpd.GeoDataFrame({"id": ["a"]}, geometry=[_NORTH], crs="EPSG:4326").to_parquet(
+        instance / "features" / "districts.parquet"
+    )
+    from open_climate_service.shared import features as shared
+
+    assert [info["id"] for info in shared.list_collections()] == ["districts"]

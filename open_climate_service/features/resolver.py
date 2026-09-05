@@ -51,7 +51,9 @@ def _call(declared: FeatureTemplate) -> tuple[dict[str, Any] | Path, str | None]
         # Ownership is checked *before* the provider runs, not after: it writes straight into the
         # store, so by the time it returns, a curated file it would have clobbered is already gone.
         store.check_ownership(declared)
-        params = {**declared.params, "path": store.target_path(declared.id)}
+        # A staging path, not the live one: a provider writing straight to the target lets a reader
+        # open a half-written file, and leaves a broken collection behind if it fails part-way.
+        params = {**declared.params, "path": store.staging_path(declared.id)}
     else:
         params = declared.params
     result = provider(**params)
