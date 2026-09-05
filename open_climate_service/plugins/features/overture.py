@@ -39,7 +39,6 @@ from open_climate_service.features.provider import feature_provider
 
 logger = logging.getLogger(__name__)
 
-S3_RELEASE_ROOT = "s3://overturemaps-us-west-2/release"
 DEFAULT_THEME = "buildings"
 BBOX_COLUMN = "bbox"
 
@@ -51,11 +50,6 @@ _THEME_TYPES = {
     "base": "land_cover",
     "divisions": "division_area",
 }
-
-
-def source_url(release: str, theme: str, type_: str) -> str:
-    """The Overture partition glob for one theme of one release."""
-    return f"{S3_RELEASE_ROOT}/{release}/theme={theme}/type={type_}/*"
 
 
 def theme_types() -> dict[str, Any]:
@@ -71,17 +65,15 @@ def overture(
     theme: str = DEFAULT_THEME,
     type: str | None = None,  # noqa: A002 -- Overture's own field name
     columns: list[str] | None = None,
-    source: str | None = None,
+    stac_catalog: bool = True,
 ) -> tuple[Path, str]:
     """Extract one Overture theme for a bounding box, writing GeoParquet to ``path``.
 
     ``bbox`` is ``[west, south, east, north]`` in lon/lat -- normally the instance extent.
-    ``source`` overrides the S3 location, which is what lets this be tested against a local file.
     Returns the path and the release id, which becomes the collection's version.
     """
-    import pyarrow.compute as pc
-    import pyarrow.dataset as pa_dataset
     import pyarrow.parquet as pq
+    from overturemaps import core
 
     if len(bbox) != 4:
         raise ValueError(f"Overture bbox must be [west, south, east, north], got {bbox!r}")
@@ -93,48 +85,45 @@ def overture(
     if type_ is None:
         raise ValueError(f"Unknown Overture theme {theme!r}. Known: {', '.join(sorted(_THEME_TYPES))}")
 
-    location = source or source_url(release, theme, type_)
-    dataset = pa_dataset.dataset(location, format="parquet")
-
-    if BBOX_COLUMN not in dataset.schema.names:
-        # Without it the window would have to touch every geometry, which is the cost this whole
-        # path exists to avoid -- so say so rather than silently doing the expensive thing.
-        raise ValueError(
-            f"Overture source {location!r} has no {BBOX_COLUMN!r} column, so a bbox window cannot be "
-            "pushed down. Every Overture release ships one; a hand-made extract may need rewriting "
-            "with write_covering_bbox=True."
-        )
-
-    # Intersects, not contains: a building on the edge of the extent belongs to it. Arrow pushes
-    # this down to row-group statistics, so only overlapping groups are fetched over the network.
-    window = (
-        (pc.field(BBOX_COLUMN, "xmin") < east)
-        & (pc.field(BBOX_COLUMN, "xmax") > west)
-        & (pc.field(BBOX_COLUMN, "ymin") < north)
-        & (pc.field(BBOX_COLUMN, "ymax") > south)
+    # stac=True is the whole performance story. Without it, selecting a window means opening the
+    # footer of every partition in the theme -- 512 of them for buildings, which measured at ~20
+    # minutes for a single city block regardless of the query engine. The STAC catalogue carries a
+    # spatial extent per partition, so only the overlapping ones are opened at all: the same query
+    # measured at 32 seconds. Range requests make each file cheap; only this makes the *count* cheap.
+    reader = core.record_batch_reader(
+        type_, bbox=(west, south, east, north), release=release, stac=stac_catalog
     )
+    if reader is None:
+        raise ValueError(f"Overture returned no data for type {type_!r} in release {release!r}")
 
-    projection: list[str] | None = None
+    schema = reader.schema
+    if BBOX_COLUMN not in schema.names:
+        raise ValueError(
+            f"Overture {type_!r} has no {BBOX_COLUMN!r} column, so the extract would have no covering "
+            "bbox and a windowed read of it would scan the whole file."
+        )
     if columns is not None:
         # geometry is the point of the file and bbox is what the covering metadata refers to, so
         # neither can be dropped by a column selection without invalidating the result.
-        projection = list(dict.fromkeys([*columns, "geometry", BBOX_COLUMN]))
-        missing = [name for name in projection if name not in dataset.schema.names]
+        keep = list(dict.fromkeys([*columns, "geometry", BBOX_COLUMN]))
+        missing = [name for name in keep if name not in schema.names]
         if missing:
-            raise ValueError(f"Overture source {location!r} has no column(s): {', '.join(missing)}")
+            raise ValueError(f"Overture {type_!r} has no column(s): {', '.join(missing)}")
+        # Preserve the `geo` metadata: it declares the covering, and rebuilding a schema drops it.
+        import pyarrow as pa
 
-    scanner = dataset.scanner(columns=projection, filter=window)
-    # Carry the source's `geo` metadata onto the output, so the extract stays valid GeoParquet and
-    # keeps its covering. Projection drops schema metadata, hence re-attaching it explicitly.
-    schema = scanner.projected_schema.with_metadata(dataset.schema.metadata)
+        schema = pa.schema([schema.field(name) for name in keep], metadata=reader.schema.metadata)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     written = 0
     with pq.ParquetWriter(path, schema) as writer:
-        for batch in scanner.to_batches():
-            if batch.num_rows:
-                writer.write_batch(batch)
-                written += batch.num_rows
+        for batch in reader:
+            if not batch.num_rows:
+                continue
+            if columns is not None:
+                batch = batch.select(schema.names)
+            writer.write_batch(batch)
+            written += batch.num_rows
 
     logger.info("Extracted %d Overture %s features (%s) for %s to %s", written, theme, release, bbox, path.name)
     return path, release

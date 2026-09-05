@@ -1,36 +1,59 @@
-"""Overture ingestion: a bbox extract straight to GeoParquet (CLIM-893).
+"""Overture ingestion: a bbox extract streamed to GeoParquet (CLIM-893).
 
-Tested against a local GeoParquet standing in for the S3 partitions. The remote path differs only
-in the URL DuckDB opens, so what these cover is the part that can be wrong: the bbox predicate, the
-covering-bbox declaration, and the store recording a file it never decoded.
+The Overture client is stubbed with a reader built from a local GeoParquet, which is the same shape
+it really returns — a `bbox` struct column plus `geo` metadata declaring it as the covering. What
+these cover is therefore what this module is actually responsible for: validating the request,
+projecting columns without losing that metadata, streaming batches out, and reporting the release as
+the version. The client owns partition selection, and there is nothing useful to assert about that
+from here — it was measured against the live bucket instead.
 """
 
 from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from shapely.geometry import Polygon
 
 from open_climate_service.features import resolver, store
 from open_climate_service.features.config import FeatureTemplates
-from open_climate_service.plugins.features.overture import overture, source_url
+from open_climate_service.plugins.features.overture import overture, theme_types
 
 
 def _building(x: float, y: float) -> Polygon:
     return Polygon([(x, y), (x + 0.5, y), (x + 0.5, y + 0.5), (x, y + 0.5)])
 
 
-@pytest.fixture
-def source(tmp_path: Path) -> Path:
-    """Three buildings, spread out enough that a bbox selects exactly one."""
-    path = tmp_path / "source.parquet"
+def _overture_like(tmp_path: Path, ids: list[Any], name: str = "src") -> pa.Table:
+    """A table shaped like the client's output: a bbox struct and a declared covering."""
+    path = tmp_path / f"{name}.parquet"
     gpd.GeoDataFrame(
-        {"id": ["west-1", "middle-1", "east-1"], "height": [3.0, 9.0, 12.0], "class": ["house", "shed", "tower"]},
-        geometry=[_building(0, 0), _building(5, 5), _building(9, 9)],
+        {"id": ids, "height": [3.0] * len(ids), "class": ["house"] * len(ids)},
+        geometry=[_building(i * 5.0, i * 5.0) for i in range(len(ids))],
         crs="EPSG:4326",
     ).to_parquet(path, write_covering_bbox=True)
-    return path
+    return pq.read_table(path)
+
+
+@pytest.fixture
+def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Any:
+    """Stub `overturemaps.core.record_batch_reader`, recording how it was called."""
+    import overturemaps.core as core
+
+    calls: list[dict[str, Any]] = []
+    state: dict[str, Any] = {"table": _overture_like(tmp_path, ["a", "b", "c"])}
+
+    def fake(overture_type: str, **kwargs: Any) -> Any:
+        calls.append({"type": overture_type, **kwargs})
+        table = state["table"]
+        if table is None:
+            return None
+        return pa.RecordBatchReader.from_batches(table.schema, table.to_batches())
+
+    monkeypatch.setattr(core, "record_batch_reader", fake)
+    return type("Client", (), {"calls": calls, "state": state})
 
 
 @pytest.fixture
@@ -47,86 +70,102 @@ def _declare(monkeypatch: pytest.MonkeyPatch, *templates: dict[str, Any]) -> Non
     monkeypatch.setattr("open_climate_service.features.resolver.get_feature_templates", lambda: loaded)
 
 
-# --- the extract ---------------------------------------------------------------------------------
+# --- the request -------------------------------------------------------------------------------
 
 
-def test_the_bbox_selects_only_overlapping_features(tmp_path: Path, source: Path) -> None:
-    out = tmp_path / "buildings.parquet"
-    overture(path=out, release="2026-08", bbox=[4.0, 4.0, 7.0, 7.0], source=str(source))
+def test_the_window_and_release_reach_the_client(tmp_path: Path, client: Any) -> None:
+    overture(path=tmp_path / "out.parquet", release="2026-08-19.0", bbox=[-13.5, 6.9, -10.1, 10.0])
 
-    assert list(gpd.read_parquet(out)["id"]) == ["middle-1"]
-
-
-def test_a_feature_straddling_the_edge_is_kept(tmp_path: Path, source: Path) -> None:
-    """Intersects, not contains — a district on the border of the extent is still in it."""
-    out = tmp_path / "buildings.parquet"
-    overture(path=out, release="2026-08", bbox=[5.25, 5.25, 8.0, 8.0], source=str(source))
-
-    assert list(gpd.read_parquet(out)["id"]) == ["middle-1"]
+    assert client.calls == [
+        {"type": "building", "bbox": (-13.5, 6.9, -10.1, 10.0), "release": "2026-08-19.0", "stac": True}
+    ]
 
 
-def test_the_extract_inherits_the_sources_covering_bbox(tmp_path: Path, source: Path) -> None:
-    """Without a covering, a windowed read of the extract scans the whole file.
-
-    Nothing recomputes or re-declares it: carrying the source's `geo` metadata through means the
-    extract is valid GeoParquet with a working covering for free.
-    """
-    import json
-
-    import pyarrow.parquet as pq
-
-    out = tmp_path / "buildings.parquet"
-    overture(path=out, release="2026-08", bbox=[-1.0, -1.0, 20.0, 20.0], source=str(source))
-
-    geo = json.loads(pq.read_metadata(out).metadata[b"geo"])
-    covering = (geo["columns"][geo["primary_column"]].get("covering") or {}).get("bbox")
-    assert covering, "the extract must keep a usable covering"
-    assert len(gpd.read_parquet(out, bbox=(4, 4, 7, 7))) == 1
+def test_the_stac_catalogue_is_used_by_default(tmp_path: Path, client: Any) -> None:
+    """Without it the client opens every partition in the theme: ~20 minutes against ~30 seconds."""
+    overture(path=tmp_path / "out.parquet", release="r", bbox=[0.0, 0.0, 1.0, 1.0])
+    assert client.calls[0]["stac"] is True
 
 
-def test_the_release_becomes_the_version(tmp_path: Path, source: Path) -> None:
-    out = tmp_path / "buildings.parquet"
-    _, version = overture(path=out, release="2026-08", bbox=[-1.0, -1.0, 20.0, 20.0], source=str(source))
-    assert version == "2026-08"
-
-
-def test_selected_columns_are_the_only_ones_carried(tmp_path: Path, source: Path) -> None:
-    """A country's buildings carry attributes nobody asked for; naming columns keeps the file small."""
-    out = tmp_path / "buildings.parquet"
-    overture(
-        path=out,
-        release="2026-08",
-        bbox=[-1.0, -1.0, 20.0, 20.0],
-        columns=["id", "height", "geometry"],
-        source=str(source),
-    )
-
-    # geopandas hides the covering-bbox column, so it does not appear here even though it is written.
-    assert set(gpd.read_parquet(out).columns) == {"id", "height", "geometry"}
+def test_the_release_becomes_the_version(tmp_path: Path, client: Any) -> None:
+    _, version = overture(path=tmp_path / "out.parquet", release="2026-08-19.0", bbox=[0.0, 0.0, 1.0, 1.0])
+    assert version == "2026-08-19.0"
 
 
 @pytest.mark.parametrize("bad", [[1.0, 1.0, 0.0, 2.0], [0.0, 5.0, 2.0, 1.0], [0.0, 0.0, 1.0]])
-def test_an_empty_or_malformed_bbox_is_refused(tmp_path: Path, source: Path, bad: list[float]) -> None:
+def test_an_empty_or_malformed_bbox_is_refused(tmp_path: Path, client: Any, bad: list[float]) -> None:
     with pytest.raises(ValueError, match="bbox"):
-        overture(path=tmp_path / "x.parquet", release="2026-08", bbox=bad, source=str(source))
+        overture(path=tmp_path / "out.parquet", release="r", bbox=bad)
 
 
-def test_an_unknown_theme_names_the_known_ones(tmp_path: Path, source: Path) -> None:
+def test_an_unknown_theme_names_the_known_ones(tmp_path: Path, client: Any) -> None:
     with pytest.raises(ValueError, match="Unknown Overture theme 'roads'.*buildings"):
-        overture(path=tmp_path / "x.parquet", release="2026-08", bbox=[0.0, 0.0, 1.0, 1.0], theme="roads")
+        overture(path=tmp_path / "out.parquet", release="r", bbox=[0.0, 0.0, 1.0, 1.0], theme="roads")
 
 
-def test_the_s3_location_is_built_from_the_release_and_theme() -> None:
-    assert source_url("2026-08", "buildings", "building").endswith("release/2026-08/theme=buildings/type=building/*")
+def test_every_known_theme_maps_to_a_type() -> None:
+    assert theme_types()["buildings"] == "building"
 
 
-# --- through the store ---------------------------------------------------------------------------
+def test_a_theme_with_no_data_in_the_release_is_refused(tmp_path: Path, client: Any) -> None:
+    client.state["table"] = None
+    with pytest.raises(ValueError, match="returned no data"):
+        overture(path=tmp_path / "out.parquet", release="r", bbox=[0.0, 0.0, 1.0, 1.0])
+
+
+# --- the written file --------------------------------------------------------------------------
+
+
+def test_the_extract_keeps_a_working_covering_bbox(tmp_path: Path, client: Any) -> None:
+    """Without a covering, a windowed read of the extract scans the whole file.
+
+    Nothing recomputes it: carrying the client's `geo` metadata through means the extract is valid
+    GeoParquet with a usable covering for free.
+    """
+    import json
+
+    out = tmp_path / "out.parquet"
+    overture(path=out, release="r", bbox=[-1.0, -1.0, 30.0, 30.0])
+
+    geo = json.loads(pq.read_metadata(out).metadata[b"geo"])
+    assert (geo["columns"][geo["primary_column"]].get("covering") or {}).get("bbox")
+    assert len(gpd.read_parquet(out, bbox=(4, 4, 7, 7))) == 1
+
+
+def test_selected_columns_keep_the_geometry_and_the_covering(tmp_path: Path, client: Any) -> None:
+    """A country's buildings carry attributes nobody asked for; naming columns keeps the file small.
+
+    Dropping geometry or bbox would invalidate the result, so both survive a selection regardless.
+    """
+    out = tmp_path / "out.parquet"
+    overture(path=out, release="r", bbox=[-1.0, -1.0, 30.0, 30.0], columns=["id"])
+
+    assert pq.read_schema(out).names == ["id", "geometry", "bbox"]
+    assert len(gpd.read_parquet(out, bbox=(4, 4, 7, 7))) == 1, "the covering still prunes"
+
+
+def test_an_unknown_column_names_what_is_missing(tmp_path: Path, client: Any) -> None:
+    with pytest.raises(ValueError, match=r"no column\(s\): nope"):
+        overture(path=tmp_path / "out.parquet", release="r", bbox=[0.0, 0.0, 1.0, 1.0], columns=["nope"])
+
+
+def test_output_without_a_bbox_column_is_refused(tmp_path: Path, client: Any) -> None:
+    """The extract would have no covering, so every windowed read of it would scan the whole file."""
+    plain = tmp_path / "plain.parquet"
+    gpd.GeoDataFrame({"id": ["a"]}, geometry=[_building(0, 0)], crs="EPSG:4326").to_parquet(plain)
+    client.state["table"] = pq.read_table(plain)
+
+    with pytest.raises(ValueError, match="has no 'bbox' column"):
+        overture(path=tmp_path / "out.parquet", release="r", bbox=[0.0, 0.0, 1.0, 1.0])
+
+
+# --- through the store -------------------------------------------------------------------------
 
 
 def test_a_file_writing_provider_is_recorded_without_decoding_geometry(
-    instance: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+    instance: Path, monkeypatch: pytest.MonkeyPatch, client: Any
 ) -> None:
-    """The whole point of the Path form: the store records the file, it does not read it back in."""
+    """The point of the Path form: the store records the file, it does not read it back in."""
     _declare(
         monkeypatch,
         {
@@ -134,67 +173,60 @@ def test_a_file_writing_provider_is_recorded_without_decoding_geometry(
             "provider": "overture",
             "license": "ODbL-1.0",
             "attribution": "© OpenStreetMap contributors, © Overture Maps Foundation",
-            "params": {"release": "2026-08", "bbox": [-1.0, -1.0, 20.0, 20.0], "source": str(source)},
+            "params": {"release": "2026-08-19.0", "bbox": [-1.0, -1.0, 30.0, 30.0]},
         },
     )
 
     version = resolver.ensure_current("buildings")
 
-    assert version == "2026-08"
+    assert version == "2026-08-19.0"
     assert (instance / "features" / "buildings.parquet").is_file()
     sidecar = store.metadata("buildings")
     assert sidecar["provider"] == "overture"
     assert sidecar["feature_count"] == 3
-    assert sidecar["id_property"] == "id", "Overture's own id column is the identity, not a rewritten one"
+    assert sidecar["id_property"] == "id", "Overture's own id is the identity, not a rewritten one"
 
 
 def test_a_second_call_within_the_ttl_does_not_re_extract(
-    instance: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+    instance: Path, monkeypatch: pytest.MonkeyPatch, client: Any
 ) -> None:
     _declare(
         monkeypatch,
-        {
-            "id": "buildings",
-            "provider": "overture",
-            "params": {"release": "2026-08", "bbox": [-1.0, -1.0, 20.0, 20.0], "source": str(source)},
-        },
+        {"id": "buildings", "provider": "overture", "params": {"release": "r", "bbox": [-1.0, -1.0, 30.0, 30.0]}},
     )
     first = resolver.ensure_current("buildings")
-    written = (instance / "features" / "buildings.parquet").stat().st_mtime_ns
+    calls = len(client.calls)
 
     second = resolver.ensure_current("buildings")
 
     assert first == second
-    assert (instance / "features" / "buildings.parquet").stat().st_mtime_ns == written
+    assert len(client.calls) == calls, "a second call within the TTL must not reach the client"
 
 
 def test_a_new_release_re_extracts_and_changes_the_version(
-    instance: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+    instance: Path, monkeypatch: pytest.MonkeyPatch, client: Any
 ) -> None:
     """A release *is* a version, so changing it is a different question and must refetch."""
-    params = {"bbox": [-1.0, -1.0, 20.0, 20.0], "source": str(source)}
-    _declare(monkeypatch, {"id": "buildings", "provider": "overture", "params": {"release": "2026-08", **params}})
-    assert resolver.ensure_current("buildings") == "2026-08"
+    box = [-1.0, -1.0, 30.0, 30.0]
+    _declare(
+        monkeypatch, {"id": "buildings", "provider": "overture", "params": {"release": "2026-07-22.0", "bbox": box}}
+    )
+    assert resolver.ensure_current("buildings") == "2026-07-22.0"
 
-    _declare(monkeypatch, {"id": "buildings", "provider": "overture", "params": {"release": "2026-09", **params}})
-    assert resolver.ensure_current("buildings") == "2026-09"
+    _declare(
+        monkeypatch, {"id": "buildings", "provider": "overture", "params": {"release": "2026-08-19.0", "bbox": box}}
+    )
+    assert resolver.ensure_current("buildings") == "2026-08-19.0"
 
 
 def test_duplicate_ids_in_an_extract_are_refused(
-    instance: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    instance: Path, monkeypatch: pytest.MonkeyPatch, client: Any, tmp_path: Path
 ) -> None:
     """The identity contract applies to a file-writing provider too, read from the id column alone."""
-    broken = tmp_path / "broken.parquet"
-    gpd.GeoDataFrame({"id": ["same", "same"]}, geometry=[_building(0, 0), _building(5, 5)], crs="EPSG:4326").to_parquet(
-        broken, write_covering_bbox=True
-    )
+    client.state["table"] = _overture_like(tmp_path, ["same", "same"], name="broken")
     _declare(
         monkeypatch,
-        {
-            "id": "buildings",
-            "provider": "overture",
-            "params": {"release": "2026-08", "bbox": [-1.0, -1.0, 20.0, 20.0], "source": str(broken)},
-        },
+        {"id": "buildings", "provider": "overture", "params": {"release": "r", "bbox": [-1.0, -1.0, 30.0, 30.0]}},
     )
 
     with pytest.raises(ValueError, match="sharing a 'id'.*same"):
@@ -202,44 +234,15 @@ def test_duplicate_ids_in_an_extract_are_refused(
 
 
 def test_an_extract_will_not_overwrite_a_curated_collection(
-    instance: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+    instance: Path, monkeypatch: pytest.MonkeyPatch, client: Any
 ) -> None:
     gpd.GeoDataFrame({"id": ["kept"]}, geometry=[_building(0, 0)], crs="EPSG:4326").to_parquet(
         instance / "features" / "buildings.parquet"
     )
     _declare(
         monkeypatch,
-        {
-            "id": "buildings",
-            "provider": "overture",
-            "params": {"release": "2026-08", "bbox": [-1.0, -1.0, 20.0, 20.0], "source": str(source)},
-        },
+        {"id": "buildings", "provider": "overture", "params": {"release": "r", "bbox": [-1.0, -1.0, 30.0, 30.0]}},
     )
 
     with pytest.raises(ValueError, match="not maintained by a provider"):
         resolver.ensure_current("buildings")
-
-
-def test_the_sources_own_bbox_is_what_is_carried(tmp_path: Path, source: Path) -> None:
-    """Exactly one bbox struct, the source's own -- nothing recomputes it.
-
-    Recomputing would mean decoding every geometry, which is the cost this path exists to avoid,
-    and would leave two identical structs with an ambiguous covering reference.
-    """
-    import pyarrow.parquet as pq
-
-    out = tmp_path / "buildings.parquet"
-    overture(path=out, release="2026-08", bbox=[-1.0, -1.0, 20.0, 20.0], source=str(source))
-
-    names = pq.read_schema(out).names
-    assert names.count("bbox") == 1, f"exactly one bbox struct, got {names}"
-    assert len(gpd.read_parquet(out, bbox=(4, 4, 7, 7))) == 1, "and it is still the usable covering"
-
-
-def test_a_source_without_a_bbox_column_is_refused(tmp_path: Path) -> None:
-    """The window would otherwise have to touch every geometry -- the cost this exists to avoid."""
-    plain = tmp_path / "plain.parquet"
-    gpd.GeoDataFrame({"id": ["a"]}, geometry=[_building(0, 0)], crs="EPSG:4326").to_parquet(plain)
-
-    with pytest.raises(ValueError, match="has no 'bbox' column"):
-        overture(path=tmp_path / "out.parquet", release="2026-08", bbox=[-1.0, -1.0, 20.0, 20.0], source=str(plain))
