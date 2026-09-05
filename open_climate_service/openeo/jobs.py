@@ -1458,7 +1458,14 @@ def _write_vector(gdf: Any, results_dir: Any, fmt: str) -> str | None:
 
     if ext == ".csv":
         path = str(results_dir / "result.csv")
-        gdf.drop(columns="geometry", errors="ignore").to_csv(path, index=False)
+        # CSV drops the shapes, so nothing is competing for the name: the label column goes back to
+        # `geometry`, which is what it is called on the cube, what a CSV of a vector cube contained
+        # before, and what the tabular exports default `location_field` to. Only the formats that
+        # actually carry geometry need the label to stand aside under `geometry_id`.
+        flat = gdf.drop(columns="geometry", errors="ignore")
+        if "geometry_id" in flat.columns:
+            flat = flat.rename(columns={"geometry_id": "geometry"})
+        flat.to_csv(path, index=False)
         return path
 
     # Fallback to GeoJSON
