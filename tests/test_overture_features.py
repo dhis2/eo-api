@@ -230,3 +230,31 @@ def test_the_sources_own_bbox_is_not_carried_through(tmp_path: Path, source: Pat
     names = pq.read_schema(out).names
     assert names.count("bbox") == 1, f"exactly one bbox struct, got {names}"
     assert len(gpd.read_parquet(out, bbox=(4, 4, 7, 7))) == 1, "and it is still the usable covering"
+
+
+def test_a_failed_covering_rewrite_leaves_nothing_in_the_store(
+    instance: Path, monkeypatch: pytest.MonkeyPatch, source: Path
+) -> None:
+    """A temp inside the store would survive as a stray collection the directory scan picks up."""
+    import pyarrow.parquet as pq
+
+    from open_climate_service.plugins.features import overture as overture_module
+
+    real = pq.ParquetWriter
+
+    class Exploding(real):  # type: ignore[misc,valid-type]
+        def write_batch(self, *args: Any, **kwargs: Any) -> None:
+            raise OSError("disk full")
+
+    monkeypatch.setattr(pq, "ParquetWriter", Exploding)
+
+    with pytest.raises(OSError, match="disk full"):
+        overture_module.overture(
+            path=instance / "features" / "buildings.parquet",
+            release="2026-08",
+            bbox=[-1.0, -1.0, 20.0, 20.0],
+            source=str(source),
+        )
+
+    leftovers = sorted(p.name for p in (instance / "features").glob("*covering*"))
+    assert leftovers == [], f"the store must not hold rewrite temporaries; found {leftovers}"

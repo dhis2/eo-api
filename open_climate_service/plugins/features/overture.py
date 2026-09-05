@@ -25,6 +25,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -61,30 +63,41 @@ def _declare_covering_bbox(path: Path, bbox_column: str = "bbox") -> None:
     Done by streaming row groups through a new writer rather than reading the table whole, so peak
     memory stays at one row group instead of the entire extract.
     """
+    import tempfile
+
     import pyarrow.parquet as pq
 
-    reader = pq.ParquetFile(path)
-    schema = reader.schema_arrow
-    if bbox_column not in schema.names:
-        return
+    with pq.ParquetFile(path) as reader:
+        schema = reader.schema_arrow
+        if bbox_column not in schema.names:
+            return
 
-    raw = (schema.metadata or {}).get(b"geo")
-    if raw is None:
-        logger.warning("Overture extract %s has no GeoParquet metadata; leaving it unmarked", path.name)
-        return
-    geo = json.loads(raw)
-    column = geo["columns"][geo["primary_column"]]
-    column["covering"] = {
-        "bbox": {edge: [bbox_column, edge] for edge in ("xmin", "ymin", "xmax", "ymax")},
-    }
-    metadata = {**(schema.metadata or {}), b"geo": json.dumps(geo).encode()}
+        raw = (schema.metadata or {}).get(b"geo")
+        if raw is None:
+            logger.warning("Overture extract %s has no GeoParquet metadata; leaving it unmarked", path.name)
+            return
+        geo = json.loads(raw)
+        column = geo["columns"][geo["primary_column"]]
+        column["covering"] = {
+            "bbox": {edge: [bbox_column, edge] for edge in ("xmin", "ymin", "xmax", "ymax")},
+        }
+        metadata = {**(schema.metadata or {}), b"geo": json.dumps(geo).encode()}
 
-    temp = path.with_suffix(".covering.parquet")
-    with pq.ParquetWriter(temp, schema.with_metadata(metadata)) as writer:
-        for batch in reader.iter_batches():
-            writer.write_batch(batch)
-    reader.close()
-    temp.replace(path)
+        # Written outside the feature store, then moved in. A temp inside it would be a stray
+        # `*.parquet` if this failed part-way -- picked up by the directory scan, warned about on
+        # every listing, and indistinguishable from a real collection.
+        handle, temp_name = tempfile.mkstemp(suffix=".parquet", prefix=f"{path.stem}-covering-")
+        os.close(handle)
+        temp = Path(temp_name)
+        try:
+            with pq.ParquetWriter(temp, schema.with_metadata(metadata)) as writer:
+                for batch in reader.iter_batches():
+                    writer.write_batch(batch)
+        except BaseException:
+            temp.unlink(missing_ok=True)
+            raise
+    # os.replace is atomic within a filesystem; shutil.move handles the temp dir being elsewhere.
+    shutil.move(str(temp), str(path))
 
 
 @feature_provider("overture")
