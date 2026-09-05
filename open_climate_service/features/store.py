@@ -31,6 +31,7 @@ import hashlib
 import json
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from open_climate_service.features.config import FeatureTemplate
@@ -91,6 +92,107 @@ def is_fresh(declaration: FeatureTemplate) -> bool:
     return age < declaration.effective_ttl
 
 
+def target_path(feature_id: str) -> Path:
+    """Where a collection's GeoParquet lives. Handed to a provider that writes its own file."""
+    root = shared_features.features_dir()
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"{feature_id}{shared_features.FEATURE_SUFFIX}"
+
+
+def check_ownership(declaration: FeatureTemplate) -> None:
+    """Refuse to overwrite a collection this provider does not own."""
+    if shared_features.collection_path(declaration.id) is None:
+        return
+    owner = metadata(declaration.id).get("provider")
+    if owner is None:
+        raise ValueError(
+            f"Feature collection {declaration.id!r} already exists in the store and is not "
+            f"maintained by a provider. Declaration {declaration.id!r} would overwrite it — "
+            "give the declaration a different id, or remove the file."
+        )
+    if owner != declaration.provider:
+        raise ValueError(
+            f"Feature collection {declaration.id!r} is maintained by provider {owner!r}, "
+            f"not {declaration.provider!r}. Give the declaration a different id."
+        )
+
+
+def _write_sidecar(
+    declaration: FeatureTemplate, *, id_property: str, version: str, count: int, fetched: datetime
+) -> None:
+    sidecar = shared_features.sidecar_path(declaration.id)
+    if sidecar is None:
+        return
+    sidecar.write_text(
+        json.dumps(
+            {
+                "id_property": id_property,
+                "provider": declaration.provider,
+                "params_fingerprint": params_fingerprint(declaration),
+                "version": version,
+                "fetched_at": fetched.isoformat(),
+                "feature_count": count,
+            },
+            indent=2,
+            default=str,
+        )
+    )
+
+
+def record_written_file(declaration: FeatureTemplate, path: Path, *, version: str | None = None) -> str:
+    """Record a GeoParquet file a provider wrote itself, without loading its geometry.
+
+    The counterpart of :func:`write` for sources too large to pass through a FeatureCollection. The
+    file is already in place; what remains is to check it can be used and to record the sidecar.
+
+    Ids are validated by reading **only the id column** through Arrow. For a country's buildings that
+    is one narrow column rather than millions of decoded geometries, which is the difference between
+    this being cheap and being the very cost the file-writing path exists to avoid.
+    """
+    import pyarrow.parquet as pq
+
+    if not path.is_file():
+        raise ValueError(f"Feature provider {declaration.provider!r} reported writing {path}, which does not exist")
+
+    # Ownership is *not* rechecked here. The file is already written, so at this point the store
+    # holds the provider's own output — asking whether it may overwrite what is there would compare
+    # it against itself and refuse. The resolver checks before the provider runs, which is the only
+    # moment the answer is meaningful.
+    schema = pq.read_schema(path)
+    id_property = declaration.id_property or ("id" if "id" in schema.names else None)
+    if id_property is None:
+        raise ValueError(
+            f"Feature collection {declaration.id!r} has no 'id' column and the template sets no "
+            f"id_property. Available: {', '.join(n for n in schema.names if n != 'geometry')}"
+        )
+    if id_property not in schema.names:
+        raise ValueError(
+            f"Feature collection {declaration.id!r} has no property {id_property!r}. "
+            f"Available: {', '.join(n for n in schema.names if n != 'geometry')}"
+        )
+
+    column = pq.read_table(path, columns=[id_property])[id_property].to_pylist()
+    if not column:
+        raise ValueError(f"Feature provider {declaration.provider!r} wrote no features for {declaration.id!r}")
+    shared_features.validate_feature_ids(
+        column,
+        source=f"Feature set {declaration.id!r} from provider {declaration.provider!r}",
+        field=id_property,
+    )
+
+    now = datetime.now(UTC)
+    recorded = version or f"{params_fingerprint(declaration)}-{now.strftime('%Y%m%dT%H%M%S%fZ')}"
+    _write_sidecar(declaration, id_property=id_property, version=recorded, count=len(column), fetched=now)
+    logger.info(
+        "Recorded feature collection '%s' written by provider '%s': %d features, version %s",
+        declaration.id,
+        declaration.provider,
+        len(column),
+        recorded,
+    )
+    return recorded
+
+
 def write(declaration: FeatureTemplate, collection: dict[str, Any], *, version: str | None = None) -> str:
     """Write a resolved FeatureCollection into the store, returning the version recorded for it.
 
@@ -103,20 +205,7 @@ def write(declaration: FeatureTemplate, collection: dict[str, Any], *, version: 
     if not features:
         raise ValueError(f"Feature provider {declaration.provider!r} returned no features for {declaration.id!r}")
 
-    existing = metadata(declaration.id)
-    if shared_features.collection_path(declaration.id) is not None:
-        owner = existing.get("provider")
-        if owner is None:
-            raise ValueError(
-                f"Feature collection {declaration.id!r} already exists in the store and is not "
-                f"maintained by a provider. Declaration {declaration.id!r} would overwrite it — "
-                "give the declaration a different id, or remove the file."
-            )
-        if owner != declaration.provider:
-            raise ValueError(
-                f"Feature collection {declaration.id!r} is maintained by provider {owner!r}, "
-                f"not {declaration.provider!r}. Give the declaration a different id."
-            )
+    check_ownership(declaration)
 
     source = f"Feature set {declaration.id!r} from provider {declaration.provider!r}"
     field = declaration.id_property or "id"
@@ -133,28 +222,10 @@ def write(declaration: FeatureTemplate, collection: dict[str, Any], *, version: 
     # a job's provenance line.
     recorded = version or f"{params_fingerprint(declaration)}-{now.strftime('%Y%m%dT%H%M%S%fZ')}"
 
-    root = shared_features.features_dir()
-    root.mkdir(parents=True, exist_ok=True)
-    path = root / f"{declaration.id}{shared_features.FEATURE_SUFFIX}"
     # A covering bbox costs almost nothing to write and is what makes a windowed read cheap later.
-    frame.to_parquet(path, write_covering_bbox=True)
+    frame.to_parquet(target_path(declaration.id), write_covering_bbox=True)
 
-    sidecar = shared_features.sidecar_path(declaration.id)
-    if sidecar is not None:
-        sidecar.write_text(
-            json.dumps(
-                {
-                    "id_property": ID_COLUMN,
-                    "provider": declaration.provider,
-                    "params_fingerprint": params_fingerprint(declaration),
-                    "version": recorded,
-                    "fetched_at": now.isoformat(),
-                    "feature_count": len(features),
-                },
-                indent=2,
-                default=str,
-            )
-        )
+    _write_sidecar(declaration, id_property=ID_COLUMN, version=recorded, count=len(features), fetched=now)
     logger.info(
         "Updated feature collection '%s' from provider '%s': %d features, version %s",
         declaration.id,

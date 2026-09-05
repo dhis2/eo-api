@@ -33,10 +33,20 @@ _OCS_STORES_RESULT_ATTR = "__ocs_feature_provider_stores__"
 def feature_provider(name: str, *, stores_result: bool = True) -> Callable[[F], F]:
     """Register ``func`` as the provider named ``name``.
 
-    The function takes the declaration's ``params`` as keyword arguments and returns a GeoJSON
-    FeatureCollection. It may also return ``(collection, version)``, where ``version`` is an etag
-    or release id — a provider whose upstream has real versions should say so that way, and it is
-    recorded verbatim as the set's version.
+    The function takes the declaration's ``params`` as keyword arguments and returns either:
+
+    * a GeoJSON **FeatureCollection**, which the store writes out; or
+    * a **Path** to a GeoParquet file the provider has already written.
+
+    Either may instead be returned as ``(result, version)``, where ``version`` is an etag or release
+    id — a provider whose upstream has real versions should say so that way, and it is recorded
+    verbatim as the set's version.
+
+    The Path form exists because a FeatureCollection is a Python dict, and some sources are far too
+    large for one. A country's building footprints are millions of features; materialising those as
+    dicts costs orders of magnitude more than the data itself. Such a provider streams the extract
+    to GeoParquet and hands back the path, so the geometry is never in Python memory at all. A
+    provider taking this form receives ``path`` as a keyword argument naming where to write.
 
     ``stores_result=False`` marks a provider that resolves live and whose output must **not** be
     written into the feature store. `stored` is the case that needs it: it reads the store already,

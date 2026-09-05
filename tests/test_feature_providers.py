@@ -399,3 +399,85 @@ def test_a_collection_with_no_template_is_still_listed(
 
     assert [info["id"] for info in listed] == ["districts"]
     assert "license" not in listed[0]
+
+
+# --- providers that write their own file ---------------------------------------------------------
+
+
+def _write_parquet(path: Path, ids: list[Any]) -> None:
+    gpd.GeoDataFrame({"id": ids}, geometry=[_NORTH, _SOUTH][: len(ids)], crs="EPSG:4326").to_parquet(path)
+
+
+def test_a_provider_may_write_the_file_itself(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A FeatureCollection is Python dicts; some sources are far too large for that.
+
+    Such a provider is handed `path`, writes GeoParquet, and returns the path. The store records it
+    without ever decoding the geometry.
+    """
+
+    def writer(path: Path, **_: Any) -> tuple[Path, str]:
+        _write_parquet(path, ["MW.N", "MW.S"])
+        return path, "release-7"
+
+    _declare(monkeypatch, {"id": "big", "provider": "writes"})
+    _register(monkeypatch, "writes", writer)
+
+    version = resolver.ensure_current("big")
+
+    assert version == "release-7"
+    assert (instance / "features" / "big.parquet").is_file()
+    assert store.metadata("big")["feature_count"] == 2
+    assert [f["id"] for f in load_features("big")["features"]] == ["MW.N", "MW.S"]
+
+
+def test_a_written_file_is_validated_by_its_id_column_alone(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The identity contract still applies — read from one narrow column, not from the geometry."""
+
+    def writer(path: Path, **_: Any) -> Path:
+        _write_parquet(path, ["same", "same"])
+        return path
+
+    _declare(monkeypatch, {"id": "big", "provider": "writes"})
+    _register(monkeypatch, "writes", writer)
+
+    with pytest.raises(ValueError, match="sharing a 'id'.*same"):
+        resolver.ensure_current("big")
+
+
+def test_a_written_file_with_no_id_column_is_refused(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def writer(path: Path, **_: Any) -> Path:
+        gpd.GeoDataFrame({"name": ["a"]}, geometry=[_NORTH], crs="EPSG:4326").to_parquet(path)
+        return path
+
+    _declare(monkeypatch, {"id": "big", "provider": "writes"})
+    _register(monkeypatch, "writes", writer)
+
+    with pytest.raises(ValueError, match="no 'id' column and the template sets no id_property"):
+        resolver.ensure_current("big")
+
+
+def test_a_provider_claiming_to_write_but_not_writing_is_refused(
+    instance: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _declare(monkeypatch, {"id": "big", "provider": "writes"})
+    _register(monkeypatch, "writes", lambda path, **_: path)
+
+    with pytest.raises(ValueError, match="reported writing.*which does not exist"):
+        resolver.ensure_current("big")
+
+
+def test_ownership_is_checked_before_a_writing_provider_runs(instance: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Checking afterwards compares the provider's own output against itself and always refuses.
+
+    It also comes too late to matter: by then the curated file it would have protected is gone.
+    """
+    curated = instance / "features" / "big.parquet"
+    _write_parquet(curated, ["kept"])
+    original = curated.read_bytes()
+
+    _declare(monkeypatch, {"id": "big", "provider": "writes"})
+    _register(monkeypatch, "writes", lambda path, **_: (_write_parquet(path, ["MW.N"]), path)[1])
+
+    with pytest.raises(ValueError, match="not maintained by a provider"):
+        resolver.ensure_current("big")
+    assert curated.read_bytes() == original, "the curated file must be untouched, not restored after"
