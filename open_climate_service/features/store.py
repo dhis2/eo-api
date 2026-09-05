@@ -99,6 +99,27 @@ def target_path(feature_id: str) -> Path:
     return root / f"{feature_id}{shared_features.FEATURE_SUFFIX}"
 
 
+_MISSING = object()
+
+
+def _feature_id(feature: dict[str, Any], field: str) -> Any:
+    """The value `id_property` names, looked for where GeoJSON actually keeps attributes.
+
+    A GeoJSON feature holds its attributes under ``properties``; only ``id`` is a top-level key. A
+    lookup that tested the top level alone would find `id_property` nowhere and quietly fall back to
+    the feature's own id — so a template pointing at, say, an org-unit code column would key the
+    whole export on the wrong column while looking like it worked.
+
+    ``properties`` wins over the top level so a feature carrying both is read the way the GeoJSON
+    spec means it, and a genuinely absent value returns None for the identity contract to reject.
+    """
+    properties = feature.get("properties")
+    if isinstance(properties, dict) and field in properties:
+        return properties[field]
+    value = feature.get(field, _MISSING)
+    return None if value is _MISSING else value
+
+
 def check_ownership(declaration: FeatureTemplate) -> None:
     """Refuse to overwrite a collection this provider does not own."""
     if shared_features.collection_path(declaration.id) is None:
@@ -209,7 +230,7 @@ def write(declaration: FeatureTemplate, collection: dict[str, Any], *, version: 
 
     source = f"Feature set {declaration.id!r} from provider {declaration.provider!r}"
     field = declaration.id_property or "id"
-    values = [feature.get(field) if field in feature else feature.get("id") for feature in features]
+    values = [_feature_id(feature, field) for feature in features]
     labels = shared_features.validate_feature_ids(values, source=source, field=field)
 
     frame = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")

@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 LIVE_VERSION = "live"
 """Version recorded for a set whose provider resolves in place and stores nothing."""
 
+CURATED_VERSION = "curated"
+"""Version recorded for a template with no provider: a file an admin maintains by hand."""
+
 
 def declaration(feature_id: str) -> FeatureTemplate:
     """The instance's template for ``feature_id``."""
@@ -79,6 +82,10 @@ def ensure_current(feature_id: str, *, refresh: bool = False) -> str:
     at the moment it runs, so there is no fetch here and no version to record beyond that fact.
     """
     declared = declaration(feature_id)
+    if not declared.is_provider_backed:
+        # A template with no provider describes a file an admin placed by hand: there is nothing to
+        # fetch and nothing that could be stale, so "current" is whatever is in the store.
+        return CURATED_VERSION
     if not stores_result(resolve_provider(declared.provider)):
         return LIVE_VERSION
     if not refresh and store.is_fresh(declared):
@@ -99,6 +106,8 @@ def load(feature_id: str) -> dict[str, Any]:
     column carries the ids — so both come back looking the same.
     """
     declared = declaration(feature_id)
+    if not declared.is_provider_backed:
+        return shared_features.load_feature_collection(feature_id)
     if not stores_result(resolve_provider(declared.provider)):
         produced, _ = _call(declared)
         if isinstance(produced, Path):
