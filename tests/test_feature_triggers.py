@@ -151,3 +151,80 @@ def test_a_trigger_referencing_an_undeclared_feature_fails_at_startup(
     )
     with pytest.raises(ValueError, match="references feature 'distrcits'.*Declared: districts"):
         automation_service._validate_feature_references(config)
+
+
+# --- the trigger actually firing -----------------------------------------------------------------
+
+
+def _event() -> Any:
+    from datetime import UTC, datetime
+
+    from open_climate_service.jobs.models import DATASET_UPDATED_EVENT_TYPE, JobEvent
+
+    return JobEvent(
+        event_id="native-job:0",
+        time=datetime(2026, 8, 19, tzinfo=UTC),
+        type=DATASET_UPDATED_EVENT_TYPE,
+        source="/datasets/chirps",
+        data={
+            "dataset_id": "chirps",
+            "artifact_id": "artifact-2",
+            "action": "append",
+            "previous_end": "2026-08-17",
+            "current_end": "2026-08-18",
+        },
+    )
+
+
+def test_a_dataset_update_submits_a_job_carrying_the_feature_node(
+    instance: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end: an event fires a trigger, and the submitted job names the set rather than carrying it.
+
+    The unit tests cover the rewrite and that its output parses; this covers the dispatch that uses
+    it, which is the whole point of the trigger integration.
+    """
+    from unittest.mock import MagicMock
+
+    from open_climate_service.automation.config import AutomationConfig, WorkflowTrigger
+    from open_climate_service.automation.service import WorkflowAutomationService
+
+    _declare(monkeypatch, {"id": "districts", "provider": "counting"})
+    _register(monkeypatch, "counting", lambda **_: (_collection(["MW.N", "MW.S"]), "release-9"))
+
+    config = AutomationConfig(
+        workflow_triggers=[
+            WorkflowTrigger(
+                id="chirps-to-dhis2",
+                on_update_of="chirps",
+                workflow_id="aggregate_to_dhis2_json",
+                arguments={
+                    "dataset_id": "$event.dataset_id",
+                    "temporal_extent": ["$event.previous_end", "$event.current_end"],
+                    "geometries": {"from_features": "districts"},
+                },
+            )
+        ]
+    )
+    openeo = MagicMock()
+    record = MagicMock()
+    record.id = "triggered-job"
+    openeo.create_triggered_job.return_value = (record, True)
+
+    service = WorkflowAutomationService(config_loader=lambda: config, openeo_service=openeo)
+    service.consume([_event()])
+
+    body = openeo.create_triggered_job.call_args.args[0]
+    graph = body.process["process_graph"]
+
+    # The feature set is a sibling node the executor can resolve, referenced by the workflow.
+    assert graph["features_districts"] == {"process_id": "load_features", "arguments": {"id": "districts"}}
+    assert graph["workflow"]["arguments"]["geometries"] == {"from_node": "features_districts"}
+    assert graph["workflow"]["arguments"]["dataset_id"] == "chirps", "event references still resolve"
+
+    # No geometry anywhere in what gets persisted.
+    assert "coordinates" not in str(body.process)
+
+    # And the job says which boundaries it ran against.
+    assert "districts@release-9" in body.description
+    openeo.start_triggered_job.assert_called_once_with("triggered-job")
