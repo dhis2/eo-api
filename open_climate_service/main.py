@@ -13,6 +13,7 @@ import open_climate_service.startup  # noqa: F401  # pyright: ignore[reportUnuse
 from open_climate_service.automation.service import get_workflow_automation_service
 from open_climate_service.data_registry import routes as dataset_template_routes
 from open_climate_service.extents import routes as extent_routes
+from open_climate_service.features import routes as feature_routes
 from open_climate_service.ingestions import routes as ingestion_routes
 from open_climate_service.jobs.service import get_job_service
 from open_climate_service.openeo import routes as openeo_routes
@@ -191,6 +192,7 @@ def create_app() -> FastAPI:
     _app.include_router(openeo_routes.udp_router, prefix="/process_graphs", tags=["openEO"])
     _app.include_router(openeo_routes.result_router, prefix="/result", tags=["openEO"])
     _app.include_router(extent_routes.router, prefix="/extent", tags=["Extent"])
+    _app.include_router(feature_routes.router, prefix="/features", tags=["Features"])
     _app.include_router(dataset_template_routes.router, prefix="/dataset-templates", tags=["Dataset templates"])
     _app.include_router(ingestion_routes.datasets_router, prefix="/datasets", tags=["Datasets"])
     _app.include_router(ingestion_routes.ingestions_router, prefix="/ingestions", tags=["Ingestions"])

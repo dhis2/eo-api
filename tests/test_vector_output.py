@@ -21,7 +21,7 @@ import xarray as xr
 
 from open_climate_service.openeo import jobs
 from open_climate_service.plugins.processes.aggregate_spatial import aggregate_spatial
-from open_climate_service.shared.vectors import GEOMETRY_WKT_COORD
+from open_climate_service.shared.features import GEOMETRY_WKT_COORD
 
 _NORTH = [[0, 2], [4, 2], [4, 4], [0, 4], [0, 2]]
 _SOUTH = [[0, 0], [4, 0], [4, 2], [0, 2], [0, 0]]

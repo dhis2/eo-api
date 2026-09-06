@@ -62,6 +62,70 @@ Each collection includes `cube:dimensions` (spatial `x`/`y`, temporal `t`, `band
 
 ---
 
+## Feature collections
+
+Zonal statistics needs geometry. It can always be posted with the request, but for the boundaries an instance uses repeatedly — administrative regions, districts, catchments — that means sending the same several megabytes on every call, and every client keeping its own copy of what should be one authoritative boundary set.
+
+An instance can therefore ship named feature collections: GeoParquet files in `<data_dir>/features/`, one per collection, the filename being the collection id.
+
+```
+data/
+└── features/
+    ├── districts.parquet
+    └── catchments.parquet
+```
+
+They are listed at `GET /features`, with per-collection metadata at `GET /features/{id}`:
+
+```bash
+curl http://localhost:8000/features
+```
+
+```json
+[
+  {
+    "id": "districts",
+    "feature_count": 32,
+    "properties": ["ou_code", "district", "population"],
+    "geometry_types": ["Polygon"],
+    "crs": "EPSG:4326",
+    "bbox": [32.7, -17.1, 35.9, -9.4],
+    "size_bytes": 148329,
+    "supports_bbox_filter": true
+  }
+]
+```
+
+`load_vector_cube` then loads one by id as the `geometries` argument of `aggregate_spatial`:
+
+```python
+cube = conn.load_collection("era5land_temperature_daily", temporal_extent=["2024-01-01", "2024-12-31"])
+stats = cube.aggregate_spatial(
+    geometries={"process_id": "load_vector_cube", "arguments": {"id": "districts", "id_property": "ou_code"}},
+    reducer="mean",
+)
+stats.download("districts.parquet", format="PARQUET")
+```
+
+`id_property` names the column that becomes each feature's id. That is more than cosmetic: the feature id becomes the label on the `geometry` dimension, which is what the `DHIS2JSON` and `CHAPCSV` exports use as their location column — so point it at an org-unit code column when the result is destined for DHIS2.
+
+A collection in a projected CRS is reprojected to EPSG:4326 on load, since the aggregation masks against the raster's own lon/lat grid.
+
+`load_vector_cube` builds a GeoJSON feature per row, so it is meant for boundary sets — administrative hierarchies, catchments — not for collections of hundreds of thousands of features. Above 50,000 features an unqualified call is refused, and a `bbox` is required:
+
+```python
+{"process_id": "load_vector_cube",
+ "arguments": {"id": "buildings", "bbox": [85.2, 27.6, 85.4, 27.8]}}
+```
+
+Where the GeoParquet carries a per-row covering bbox — written with `write_covering_bbox=True` — a windowed read prunes row groups and fetches only the matching ones. `supports_bbox_filter` in the listing says whether a given collection has one; without it the window still works, but the whole file is read and filtered.
+
+Named collections are an addition, not a replacement: passing a GeoJSON `FeatureCollection` directly works exactly as before.
+
+Aggregation results keep their geometry, so `PARQUET` and `GEOJSON` output carries the real shapes rather than only the labels.
+
+---
+
 ## Building a process graph
 
 Process graphs are composable operations. The openEO Python client builds them lazily — no data moves until you call `execute()` or `download()`.
@@ -177,6 +241,7 @@ Key processes for climate work:
 | `reduce_dimension`          | Collapse a dimension with a reducer (e.g. mean, sum)      |
 | `aggregate_temporal_period` | Group by calendar period (month, season, year) and reduce |
 | `aggregate_spatial`         | Zonal statistics over GeoJSON geometries                  |
+| `load_vector_cube`          | Load a boundary set the instance ships, by id             |
 | `resample_cube_spatial`     | Reproject and resample to a target grid                   |
 | `merge_cubes`               | Combine two aligned cubes                                 |
 | `save_result`               | Finalise the result — controls the output format          |
